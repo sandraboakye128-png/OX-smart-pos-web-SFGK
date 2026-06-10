@@ -20,10 +20,9 @@ USE_POSTGRES = DATABASE_URL is not None
 
 if USE_POSTGRES:
     import psycopg2
-    from psycopg2.extras import RealDictCursor
-    print("Using PostgreSQL (Supabase)")
+    # Use the default cursor (returns tuples, not dictionaries)
+    print("Using PostgreSQL (Supabase) - default cursor")
 
-    # ----- PostgreSQL Schema -----
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
@@ -120,8 +119,6 @@ if USE_POSTGRES:
     );
     """
 
-    # PostgreSQL migration statements (ALTER TABLE) – they will fail if column already exists,
-    # so we wrap each in a try/except block inside the connection function.
     POSTGRES_MIGRATIONS = [
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS discount REAL DEFAULT 0",
@@ -148,7 +145,7 @@ if USE_POSTGRES:
     ]
 
     def get_connection():
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor()
         # Create tables if not exist
         cursor.execute(SCHEMA)
@@ -156,9 +153,8 @@ if USE_POSTGRES:
         for migration in POSTGRES_MIGRATIONS:
             try:
                 cursor.execute(migration)
-            except Exception as e:
-                # Column might already exist; ignore
-                pass
+            except Exception:
+                pass  # column already exists or other benign error
         conn.commit()
         return conn
 
@@ -272,7 +268,6 @@ else:
         cursor.executescript(SCHEMA)
 
         # ---------- SAFE MIGRATIONS ----------
-        # PRODUCTS
         try: cursor.execute("ALTER TABLE products ADD COLUMN category TEXT")
         except: pass
         try: cursor.execute("ALTER TABLE products ADD COLUMN discount REAL DEFAULT 0")
@@ -280,7 +275,6 @@ else:
         try: cursor.execute("ALTER TABLE products ADD COLUMN base_unit TEXT DEFAULT 'piece'")
         except: pass
 
-        # SALES
         try: cursor.execute("ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0")
         except: pass
         try: cursor.execute("ALTER TABLE sales ADD COLUMN subtotal REAL DEFAULT 0")
@@ -290,19 +284,16 @@ else:
         try: cursor.execute("ALTER TABLE sales ADD COLUMN reversed INTEGER DEFAULT 0")
         except: pass
 
-        # PURCHASES
         try: cursor.execute("ALTER TABLE purchases ADD COLUMN selling_price REAL DEFAULT 0")
         except: pass
         try: cursor.execute("ALTER TABLE purchases ADD COLUMN remaining_stock INTEGER DEFAULT 0")
         except: pass
 
-        # PURCHASE BATCHES
         try: cursor.execute("ALTER TABLE purchase_batches ADD COLUMN selling_price REAL DEFAULT 0")
         except: pass
         try: cursor.execute("ALTER TABLE purchase_batches ADD COLUMN action TEXT DEFAULT 'created'")
         except: pass
 
-        # DELETED PRODUCTS
         try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN category TEXT")
         except: pass
         try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN discount REAL DEFAULT 0")
@@ -320,13 +311,11 @@ else:
         try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN product_id INTEGER")
         except: pass
 
-        # SALES_ITEMS
         try: cursor.execute("ALTER TABLE sales_items ADD COLUMN unit_id INTEGER")
         except: pass
         try: cursor.execute("ALTER TABLE sales_items ADD COLUMN unit_quantity REAL")
         except: pass
 
-        # PRODUCT_UNITS table
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS product_units (

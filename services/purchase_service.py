@@ -3,6 +3,7 @@ from datetime import datetime
 
 # --------------------------- UPDATE PRODUCT STOCK ---------------------------
 def update_product_stock(cursor, product_id):
+    """Recalculate stock for a product based on all batches."""
     cursor.execute("""
         SELECT COALESCE(SUM(remaining_quantity), 0)
         FROM purchase_batches
@@ -46,6 +47,7 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
 
         if product:
             product_id = product[0]
+            # Only update category, NOT other fields
             cursor.execute("""
                 UPDATE products
                 SET category = %s
@@ -66,6 +68,7 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (product_id, quantity, quantity, cost_price, selling_price, discount, datetime.now(), "added"))
+
         batch_id = cursor.fetchone()[0]
 
         # Recalculate stock
@@ -89,13 +92,16 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     try:
         cursor = conn.cursor()
 
+        # Get linked product_id
         cursor.execute(
             "SELECT product_id FROM purchase_batches WHERE id = %s",
             (batch_id,)
         )
         result = cursor.fetchone()
+
         if not result:
             raise ValueError("Batch not found")
+
         product_id = result[0]
 
         # Archive old batch data
@@ -134,7 +140,7 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
         conn.close()
 
 
-# --------------------------- GET ALL PURCHASES ---------------------------
+# --------------------------- GET ALL PURCHASES (FIXED) ---------------------------
 def get_all_purchases():
     conn = get_connection()
     try:
