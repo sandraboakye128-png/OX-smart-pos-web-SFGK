@@ -18,14 +18,14 @@ def create_user(username: str, password: str, role: str = "user") -> bool:
         conn.commit()
         return True
     except Exception as e:
-        # IntegrityError for duplicate username
+        # IntegrityError for duplicate username (or other errors)
         conn.rollback()
         return False
     finally:
         conn.close()
 
 
-# ---------------- LOGIN USER ----------------
+# ---------------- LOGIN USER (dictionary access) ----------------
 def login_user(username: str, password: str):
     conn = get_connection()
     cursor = conn.cursor()
@@ -33,10 +33,14 @@ def login_user(username: str, password: str):
         "SELECT id, username, role, password FROM users WHERE username = %s",
         (username,)
     )
-    user = cursor.fetchone()
+    user = cursor.fetchone()   # returns a dictionary with column names as keys
     conn.close()
-    if user and user[3] == hash_password(password):
-        return {"id": user[0], "username": user[1], "role": user[2]}
+    if user and user["password"] == hash_password(password):
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"]
+        }
     return None
 
 
