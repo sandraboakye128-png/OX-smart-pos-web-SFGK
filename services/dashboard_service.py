@@ -10,6 +10,7 @@ def get_today_sales(selected_date=None):
     dt = selected_date or date.today()
     dt = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
 
+    # Only include sales that have at least one item not from a permanently deleted product
     cursor.execute("""
         SELECT IFNULL(SUM(s.total), 0)
         FROM sales s
@@ -33,7 +34,7 @@ def get_today_sales(selected_date=None):
     return total
 
 
-# ----------------- TODAY'S PROFIT -----------------
+# ----------------- TODAY'S PROFIT (NET) -----------------
 def get_today_profit(selected_date=None):
     conn = get_connection()
     cursor = conn.cursor()
@@ -42,16 +43,20 @@ def get_today_profit(selected_date=None):
     dt = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
 
     cursor.execute("""
-        SELECT IFNULL(SUM(si.profit), 0)
-        FROM sales_items si
-        JOIN sales s ON si.sale_id = s.id
+        SELECT IFNULL(SUM(s.profit), 0)
+        FROM sales s
         WHERE DATE(s.date)=?
         AND s.reversed = 0
-        AND NOT EXISTS (
-            SELECT 1 FROM deleted_products dp 
-            WHERE dp.product_id = si.product_id 
-            AND dp.action = 'PERMANENTLY DELETED' 
-            AND dp.source = 'product'
+        AND EXISTS (
+            SELECT 1 FROM sales_items si
+            JOIN products p ON p.id = si.product_id
+            WHERE si.sale_id = s.id
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
         )
     """, (dt,))
 
@@ -104,12 +109,11 @@ def get_low_stock_products(threshold=10):
     return products
 
 
-# ----------------- WEEKLY SALES -----------------
+# ----------------- WEEKLY SALES (NET) -----------------
 def get_weekly_sales():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Use subquery to get unique sale totals per day
     cursor.execute("""
         SELECT DATE(s.date), IFNULL(SUM(s.total), 0)
         FROM sales s
@@ -169,86 +173,58 @@ def get_top_products(selected_date=None, limit=5):
     return products
 
 
-# ----------------- SALES HISTORY (FIXED) -----------------
+# ----------------- SALES HISTORY (NET) -----------------
 def get_sales_history(selected_date=None):
     conn = get_connection()
     cursor = conn.cursor()
 
-    # First, get per‑day totals and discounts from the sales table (no join)
     if selected_date:
         dt = selected_date.isoformat() if hasattr(selected_date, "isoformat") else str(selected_date)
         cursor.execute("""
             SELECT DATE(s.date),
                    IFNULL(SUM(s.total), 0) AS total_sales,
+                   IFNULL(SUM(s.profit), 0) AS total_profit,
                    IFNULL(SUM(s.discount), 0) AS total_discount
             FROM sales s
             WHERE DATE(s.date) = ?
             AND s.reversed = 0
+            AND EXISTS (
+                SELECT 1 FROM sales_items si
+                JOIN products p ON p.id = si.product_id
+                WHERE si.sale_id = s.id
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.source = 'product'
+                )
+            )
             GROUP BY DATE(s.date)
         """, (dt,))
-        sales_rows = cursor.fetchall()
     else:
         cursor.execute("""
             SELECT DATE(s.date),
                    IFNULL(SUM(s.total), 0) AS total_sales,
+                   IFNULL(SUM(s.profit), 0) AS total_profit,
                    IFNULL(SUM(s.discount), 0) AS total_discount
             FROM sales s
             WHERE s.reversed = 0
+            AND EXISTS (
+                SELECT 1 FROM sales_items si
+                JOIN products p ON p.id = si.product_id
+                WHERE si.sale_id = s.id
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.source = 'product'
+                )
+            )
             GROUP BY DATE(s.date)
             ORDER BY DATE(s.date) DESC
         """)
-        sales_rows = cursor.fetchall()
 
-    # Create a dict with date as key, storing total_sales and total_discount
-    sales_dict = {}
-    for row in sales_rows:
-        date_str = row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0])
-        sales_dict[date_str] = {
-            'total_sales': row[1],
-            'total_discount': row[2],
-            'total_profit': 0.0  # placeholder
-        }
-
-    # Now get per‑day profit from sales_items (needs join but profit is per item, so safe)
-    if selected_date:
-        cursor.execute("""
-            SELECT DATE(s.date),
-                   IFNULL(SUM(si.profit), 0) AS total_profit
-            FROM sales_items si
-            JOIN sales s ON si.sale_id = s.id
-            WHERE DATE(s.date) = ?
-            AND s.reversed = 0
-            GROUP BY DATE(s.date)
-        """, (dt,))
-    else:
-        cursor.execute("""
-            SELECT DATE(s.date),
-                   IFNULL(SUM(si.profit), 0) AS total_profit
-            FROM sales_items si
-            JOIN sales s ON si.sale_id = s.id
-            WHERE s.reversed = 0
-            GROUP BY DATE(s.date)
-            ORDER BY DATE(s.date) DESC
-        """)
-    profit_rows = cursor.fetchall()
+    rows = cursor.fetchall()
     conn.close()
-
-    # Merge profit into the dict
-    for row in profit_rows:
-        date_str = row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0])
-        if date_str in sales_dict:
-            sales_dict[date_str]['total_profit'] = row[1]
-        else:
-            # Should not happen, but just in case
-            sales_dict[date_str] = {
-                'total_sales': 0,
-                'total_discount': 0,
-                'total_profit': row[1]
-            }
-
-    # Convert dict to list of tuples (date, total_sales, total_profit, total_discount) sorted by date
-    result = []
-    for date_str, vals in sorted(sales_dict.items(), key=lambda x: x[0], reverse=True):
-        result.append((date_str, vals['total_sales'], vals['total_profit'], vals['total_discount']))
-
-    return result
+    # Convert to list of tuples (date, total_sales, total_profit, total_discount)
+    return [(r[0], r[1], r[2], r[3]) for r in rows]

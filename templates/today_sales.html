@@ -199,7 +199,7 @@
         }
     }
 
-    // Render sales as cards
+    // Render sales as cards (using net_profit for summary)
     function renderSales(sales) {
         const container = document.getElementById('salesList');
         if (!sales.length) {
@@ -208,7 +208,7 @@
             return;
         }
 
-        // Group items by sale_id
+        // Group items by sale_id and store net_profit (same for all items in the sale)
         const saleMap = new Map();
         for (const sale of sales) {
             if (!saleMap.has(sale.sale_id)) {
@@ -216,6 +216,7 @@
                     discount: sale.discount,
                     total: sale.total,
                     date: sale.sale_date,
+                    netProfit: sale.net_profit,   // net profit from sales table
                     items: []
                 });
             }
@@ -256,9 +257,9 @@
             `;
         }
         container.innerHTML = html;
-        updateSummary(sales);
-        
-        // Attach click handlers for reverse buttons (since we used innerHTML)
+        updateSummary(sales);   // we pass the raw sales so that updateSummary can use net_profit
+
+        // Attach click handlers for reverse buttons
         document.querySelectorAll('.reverse-sale-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const saleId = parseInt(btn.getAttribute('data-sale-id'));
@@ -268,6 +269,7 @@
         });
     }
 
+    // Update summary bar using net_profit (not gross profit from items)
     function updateSummary(sales) {
         const seenSales = new Set();
         let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
@@ -275,9 +277,9 @@
             if (!seenSales.has(sale.sale_id)) {
                 totalSales += sale.total;
                 totalDiscount += sale.discount;
+                totalProfit += sale.net_profit;   // use net profit from sales table
                 seenSales.add(sale.sale_id);
             }
-            totalProfit += sale.profit;
             totalItems += sale.quantity;
         }
         let periodText = '';
