@@ -639,7 +639,7 @@ def api_reverse_sale(sale_id):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT reversed FROM sales WHERE id = ?", (sale_id,))
+        cursor.execute("SELECT reversed FROM sales WHERE id = %s", (sale_id,))
         row = cursor.fetchone()
         if not row:
             return jsonify({'success': False, 'error': 'Sale not found'}), 404
@@ -648,7 +648,7 @@ def api_reverse_sale(sale_id):
         cursor.execute("""
             SELECT product_id, batch_id, quantity, cost_price, selling_price, profit
             FROM sales_items
-            WHERE sale_id = ?
+            WHERE sale_id = %s
         """, (sale_id,))
         items = cursor.fetchall()
         if not items:
@@ -657,11 +657,11 @@ def api_reverse_sale(sale_id):
             product_id, batch_id, qty, cost_price, selling_price, profit = item
             cursor.execute("""
                 UPDATE purchase_batches
-                SET remaining_quantity = remaining_quantity + ?
-                WHERE id = ?
+                SET remaining_quantity = remaining_quantity + %s
+                WHERE id = %s
             """, (qty, batch_id))
             update_product_stock(cursor, product_id)
-        cursor.execute("UPDATE sales SET reversed = 1 WHERE id = ?", (sale_id,))
+        cursor.execute("UPDATE sales SET reversed = 1 WHERE id = %s", (sale_id,))
         conn.commit()
         return jsonify({'success': True})
     except Exception as e:
@@ -682,7 +682,7 @@ def api_reverse_sale_items():
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT reversed, subtotal, discount, total, profit FROM sales WHERE id = ?", (sale_id,))
+        cursor.execute("SELECT reversed, subtotal, discount, total, profit FROM sales WHERE id = %s", (sale_id,))
         row = cursor.fetchone()
         if not row:
             return jsonify({'success': False, 'error': 'Sale not found'}), 404
@@ -696,13 +696,13 @@ def api_reverse_sale_items():
         for item in items_to_reverse:
             batch_id = item['batch_id']
             qty = item['quantity']
-            cursor.execute("SELECT product_id, selling_price FROM purchase_batches WHERE id = ?", (batch_id,))
+            cursor.execute("SELECT product_id, selling_price FROM purchase_batches WHERE id = %s", (batch_id,))
             batch_row = cursor.fetchone()
             if not batch_row:
                 raise ValueError(f"Batch {batch_id} not found")
             product_id = batch_row[0]
             selling_price = batch_row[1]
-            cursor.execute("SELECT cost_price, profit FROM sales_items WHERE sale_id = ? AND batch_id = ?", (sale_id, batch_id))
+            cursor.execute("SELECT cost_price, profit FROM sales_items WHERE sale_id = %s AND batch_id = %s", (sale_id, batch_id))
             item_row = cursor.fetchone()
             if not item_row:
                 raise ValueError(f"Sales item for batch {batch_id} not found")
@@ -711,8 +711,8 @@ def api_reverse_sale_items():
             item_subtotal = selling_price * qty
             reversed_subtotal += item_subtotal
             reversed_profit_gross += item_gross_profit
-            cursor.execute("UPDATE purchase_batches SET remaining_quantity = remaining_quantity + ? WHERE id = ?", (qty, batch_id))
-            cursor.execute("DELETE FROM sales_items WHERE sale_id = ? AND batch_id = ?", (sale_id, batch_id))
+            cursor.execute("UPDATE purchase_batches SET remaining_quantity = remaining_quantity + %s WHERE id = %s", (qty, batch_id))
+            cursor.execute("DELETE FROM sales_items WHERE sale_id = %s AND batch_id = %s", (sale_id, batch_id))
             update_product_stock(cursor, product_id)
         new_subtotal = original_subtotal - reversed_subtotal
         new_gross_profit = original_net_profit + original_discount - reversed_profit_gross
@@ -725,12 +725,12 @@ def api_reverse_sale_items():
         if new_total < 0:
             new_total = 0
         if new_subtotal == 0:
-            cursor.execute("UPDATE sales SET reversed = 1 WHERE id = ?", (sale_id,))
+            cursor.execute("UPDATE sales SET reversed = 1 WHERE id = %s", (sale_id,))
         else:
             cursor.execute("""
                 UPDATE sales
-                SET subtotal = ?, discount = ?, total = ?, profit = ?
-                WHERE id = ?
+                SET subtotal = %s, discount = %s, total = %s, profit = %s
+                WHERE id = %s
             """, (new_subtotal, new_discount, new_total, new_net_profit, sale_id))
         conn.commit()
         return jsonify({'success': True})
@@ -742,7 +742,7 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API (including net_profit) =====================
+# ===================== TODAY'S SALES API (PostgreSQL version) =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
@@ -759,7 +759,6 @@ def api_today_sales():
             AND dp.source = 'product'
         )
     """
-    # Common SELECT with net_profit added
     select_clause = """
         SELECT 
             sales.id, 
@@ -789,29 +788,27 @@ def api_today_sales():
             {select_clause}
             {from_clause}
             {exclude_permanent}
-            AND DATE(sales.date) BETWEEN ? AND ?
+            AND sales.date::date BETWEEN %s AND %s
             AND sales.reversed = 0
             ORDER BY sales.date DESC
         """, (start_date, end_date))
     else:
         if period == 'weekly':
-            start = (datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d')
-            end = datetime.now().strftime('%Y-%m-%d')
             cursor.execute(f"""
                 {select_clause}
                 {from_clause}
                 {exclude_permanent}
-                AND DATE(sales.date) BETWEEN ? AND ?
+                AND sales.date >= CURRENT_DATE - INTERVAL '6 days'
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
-            """, (start, end))
+            """)
         elif period == 'monthly':
             cursor.execute(f"""
                 {select_clause}
                 {from_clause}
                 {exclude_permanent}
-                AND strftime('%%m', sales.date) = strftime('%%m','now') 
-                AND strftime('%%Y', sales.date) = strftime('%%Y','now')
+                AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                AND EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
@@ -820,7 +817,7 @@ def api_today_sales():
                 {select_clause}
                 {from_clause}
                 {exclude_permanent}
-                AND strftime('%%Y', sales.date) = strftime('%%Y','now')
+                AND EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
@@ -829,7 +826,7 @@ def api_today_sales():
                 {select_clause}
                 {from_clause}
                 {exclude_permanent}
-                AND DATE(sales.date) = DATE('now','localtime')
+                AND sales.date::date = CURRENT_DATE
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
@@ -882,7 +879,7 @@ def api_today_sales_pdf():
             total_sales += sale['total']
             total_discount += sale['discount']
             seen_sales.add(sale_id)
-        total_profit += sale['profit']   # Note: using gross profit per item in PDF? Change to net if desired.
+        total_profit += sale['profit']   # Note: using gross profit per item in PDF; change to net if desired.
         total_items += sale['quantity']
     elements.append(Paragraph(
         f"🧾 Items: {total_items}   |   💰 Sales: ₵{total_sales:.2f}   |   "
@@ -924,7 +921,7 @@ def api_today_sales_pdf():
                      download_name=f"SalesReport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== ANALYTICS API (uses net profit) =====================
+# ===================== ANALYTICS API =====================
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
