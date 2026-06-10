@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Two-column layout -->
+    <!-- Two-column layout (unchanged) -->
     <div class="flex flex-wrap -mx-4">
         <!-- LEFT PANEL: Products & Form -->
         <div class="w-full lg:w-1/2 px-4 mb-6">
@@ -14,9 +14,7 @@
                        class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3">
                 
                 <!-- Product List -->
-                <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4">
-                    <!-- dynamic product buttons -->
-                </div>
+                <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4"></div>
                 
                 <!-- Selected Product Info -->
                 <div id="selectedProductInfo" class="text-gray-600 text-sm mb-2">No product selected</div>
@@ -49,9 +47,7 @@
         <div class="w-full lg:w-1/2 px-4">
             <div class="bg-white rounded-xl shadow-md p-4">
                 <h2 class="text-xl font-bold text-indigo-600 mb-3">🧾 Cart</h2>
-                <div id="cartItems" class="max-h-96 overflow-y-auto border rounded-lg p-2 mb-4 space-y-3">
-                    <!-- dynamic cart items -->
-                </div>
+                <div id="cartItems" class="max-h-96 overflow-y-auto border rounded-lg p-2 mb-4 space-y-3"></div>
                 <div class="mb-3 text-right">
                     <span class="text-lg font-bold">Grand Total: </span>
                     <span id="grandTotal" class="text-2xl font-bold text-green-600">₵0.00</span>
@@ -62,15 +58,13 @@
                 <button id="printReceiptBtn" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-lg mb-3" disabled>
                     🖨 Print Receipt
                 </button>
-                <div id="receiptPreview" class="border rounded-lg p-3 bg-gray-50 font-mono text-sm max-h-60 overflow-y-auto">
-                    <!-- receipt text will appear here -->
-                </div>
+                <div id="receiptPreview" class="border rounded-lg p-3 bg-gray-50 font-mono text-sm max-h-60 overflow-y-auto"></div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Batch Selection Modal -->
+<!-- Batch Selection Modal (unchanged) -->
 <div id="batchModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
     <div class="bg-white rounded-xl shadow-xl w-11/12 max-w-4xl max-h-[90vh] overflow-y-auto">
         <div class="sticky top-0 bg-white p-4 border-b flex justify-between items-center">
@@ -93,31 +87,186 @@
     </div>
 </div>
 
+<!-- ========== LICENSE MODAL (Trial / Activation) ========== -->
+<div id="licenseModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl w-96 p-6">
+        <h3 class="text-xl font-bold mb-2" id="licenseModalTitle">Trial Version</h3>
+        <div id="licenseModalMessage" class="text-gray-700 text-sm mb-4"></div>
+        <input type="text" id="licenseKeyInput" placeholder="Enter license key" class="w-full border rounded-lg px-3 py-2 mb-4">
+        <div class="flex justify-end gap-3">
+            <button id="licenseCancelBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">Cancel</button>
+            <button id="licenseOkBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Activate</button>
+        </div>
+        <div id="licenseTimer" class="text-xs text-center text-gray-500 mt-3"></div>
+    </div>
+</div>
+
 <script>
-    // ---------- Global State ----------
+    // ---------- Existing Sales JS (keep everything) ----------
     let products = [];
     let currentProduct = null;
-    let cart = [];           // each item: { product, qty, discount, selectedBatches, subtotal, final }
-    let lastSale = null;    // store receipt text and total after sale
-    
-    // Batch modal state
+    let cart = [];
+    let lastSale = null;
     let currentBatches = [];
     let currentProductForBatch = null;
     let neededQty = 0;
-    let batchSelection = [];  // array of { batch, var, qtyEntry }
-    
+    let batchSelection = [];
+
     // Helper: format currency
     function formatMoney(amount) {
         return '₵' + amount.toFixed(2);
     }
-    
-    // ---------- Load Products ----------
+
+    // ---------- License state ----------
+    let licenseRemainingSeconds = 0;
+    let licenseLicensed = false;
+    let licenseTrialActive = false;
+    let licenseTimerInterval = null;
+
+    // ---------- Load License Status from Server ----------
+    async function loadLicenseStatus() {
+        try {
+            const res = await fetch('/api/license/status');
+            const data = await res.json();
+            licenseLicensed = data.licensed;
+            licenseTrialActive = data.trial_active;
+            licenseRemainingSeconds = data.remaining_seconds;
+            console.log("License status:", data);
+            return data;
+        } catch (err) {
+            console.error("Failed to load license status:", err);
+            return { licensed: false, trial_active: false, remaining_seconds: 0 };
+        }
+    }
+
+    // Show license modal (similar to desktop popup)
+    function showLicenseModal(allowCancel = true) {
+        return new Promise(async (resolve) => {
+            const modal = document.getElementById('licenseModal');
+            const messageDiv = document.getElementById('licenseModalMessage');
+            const timerDiv = document.getElementById('licenseTimer');
+            const keyInput = document.getElementById('licenseKeyInput');
+            const cancelBtn = document.getElementById('licenseCancelBtn');
+            const okBtn = document.getElementById('licenseOkBtn');
+
+            // Clear previous timer
+            if (licenseTimerInterval) clearInterval(licenseTimerInterval);
+
+            // Update status from server (fresh)
+            await loadLicenseStatus();
+
+            // Build message
+            let message = '';
+            let showTimer = false;
+            let remaining = licenseRemainingSeconds;
+
+            if (licenseLicensed) {
+                // Already licensed – should not happen, but resolve true
+                resolve(true);
+                return;
+            }
+
+            if (licenseTrialActive && remaining > 0) {
+                const days = Math.floor(remaining / 86400);
+                const hours = Math.floor((remaining % 86400) / 3600);
+                const minutes = Math.floor((remaining % 3600) / 60);
+                const seconds = remaining % 60;
+                let timeStr = '';
+                if (days > 0) timeStr = `${days}d ${hours.toString().padStart(2,'0')}h ${minutes.toString().padStart(2,'0')}m ${seconds.toString().padStart(2,'0')}s`;
+                else if (hours > 0) timeStr = `${hours.toString().padStart(2,'0')}h ${minutes.toString().padStart(2,'0')}m ${seconds.toString().padStart(2,'0')}s`;
+                else timeStr = `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+                message = `Trial version – ${timeStr} remaining.\n\nEnter license key to unlock permanently.\n\nIf you do not have a key, you can still use the trial until it expires.`;
+                showTimer = true;
+                allowCancel = true;
+            } else {
+                message = `Trial period has expired.\n\nYou must enter a valid license key to continue using the software.`;
+                showTimer = false;
+                allowCancel = false;
+            }
+
+            messageDiv.innerText = message;
+            keyInput.value = '';
+            timerDiv.innerText = showTimer ? `Time left: ${formatTime(remaining)}` : '';
+            if (!allowCancel) cancelBtn.style.display = 'none';
+            else cancelBtn.style.display = 'inline-block';
+
+            // Timer update
+            if (showTimer && remaining > 0) {
+                let currentRemaining = remaining;
+                licenseTimerInterval = setInterval(async () => {
+                    if (currentRemaining <= 0) {
+                        clearInterval(licenseTimerInterval);
+                        await loadLicenseStatus();
+                        timerDiv.innerText = 'Expired';
+                        messageDiv.innerText = `Trial period has expired.\n\nYou must enter a valid license key to continue.`;
+                        cancelBtn.style.display = 'none';
+                        return;
+                    }
+                    currentRemaining--;
+                    timerDiv.innerText = `Time left: ${formatTime(currentRemaining)}`;
+                }, 1000);
+            }
+
+            // Show modal
+            modal.classList.remove('hidden');
+
+            // Resolve promise when user action completes
+            const handleOk = async () => {
+                const key = keyInput.value.trim();
+                const actRes = await fetch('/api/license/activate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: key })
+                });
+                const actData = await actRes.json();
+                if (actData.success) {
+                    licenseLicensed = true;
+                    modal.classList.add('hidden');
+                    cleanup();
+                    resolve(true);
+                } else {
+                    alert('Invalid license key. Please try again.');
+                }
+            };
+
+            const handleCancel = () => {
+                if (allowCancel) {
+                    modal.classList.add('hidden');
+                    cleanup();
+                    resolve(false);
+                } else {
+                    // If cancel not allowed, do nothing (modal must be activated)
+                }
+            };
+
+            const cleanup = () => {
+                if (licenseTimerInterval) clearInterval(licenseTimerInterval);
+                okBtn.removeEventListener('click', handleOk);
+                cancelBtn.removeEventListener('click', handleCancel);
+            };
+
+            okBtn.addEventListener('click', handleOk);
+            cancelBtn.addEventListener('click', handleCancel);
+        });
+    }
+
+    function formatTime(seconds) {
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (days > 0) return `${days}d ${hours.toString().padStart(2,'0')}h ${minutes.toString().padStart(2,'0')}m ${secs.toString().padStart(2,'0')}s`;
+        if (hours > 0) return `${hours.toString().padStart(2,'0')}h ${minutes.toString().padStart(2,'0')}m ${secs.toString().padStart(2,'0')}s`;
+        return `${minutes.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+    }
+
+    // ---------- Original Sales Page Functions ----------
     async function loadProducts() {
         const res = await fetch('/api/sales/products');
         products = await res.json();
         renderProductList(products);
     }
-    
+
     function renderProductList(prods) {
         const container = document.getElementById('productList');
         if (!prods.length) {
@@ -133,30 +282,23 @@
             container.appendChild(btn);
         });
     }
-    
+
     function selectProduct(product) {
         currentProduct = product;
         document.getElementById('selectedProductInfo').innerHTML = `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)}`;
-        // Clear quantity/discount
         document.getElementById('quantity').value = '';
         document.getElementById('discount').value = '';
     }
-    
-    // Product search filter
+
     document.getElementById('searchProduct').addEventListener('input', function(e) {
         const keyword = e.target.value.toLowerCase();
-        const filtered = products.filter(p => 
-            p.name.toLowerCase().includes(keyword) || 
-            p.brand.toLowerCase().includes(keyword)
-        );
+        const filtered = products.filter(p => p.name.toLowerCase().includes(keyword) || p.brand.toLowerCase().includes(keyword));
         renderProductList(filtered);
     });
-    
-    // ---------- Batch Modal ----------
+
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
-        // Fetch batches for this product
         const res = await fetch(`/api/sales/batches/${product.id}`);
         const batches = await res.json();
         currentBatches = batches.filter(b => b.remaining_quantity > 0);
@@ -164,112 +306,74 @@
             alert('No available batches for this product.');
             return false;
         }
-        
-        // Build modal content
         const container = document.getElementById('batchList');
         container.innerHTML = '';
         batchSelection = [];
-        
-        // Header row
         const header = document.createElement('div');
         header.className = 'grid grid-cols-6 gap-2 bg-gray-100 p-2 font-bold sticky top-0';
-        header.innerHTML = `
-            <div>Select</div>
-            <div>Batch ID</div>
-            <div>Stock</div>
-            <div>Selling Price</div>
-            <div>Cost Price</div>
-            <div>Qty to Sell</div>
-        `;
+        header.innerHTML = `<div>Select</div><div>Batch ID</div><div>Stock</div><div>Selling Price</div><div>Cost Price</div><div>Qty to Sell</div>`;
         container.appendChild(header);
-        
         for (const batch of currentBatches) {
             const row = document.createElement('div');
             row.className = 'grid grid-cols-6 gap-2 items-center border-b py-2';
-            
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.className = 'w-5 h-5';
-            
             const batchIdSpan = document.createElement('span');
             batchIdSpan.innerText = batch.batch_id;
-            
             const stockSpan = document.createElement('span');
             stockSpan.innerText = batch.remaining_quantity;
-            
             const priceSpan = document.createElement('span');
             priceSpan.innerText = `₵${batch.selling_price.toFixed(2)}`;
-            
             const costSpan = document.createElement('span');
             costSpan.innerText = `₵${batch.cost_price.toFixed(2)}`;
-            
             const qtyInput = document.createElement('input');
             qtyInput.type = 'number';
             qtyInput.className = 'border rounded px-1 py-1 w-20';
             qtyInput.value = '0';
             qtyInput.disabled = true;
-            
             row.appendChild(cb);
             row.appendChild(batchIdSpan);
             row.appendChild(stockSpan);
             row.appendChild(priceSpan);
             row.appendChild(costSpan);
             row.appendChild(qtyInput);
-            
             container.appendChild(row);
-            
-            // Store selection data
-            batchSelection.push({
-                batch: batch,
-                checkbox: cb,
-                qtyInput: qtyInput,
-                batchId: batch.batch_id
-            });
-            
-            // Toggle qtyInput enabled when checkbox checked
+            batchSelection.push({ batch, checkbox: cb, qtyInput, batchId: batch.batch_id });
             cb.addEventListener('change', () => {
                 qtyInput.disabled = !cb.checked;
-                if (cb.checked && qtyInput.value === '0') {
-                    qtyInput.value = '1';
-                } else if (!cb.checked) {
-                    qtyInput.value = '0';
-                }
+                if (cb.checked && qtyInput.value === '0') qtyInput.value = '1';
+                else if (!cb.checked) qtyInput.value = '0';
                 updateBatchTotals();
             });
             qtyInput.addEventListener('input', updateBatchTotals);
         }
-        
-        // Update totals function
         function updateBatchTotals() {
             let assigned = 0;
             batchSelection.forEach(sel => {
                 if (sel.checkbox.checked) {
                     let val = parseInt(sel.qtyInput.value) || 0;
                     const maxStock = sel.batch.remaining_quantity;
-                    if (val > maxStock) {
-                        sel.qtyInput.value = maxStock;
-                        val = maxStock;
-                    }
+                    if (val > maxStock) { sel.qtyInput.value = maxStock; val = maxStock; }
                     assigned += val;
                 }
             });
             document.getElementById('assignedQty').innerText = `Assigned: ${assigned}`;
             const remaining = neededQty - assigned;
             document.getElementById('remainingQty').innerText = `Remaining: ${remaining}`;
-            const remainingSpan = document.getElementById('remainingQty');
-            if (remaining < 0) remainingSpan.classList.add('text-red-600');
-            else remainingSpan.classList.remove('text-red-600');
-            if (remaining === 0) remainingSpan.classList.add('text-green-600');
-            else remainingSpan.classList.remove('text-green-600');
+            const remSpan = document.getElementById('remainingQty');
+            if (remaining < 0) remSpan.classList.add('text-red-600');
+            else remSpan.classList.remove('text-red-600');
+            if (remaining === 0) remSpan.classList.add('text-green-600');
+            else remSpan.classList.remove('text-green-600');
         }
-        
         document.getElementById('batchModalTitle').innerHTML = `Select batches for ${product.name} (need ${qty} units)`;
         document.getElementById('assignedQty').innerText = 'Assigned: 0';
         document.getElementById('remainingQty').innerText = `Remaining: ${neededQty}`;
         document.getElementById('batchModal').classList.remove('hidden');
         return true;
     }
-    
+
     function selectAllBatches() {
         batchSelection.forEach(sel => {
             sel.checkbox.checked = true;
@@ -292,34 +396,30 @@
             if (sel.checkbox.checked) {
                 let val = parseInt(sel.qtyInput.value) || 0;
                 const maxStock = sel.batch.remaining_quantity;
-                if (val > maxStock) {
-                    sel.qtyInput.value = maxStock;
-                    val = maxStock;
-                }
+                if (val > maxStock) { sel.qtyInput.value = maxStock; val = maxStock; }
                 assigned += val;
             }
         });
         document.getElementById('assignedQty').innerText = `Assigned: ${assigned}`;
         const remaining = neededQty - assigned;
         document.getElementById('remainingQty').innerText = `Remaining: ${remaining}`;
-        const remainingSpan = document.getElementById('remainingQty');
-        if (remaining < 0) remainingSpan.classList.add('text-red-600');
-        else remainingSpan.classList.remove('text-red-600');
-        if (remaining === 0) remainingSpan.classList.add('text-green-600');
-        else remainingSpan.classList.remove('text-green-600');
+        const remSpan = document.getElementById('remainingQty');
+        if (remaining < 0) remSpan.classList.add('text-red-600');
+        else remSpan.classList.remove('text-red-600');
+        if (remaining === 0) remSpan.classList.add('text-green-600');
+        else remSpan.classList.remove('text-green-600');
     }
     window.selectAllBatches = selectAllBatches;
     window.deselectAllBatches = deselectAllBatches;
-    
+
     function closeBatchModal() {
         document.getElementById('batchModal').classList.add('hidden');
         currentProductForBatch = null;
         neededQty = 0;
     }
     window.closeBatchModal = closeBatchModal;
-    
+
     function confirmBatchSelection() {
-        // Validate total assigned equals needed quantity
         let assigned = 0;
         let selected = [];
         for (const sel of batchSelection) {
@@ -327,11 +427,7 @@
                 let qty = parseInt(sel.qtyInput.value) || 0;
                 if (qty > 0) {
                     assigned += qty;
-                    selected.push({
-                        batch_id: sel.batchId,
-                        qty: qty,
-                        batch: sel.batch
-                    });
+                    selected.push({ batch_id: sel.batchId, qty, batch: sel.batch });
                 }
             }
         }
@@ -343,30 +439,25 @@
             alert('Please select at least one batch.');
             return;
         }
-        // Add to cart
         const discount = parseFloat(document.getElementById('discount').value) || 0;
         let subtotal = 0;
-        for (const s of selected) {
-            subtotal += s.qty * s.batch.selling_price;
-        }
+        for (const s of selected) subtotal += s.qty * s.batch.selling_price;
         const finalTotal = Math.max(subtotal - discount, 0);
         cart.push({
             product: currentProductForBatch,
             qty: neededQty,
-            discount: discount,
+            discount,
             selectedBatches: selected,
-            subtotal: subtotal,
+            subtotal,
             final: finalTotal
         });
         updateCart();
         closeBatchModal();
-        // Clear quantity and discount
         document.getElementById('quantity').value = '';
         document.getElementById('discount').value = '';
     }
     window.confirmBatchSelection = confirmBatchSelection;
-    
-    // ---------- Cart Management ----------
+
     function updateCart() {
         const container = document.getElementById('cartItems');
         if (!cart.length) {
@@ -386,9 +477,7 @@
                         <strong>${item.product.name} (${item.product.brand})</strong>
                         <div class="text-sm text-gray-600">Qty: ${item.qty} | Discount: ${formatMoney(item.discount)}</div>
                         <div class="text-xs text-gray-500">Batches:</div>
-                        <div class="text-xs">
-                            ${item.selectedBatches.map(b => `Batch #${b.batch_id}: ${b.qty} @ ${formatMoney(b.batch.selling_price)}`).join('<br>')}
-                        </div>
+                        <div class="text-xs">${item.selectedBatches.map(b => `Batch #${b.batch_id}: ${b.qty} @ ${formatMoney(b.batch.selling_price)}`).join('<br>')}</div>
                     </div>
                     <div class="text-right">
                         <div class="font-bold">${formatMoney(item.final)}</div>
@@ -400,79 +489,72 @@
         });
         document.getElementById('grandTotal').innerText = formatMoney(grandTotal);
     }
-    
     window.removeCartItem = function(index) {
         cart.splice(index, 1);
         updateCart();
     };
-    
-    // ---------- Add to Cart (opens batch selector) ----------
+
     document.getElementById('addToCartBtn').addEventListener('click', async () => {
-        if (!currentProduct) {
-            alert('Please select a product first.');
-            return;
-        }
+        if (!currentProduct) { alert('Please select a product first.'); return; }
         const qty = parseInt(document.getElementById('quantity').value);
-        if (isNaN(qty) || qty <= 0) {
-            alert('Please enter a valid quantity.');
-            return;
-        }
-        // Check product stock
-        if (qty > currentProduct.stock) {
-            alert(`Only ${currentProduct.stock} units available in stock.`);
-            return;
-        }
+        if (isNaN(qty) || qty <= 0) { alert('Please enter a valid quantity.'); return; }
+        if (qty > currentProduct.stock) { alert(`Only ${currentProduct.stock} units available in stock.`); return; }
         await openBatchSelector(currentProduct, qty);
     });
-    
-    // ---------- Complete Sale ----------
+
+    // ---------- MODIFIED: Complete Sale with License Check ----------
     document.getElementById('completeSaleBtn').addEventListener('click', async () => {
         if (cart.length === 0) {
             alert('Cart is empty.');
             return;
         }
-        // Build sale data
-        const cartItems = cart.map(item => ({
-            product: item.product,
-            qty: item.qty,
-            discount: item.discount
-        }));
+
+        // 1. Check license status
+        const licenseData = await loadLicenseStatus();
+        console.log("License data before sale:", licenseData);
+        let canProceed = false;
+
+        if (licenseData.licensed) {
+            console.log("Licensed – proceeding");
+            canProceed = true;
+        } else if (licenseData.trial_active) {
+            console.log("Trial active – showing modal with cancel option");
+            const userChoseProceed = await showLicenseModal(true);
+            // If user activated, they will have become licensed; if they cancelled, we still allow (trial active)
+            canProceed = true;
+        } else {
+            console.log("Trial expired – showing modal without cancel");
+            const activated = await showLicenseModal(false);
+            canProceed = activated;
+        }
+
+        if (!canProceed) {
+            console.log("License check failed, sale not allowed");
+            return;
+        }
+
+        // 2. Proceed with sale
+        const cartItems = cart.map(item => ({ product: item.product, qty: item.qty, discount: item.discount }));
         const selectedBatches = [];
         cart.forEach(item => {
             item.selectedBatches.forEach(b => {
-                selectedBatches.push({
-                    batch_id: b.batch_id,
-                    qty: b.qty,
-                    product_id: item.product.id  // needed to match in create_multi_sale? Actually create_multi_sale expects batch_id and qty; it gets product from batch.
-                });
+                selectedBatches.push({ batch_id: b.batch_id, qty: b.qty, product_id: item.product.id });
             });
         });
-        // Get custom datetime
         let saleDatetime = null;
         const dateVal = document.getElementById('saleDate').value;
         const timeVal = document.getElementById('saleTime').value;
         if (dateVal && timeVal) {
-            // Convert time to 24-hour format
             let time24 = timeVal;
             try {
                 if (timeVal.toLowerCase().includes('am') || timeVal.toLowerCase().includes('pm')) {
-                    // parse as 12-hour
                     const parsed = new Date(`2000-01-01 ${timeVal}`);
-                    if (!isNaN(parsed)) {
-                        time24 = parsed.toLocaleTimeString('en-GB', { hour12: false });
-                    }
-                } else {
-                    // assume 24-hour already
-                    time24 = timeVal;
-                }
+                    if (!isNaN(parsed)) time24 = parsed.toLocaleTimeString('en-GB', { hour12: false });
+                } else time24 = timeVal;
                 saleDatetime = `${dateVal} ${time24}`;
             } catch(e) { console.error(e); }
         }
-        const payload = {
-            cart_items: cartItems,
-            sale_datetime: saleDatetime,
-            selected_batches: selectedBatches
-        };
+        const payload = { cart_items: cartItems, sale_datetime: saleDatetime, selected_batches: selectedBatches };
         const res = await fetch('/api/sales/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -481,24 +563,20 @@
         const data = await res.json();
         if (data.success) {
             lastSale = data;
-            // Display receipt preview
             document.getElementById('receiptPreview').innerHTML = `<pre class="whitespace-pre-wrap">${data.receipt_text}</pre>`;
             document.getElementById('printReceiptBtn').disabled = false;
-            // Clear cart
             cart = [];
             updateCart();
-            // Optionally reload products to reflect stock changes
             loadProducts();
             alert(`Sale completed! Total: ${formatMoney(data.total)}`);
         } else {
             alert('Error: ' + data.error);
         }
     });
-    
-    // ---------- Print Receipt ----------
+
+    // Print receipt (unchanged)
     document.getElementById('printReceiptBtn').addEventListener('click', () => {
         if (!lastSale) return;
-        // Open print dialog with receipt text
         const printWindow = window.open('', '_blank');
         printWindow.document.write(`
             <html>
@@ -512,21 +590,19 @@
         `);
         printWindow.document.close();
     });
-    
-    // Set default sale date/time to now
+
+    // Set default date/time
     function setDefaultDateTime() {
         const now = new Date();
-        const dateStr = now.toISOString().split('T')[0];
-        document.getElementById('saleDate').value = dateStr;
+        document.getElementById('saleDate').value = now.toISOString().split('T')[0];
         let hours = now.getHours();
         const minutes = now.getMinutes();
         const ampm = hours >= 12 ? 'PM' : 'AM';
         hours = hours % 12 || 12;
-        const timeStr = `${hours}:${minutes.toString().padStart(2,'0')} ${ampm}`;
-        document.getElementById('saleTime').value = timeStr;
+        document.getElementById('saleTime').value = `${hours}:${minutes.toString().padStart(2,'0')} ${ampm}`;
     }
     setDefaultDateTime();
-    
+
     // Initial load
     loadProducts();
 </script>

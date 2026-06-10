@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, session
 from functools import wraps
 from services.product_service import get_all_products as get_all_products_service
-import os   # <-- ADDED for environment variable
+import os
 
 # ---------- IMPORT PURCHASE SERVICES ----------
 from services.purchase_service import (
@@ -66,10 +66,70 @@ app = Flask(__name__)
 # ---------------------- SECRET KEY (from environment variable) ----------------------
 app.secret_key = os.getenv(
     "SECRET_KEY",
-    "temporary-dev-key"   # fallback for local development
+    "temporary-dev-key"
 )
 
-# ---------------------- CONTEXT PROCESSOR (injects user into all templates) ----------------------
+# ===================== LICENSE / TRIAL SYSTEM (hardened) =====================
+import json
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LICENSE_FILE = os.path.join(BASE_DIR, "license.json")
+TRIAL_DAYS = 30
+MASTER_KEY = "OXSMART-1234-KEY"
+
+def load_license_data():
+    try:
+        if os.path.exists(LICENSE_FILE):
+            with open(LICENSE_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading license file: {e}")
+    return {"trial_start": None, "licensed": False, "key": None}
+
+def save_license_data(data):
+    try:
+        with open(LICENSE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving license file: {e}")
+        return False
+
+def get_trial_start():
+    data = load_license_data()
+    start = data.get("trial_start")
+    if start:
+        try:
+            return datetime.fromisoformat(start)
+        except:
+            return None
+    return None
+
+def get_trial_end():
+    start = get_trial_start()
+    if start:
+        return start + timedelta(days=TRIAL_DAYS)
+    return None
+
+def get_remaining_trial():
+    data = load_license_data()
+    if data.get("licensed", False):
+        return None
+    end = get_trial_end()
+    if not end:
+        return None
+    now = datetime.now()
+    if now >= end:
+        return timedelta(0)
+    return end - now
+
+def is_trial_active():
+    if load_license_data().get("licensed", False):
+        return True
+    rem = get_remaining_trial()
+    return rem is not None and rem.total_seconds() > 0
+
+# ---------------------- CONTEXT PROCESSOR ----------------------
 @app.context_processor
 def inject_user():
     if 'user_id' in session:
@@ -90,7 +150,7 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# ---------------------- PUBLIC ROUTES (no login required) ----------------------
+# ---------------------- PUBLIC ROUTES ----------------------
 @app.route("/login")
 def login():
     if 'user_id' in session:
@@ -103,7 +163,7 @@ def signup():
         return redirect(url_for('dashboard'))
     return render_template("signup.html")
 
-# ---------------------- PROTECTED ROUTES (require login) ----------------------
+# ---------------------- PROTECTED ROUTES ----------------------
 @app.route("/")
 @login_required
 def dashboard():
@@ -144,6 +204,37 @@ def today_sales():
 def archive():
     return render_template("archive.html")
 
+# ===================== LICENSE API =====================
+
+@app.route('/api/license/status', methods=['GET'])
+def api_license_status():
+    data = load_license_data()
+    if not data.get("trial_start"):
+        data["trial_start"] = datetime.now().isoformat()
+        save_license_data(data)
+        data = load_license_data()
+    rem = get_remaining_trial()
+    remaining_seconds = int(rem.total_seconds()) if rem else 0
+    return jsonify({
+        "licensed": data.get("licensed", False),
+        "trial_active": is_trial_active(),
+        "remaining_seconds": remaining_seconds,
+        "trial_days": TRIAL_DAYS
+    })
+
+@app.route('/api/license/activate', methods=['POST'])
+def api_license_activate():
+    req = request.json
+    key = req.get("key", "").strip()
+    if key == MASTER_KEY:
+        data = load_license_data()
+        data["licensed"] = True
+        data["key"] = key
+        save_license_data(data)
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "error": "Invalid license key"}), 400
+
 # ===================== AUTH API =====================
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -167,7 +258,6 @@ def api_auth_signup():
     password = data.get('password')
     role = data.get('role', 'user')
     
-    # If no admin exists yet, force role to admin for first user
     if not admin_exists():
         role = 'admin'
     
@@ -574,12 +664,10 @@ def api_sales_complete():
 @app.route('/api/sales/reverse/<int:sale_id>', methods=['POST'])
 @login_required
 def api_reverse_sale(sale_id):
-    """Reverse a sale: restore stock to batches, mark sale as reversed."""
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
-        # Check if sale exists and not already reversed
         cursor.execute("SELECT reversed FROM sales WHERE id = ?", (sale_id,))
         row = cursor.fetchone()
         if not row:
@@ -587,7 +675,6 @@ def api_reverse_sale(sale_id):
         if row[0] == 1:
             return jsonify({'success': False, 'error': 'Sale already reversed'}), 400
         
-        # Get all sale items
         cursor.execute("""
             SELECT product_id, batch_id, quantity, cost_price, selling_price, profit
             FROM sales_items
@@ -598,21 +685,16 @@ def api_reverse_sale(sale_id):
         if not items:
             return jsonify({'success': False, 'error': 'No items found for this sale'}), 400
         
-        # Restore each batch
         for item in items:
             product_id, batch_id, qty, cost_price, selling_price, profit = item
-            # Increase batch remaining quantity
             cursor.execute("""
                 UPDATE purchase_batches
                 SET remaining_quantity = remaining_quantity + ?
                 WHERE id = ?
             """, (qty, batch_id))
-            # Recalculate product stock
             update_product_stock(cursor, product_id)
         
-        # Mark sale as reversed
         cursor.execute("UPDATE sales SET reversed = 1 WHERE id = ?", (sale_id,))
-        
         conn.commit()
         return jsonify({'success': True})
         
@@ -622,12 +704,115 @@ def api_reverse_sale(sale_id):
     finally:
         conn.close()
 
+# ===================== PARTIAL REVERSE SALE API (FULLY CORRECTED) =====================
+
+@app.route('/api/sales/reverse_items', methods=['POST'])
+@login_required
+def api_reverse_sale_items():
+    """
+    Reverse selected items from a sale.
+    Request body: { "sale_id": int, "items": [{"batch_id": int, "quantity": int}, ...] }
+    """
+    import traceback
+    data = request.json
+    sale_id = data.get('sale_id')
+    items_to_reverse = data.get('items', [])
+    
+    if not sale_id or not items_to_reverse:
+        return jsonify({'success': False, 'error': 'Missing sale_id or items'}), 400
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if sale exists and not already fully reversed
+        cursor.execute("SELECT reversed, subtotal, discount, total FROM sales WHERE id = ?", (sale_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Sale not found'}), 404
+        if row[0] == 1:
+            return jsonify({'success': False, 'error': 'Sale already fully reversed'}), 400
+        
+        original_subtotal = row[1]
+        original_discount = row[2]
+        original_total = row[3]
+        
+        # Process each item
+        for item in items_to_reverse:
+            batch_id = item['batch_id']
+            qty = item['quantity']
+            
+            # Get product_id from batch
+            cursor.execute("SELECT product_id FROM purchase_batches WHERE id = ?", (batch_id,))
+            batch_row = cursor.fetchone()
+            if not batch_row:
+                raise ValueError(f"Batch {batch_id} not found")
+            product_id = batch_row[0]
+            
+            # Restore batch remaining quantity
+            cursor.execute("""
+                UPDATE purchase_batches
+                SET remaining_quantity = remaining_quantity + ?
+                WHERE id = ?
+            """, (qty, batch_id))
+            
+            # Delete the specific sales_items row
+            cursor.execute("""
+                DELETE FROM sales_items
+                WHERE sale_id = ? AND batch_id = ?
+            """, (sale_id, batch_id))
+            
+            # Recalculate product stock
+            update_product_stock(cursor, product_id)
+        
+        # After removal, recompute sale totals from remaining items
+        cursor.execute("""
+            SELECT 
+                IFNULL(SUM(quantity * selling_price), 0),
+                IFNULL(SUM(profit), 0)
+            FROM sales_items
+            WHERE sale_id = ?
+        """, (sale_id,))
+        new_subtotal, new_profit = cursor.fetchone()
+        
+        # Calculate new discount proportionally (if original_subtotal > 0)
+        if original_subtotal > 0:
+            new_discount = original_discount * (new_subtotal / original_subtotal)
+        else:
+            new_discount = 0
+        
+        new_total = new_subtotal - new_discount
+        if new_total < 0:
+            new_total = 0
+        
+        # Check if any items remain
+        if new_subtotal == 0:
+            # No items left – mark sale as reversed
+            cursor.execute("UPDATE sales SET reversed = 1 WHERE id = ?", (sale_id,))
+        else:
+            # Update sale record
+            cursor.execute("""
+                UPDATE sales
+                SET subtotal = ?, discount = ?, total = ?, profit = ?
+                WHERE id = ?
+            """, (new_subtotal, new_discount, new_total, new_profit, sale_id))
+        
+        conn.commit()
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        conn.rollback()
+        print("ERROR in reverse_items:")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
+
 # ===================== TODAY'S SALES API =====================
 
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
-    """Get sales data filtered by period (daily/weekly/monthly/yearly) or custom date range (excluding reversed sales)"""
     period = request.args.get('period', 'daily')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
@@ -635,7 +820,6 @@ def api_today_sales():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Base query that includes deleted batches (via LEFT JOIN) and excludes reversed sales
     exclude_permanent = """
         WHERE NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
@@ -646,7 +830,6 @@ def api_today_sales():
     """
     
     if start_date and end_date:
-        # Custom date range
         cursor.execute(f"""
             SELECT 
                 sales.id, 
@@ -673,7 +856,6 @@ def api_today_sales():
             ORDER BY sales.date DESC
         """, (start_date, end_date))
     else:
-        # Use period filter
         if period == 'weekly':
             start = (datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d')
             end = datetime.now().strftime('%Y-%m-%d')
@@ -755,7 +937,7 @@ def api_today_sales():
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
-        else:  # daily (default)
+        else:
             cursor.execute(f"""
                 SELECT 
                     sales.id, 
@@ -785,7 +967,6 @@ def api_today_sales():
     rows = cursor.fetchall()
     conn.close()
     
-    # Convert rows to list of dictionaries
     sales_data = []
     for r in rows:
         sales_data.append({
@@ -810,7 +991,6 @@ def api_today_sales():
 @app.route('/api/today_sales/pdf', methods=['POST'])
 @login_required
 def api_today_sales_pdf():
-    """Generate PDF report from the currently filtered sales data"""
     data = request.json
     sales_data = data.get('sales_data', [])
     period_text = data.get('period_text', 'Sales Report')
@@ -821,13 +1001,11 @@ def api_today_sales_pdf():
     elements = []
     styles = getSampleStyleSheet()
     
-    # Title
     elements.append(Paragraph("Sales Report", styles['Title']))
     elements.append(Spacer(1, 0.2*cm))
     elements.append(Paragraph(period_text, styles['Normal']))
     elements.append(Spacer(1, 0.2*cm))
     
-    # Calculate totals
     seen_sales = set()
     total_sales = 0.0
     total_discount = 0.0
@@ -850,7 +1028,6 @@ def api_today_sales_pdf():
     ))
     elements.append(Spacer(1, 0.3*cm))
     
-    # Table headers
     table_data = [["Name", "Brand", "Category", "Qty", "Price", "Subtotal", 
                    "Discount", "Total", "Profit", "Batch", "Cost", "Sale Date", "Status"]]
     
@@ -893,207 +1070,161 @@ def api_today_sales_pdf():
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
-    """Get summary metrics: items sold, subtotal, discount, total, profit for a period (excluding reversed sales)"""
     period = request.args.get('period', 'daily')
     
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Build date filters based on period
     if period == 'weekly':
-        date_filter = "DATE(sales.date) >= DATE('now', '-6 days')"
+        date_filter = "DATE(s.date) >= DATE('now', '-6 days')"
     elif period == 'monthly':
-        date_filter = "strftime('%m', sales.date) = strftime('%m','now') AND strftime('%Y', sales.date) = strftime('%Y','now')"
+        date_filter = "strftime('%m', s.date) = strftime('%m','now') AND strftime('%Y', s.date) = strftime('%Y','now')"
     elif period == 'yearly':
-        date_filter = "strftime('%Y', sales.date) = strftime('%Y','now')"
-    else:  # daily
-        date_filter = "DATE(sales.date) = DATE('now','localtime')"
+        date_filter = "strftime('%Y', s.date) = strftime('%Y','now')"
+    else:
+        date_filter = "DATE(s.date) = DATE('now','localtime')"
     
-    # Exclude permanently deleted products and reversed sales
-    exclude = """
+    # Total sales and discount directly from sales table (no join)
+    cursor.execute(f"""
+        SELECT 
+            IFNULL(SUM(s.total), 0) as total,
+            IFNULL(SUM(s.discount), 0) as discount
+        FROM sales s
+        WHERE {date_filter}
+        AND s.reversed = 0
+    """)
+    row1 = cursor.fetchone()
+    total_sales = row1[0]
+    total_discount = row1[1]
+    
+    # Items sold and profit from sales_items (needs join but no multiplication)
+    cursor.execute(f"""
+        SELECT 
+            IFNULL(SUM(si.quantity), 0) as items_sold,
+            IFNULL(SUM(si.profit), 0) as profit
+        FROM sales_items si
+        JOIN sales s ON si.sale_id = s.id
+        WHERE {date_filter}
+        AND s.reversed = 0
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
-            WHERE dp.product_id = products.id 
+            WHERE dp.product_id = si.product_id 
             AND dp.action = 'PERMANENTLY DELETED' 
             AND dp.source = 'product'
         )
-        AND sales.reversed = 0
-    """
+    """)
+    row2 = cursor.fetchone()
+    items_sold = row2[0]
+    profit = row2[1]
     
-    query = f"""
-        SELECT 
-            IFNULL(SUM(sales_items.quantity), 0) as items_sold,
-            IFNULL(SUM(sales_items.quantity * sales_items.selling_price), 0) as subtotal,
-            IFNULL(SUM(sales.discount), 0) as discount,
-            IFNULL(SUM(sales.total), 0) as total,
-            IFNULL(SUM(sales_items.profit), 0) as profit
-        FROM sales
-        JOIN sales_items ON sales.id = sales_items.sale_id
-        JOIN products ON products.id = sales_items.product_id
-        WHERE {date_filter}
-        {exclude}
-    """
-    cursor.execute(query)
-    row = cursor.fetchone()
     conn.close()
     
     return jsonify({
-        'items_sold': int(row[0]),
-        'subtotal': float(row[1]),
-        'discount': float(row[2]),
-        'total': float(row[3]),
-        'profit': float(row[4])
+        'items_sold': items_sold,
+        'subtotal': total_sales,
+        'discount': total_discount,
+        'total': total_sales,
+        'profit': profit
     })
 
 @app.route('/api/analytics/trend', methods=['GET'])
 @login_required
 def api_analytics_trend():
-    """Get sales and profit trend over time for a period (excluding reversed sales)"""
     period = request.args.get('period', 'daily')
     
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Different grouping based on period
     if period == 'weekly':
-        cursor.execute("""
-            SELECT 
-                DATE(sales.date) as day,
-                IFNULL(SUM(sales.total), 0) as sales,
-                IFNULL(SUM(sales_items.profit), 0) as profit
-            FROM sales
-            JOIN sales_items ON sales.id = sales_items.sale_id
-            JOIN products ON products.id = sales_items.product_id
-            WHERE DATE(sales.date) >= DATE('now', '-6 days')
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = products.id 
-                AND dp.action = 'PERMANENTLY DELETED' 
-                AND dp.source = 'product'
-            )
-            AND sales.reversed = 0
-            GROUP BY DATE(sales.date)
-            ORDER BY day ASC
-        """)
+        group = "DATE(s.date)"
+        date_filter = "DATE(s.date) >= DATE('now', '-6 days')"
     elif period == 'monthly':
-        cursor.execute("""
-            SELECT 
-                DATE(sales.date) as day,
-                IFNULL(SUM(sales.total), 0) as sales,
-                IFNULL(SUM(sales_items.profit), 0) as profit
-            FROM sales
-            JOIN sales_items ON sales.id = sales_items.sale_id
-            JOIN products ON products.id = sales_items.product_id
-            WHERE DATE(sales.date) >= DATE('now', '-29 days')
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = products.id 
-                AND dp.action = 'PERMANENTLY DELETED' 
-                AND dp.source = 'product'
-            )
-            AND sales.reversed = 0
-            GROUP BY DATE(sales.date)
-            ORDER BY day ASC
-        """)
+        group = "DATE(s.date)"
+        date_filter = "DATE(s.date) >= DATE('now', '-29 days')"
     elif period == 'yearly':
-        cursor.execute("""
-            SELECT 
-                strftime('%Y-%m', sales.date) as month,
-                IFNULL(SUM(sales.total), 0) as sales,
-                IFNULL(SUM(sales_items.profit), 0) as profit
-            FROM sales
-            JOIN sales_items ON sales.id = sales_items.sale_id
-            JOIN products ON products.id = sales_items.product_id
-            WHERE strftime('%Y', sales.date) = strftime('%Y','now')
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = products.id 
-                AND dp.action = 'PERMANENTLY DELETED' 
-                AND dp.source = 'product'
-            )
-            AND sales.reversed = 0
-            GROUP BY strftime('%Y-%m', sales.date)
-            ORDER BY month ASC
-        """)
-    else:
-        cursor.execute("""
-            SELECT 
-                DATE(sales.date) as day,
-                IFNULL(SUM(sales.total), 0) as sales,
-                IFNULL(SUM(sales_items.profit), 0) as profit
-            FROM sales
-            JOIN sales_items ON sales.id = sales_items.sale_id
-            JOIN products ON products.id = sales_items.product_id
-            WHERE DATE(sales.date) >= DATE('now', '-6 days')
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = products.id 
-                AND dp.action = 'PERMANENTLY DELETED' 
-                AND dp.source = 'product'
-            )
-            AND sales.reversed = 0
-            GROUP BY DATE(sales.date)
-            ORDER BY day ASC
-        """)
+        group = "strftime('%Y-%m', s.date)"
+        date_filter = "strftime('%Y', s.date) = strftime('%Y','now')"
+    else:  # daily – show last 7 days
+        group = "DATE(s.date)"
+        date_filter = "DATE(s.date) >= DATE('now', '-6 days')"
     
-    rows = cursor.fetchall()
+    cursor.execute(f"""
+        SELECT 
+            {group} as label,
+            IFNULL(SUM(s.total), 0) as sales
+        FROM sales s
+        WHERE {date_filter}
+        AND s.reversed = 0
+        GROUP BY label
+        ORDER BY label ASC
+    """)
+    sales_rows = cursor.fetchall()
+    
+    cursor.execute(f"""
+        SELECT 
+            {group} as label,
+            IFNULL(SUM(si.profit), 0) as profit
+        FROM sales_items si
+        JOIN sales s ON si.sale_id = s.id
+        WHERE {date_filter}
+        AND s.reversed = 0
+        GROUP BY label
+        ORDER BY label ASC
+    """)
+    profit_rows = cursor.fetchall()
+    
     conn.close()
     
+    profit_dict = {p[0]: p[1] for p in profit_rows}
     trend = []
-    for r in rows:
+    for s in sales_rows:
         trend.append({
-            'label': r[0],
-            'sales': float(r[1]),
-            'profit': float(r[2])
+            'label': s[0],
+            'sales': float(s[1]),
+            'profit': float(profit_dict.get(s[0], 0))
         })
     return jsonify(trend)
 
 @app.route('/api/analytics/top_products', methods=['GET'])
 @login_required
 def api_analytics_top_products():
-    """Get top selling products for a period (excluding reversed sales)"""
     period = request.args.get('period', 'daily')
     limit = int(request.args.get('limit', 10))
     
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Date filter
     if period == 'weekly':
-        date_filter = "DATE(sales.date) >= DATE('now', '-6 days')"
+        date_filter = "DATE(s.date) >= DATE('now', '-6 days')"
     elif period == 'monthly':
-        date_filter = "strftime('%m', sales.date) = strftime('%m','now') AND strftime('%Y', sales.date) = strftime('%Y','now')"
+        date_filter = "strftime('%m', s.date) = strftime('%m','now') AND strftime('%Y', s.date) = strftime('%Y','now')"
     elif period == 'yearly':
-        date_filter = "strftime('%Y', sales.date) = strftime('%Y','now')"
-    else:  # daily
-        date_filter = "DATE(sales.date) = DATE('now','localtime')"
+        date_filter = "strftime('%Y', s.date) = strftime('%Y','now')"
+    else:
+        date_filter = "DATE(s.date) = DATE('now','localtime')"
     
-    exclude = """
+    cursor.execute(f"""
+        SELECT 
+            p.name,
+            p.brand,
+            p.category,
+            IFNULL(SUM(si.quantity), 0) as total_qty
+        FROM sales_items si
+        JOIN sales s ON si.sale_id = s.id
+        JOIN products p ON p.id = si.product_id
+        WHERE {date_filter}
+        AND s.reversed = 0
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
-            WHERE dp.product_id = products.id 
+            WHERE dp.product_id = p.id 
             AND dp.action = 'PERMANENTLY DELETED' 
             AND dp.source = 'product'
         )
-        AND sales.reversed = 0
-    """
-    
-    query = f"""
-        SELECT 
-            products.name,
-            products.brand,
-            products.category,
-            IFNULL(SUM(sales_items.quantity), 0) as total_qty
-        FROM sales
-        JOIN sales_items ON sales.id = sales_items.sale_id
-        JOIN products ON products.id = sales_items.product_id
-        WHERE {date_filter}
-        {exclude}
-        GROUP BY products.id
+        GROUP BY p.id
         ORDER BY total_qty DESC
         LIMIT ?
-    """
-    cursor.execute(query, (limit,))
+    """, (limit,))
+    
     rows = cursor.fetchall()
     conn.close()
     
@@ -1112,10 +1243,8 @@ def api_analytics_top_products():
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
-    """Return combined archive: active products + deleted records"""
     status_filter = request.args.get('status', 'ALL')
     
-    # Active products
     active_products = get_all_products_service()
     active_items = []
     for p in active_products:
@@ -1138,12 +1267,9 @@ def api_archive():
             'product_id': p['product_id']
         })
     
-    # Deleted records
     deleted_records = get_deleted_products()
     deleted_items = []
     for r in deleted_records:
-        # r structure: (id, name, brand, cost_price, selling_price, stock, category, discount, action, deleted_at,
-        #               batch_id, batch_quantity, batch_remaining, product_id, source)
         action = r[8].upper() if len(r) > 8 else 'UNKNOWN'
         is_permanent = action == 'PERMANENTLY DELETED'
         deleted_items.append({
@@ -1167,11 +1293,9 @@ def api_archive():
     
     combined = active_items + deleted_items
     
-    # Filter by status
     if status_filter != 'ALL':
         combined = [item for item in combined if item['action'] == status_filter]
     
-    # Sort by date (newest first), active products first (they have no date)
     def sort_key(item):
         if item['action'] == 'ACTIVE':
             return (datetime.max, item['name'])
@@ -1201,7 +1325,6 @@ def api_archive_restore():
 @app.route('/api/archive/batches', methods=['GET'])
 @login_required
 def api_archive_batches():
-    """Get all batches for a given product (by name+brand) – used in View Batches modal"""
     name = request.args.get('name')
     brand = request.args.get('brand')
     if not name or not brand:
