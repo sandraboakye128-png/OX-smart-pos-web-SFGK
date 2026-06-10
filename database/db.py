@@ -1,7 +1,5 @@
 import os
 import sqlite3
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
 # ---------- Ensure folders exist ----------
 DB_DIR = "database"
@@ -12,198 +10,343 @@ os.makedirs(DB_DIR, exist_ok=True)
 os.makedirs(RECEIPTS_DIR, exist_ok=True)
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
-# ---------- DATABASE PATHS ----------
+# ---------- DATABASE PATHS (for SQLite) ----------
 DB_PATH = os.path.join(DB_DIR, "retail.db")
 AUTH_DB_PATH = os.path.join(DB_DIR, "auth.db")
 
-# ---------- RETAIL SCHEMA ----------
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    brand TEXT,
-    cost_price REAL,
-    selling_price REAL,
-    stock INTEGER,
-    category TEXT,
-    discount REAL DEFAULT 0,
-    base_unit TEXT DEFAULT 'piece'
-);
+# ---------- Check if we are on Render (PostgreSQL) ----------
+DATABASE_URL = os.getenv("DATABASE_URL")
+USE_POSTGRES = DATABASE_URL is not None
 
-CREATE TABLE IF NOT EXISTS sales (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    subtotal REAL DEFAULT 0,
-    discount REAL DEFAULT 0,
-    total REAL,
-    profit REAL,
-    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+if USE_POSTGRES:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    print("Using PostgreSQL (Supabase)")
 
-CREATE TABLE IF NOT EXISTS deleted_products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    brand TEXT,
-    cost_price REAL,
-    selling_price REAL,
-    stock INTEGER,
-    category TEXT,
-    discount REAL DEFAULT 0,
-    action TEXT DEFAULT 'deleted',
-    source TEXT DEFAULT 'product',
-    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    batch_id INTEGER,
-    batch_quantity INTEGER,
-    batch_remaining INTEGER,
-    product_id INTEGER
-);
+    # ----- PostgreSQL Schema -----
+    SCHEMA = """
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        brand TEXT,
+        cost_price REAL,
+        selling_price REAL,
+        stock INTEGER,
+        category TEXT,
+        discount REAL DEFAULT 0,
+        base_unit TEXT DEFAULT 'piece'
+    );
 
-CREATE TABLE IF NOT EXISTS purchases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_name TEXT NOT NULL,
-    brand TEXT,
-    category TEXT,
-    quantity INTEGER,
-    cost_price REAL,
-    discount REAL DEFAULT 0,
-    total REAL,
-    selling_price REAL,
-    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    remaining_stock INTEGER DEFAULT 0
-);
+    CREATE TABLE IF NOT EXISTS sales (
+        id SERIAL PRIMARY KEY,
+        subtotal REAL DEFAULT 0,
+        discount REAL DEFAULT 0,
+        total REAL,
+        profit REAL,
+        date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
 
-CREATE TABLE IF NOT EXISTS purchase_batches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    quantity INTEGER,
-    remaining_quantity INTEGER,
-    cost_price REAL,
-    discount REAL,
-    selling_price REAL,
-    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    action TEXT DEFAULT 'created'
-);
+    CREATE TABLE IF NOT EXISTS deleted_products (
+        id SERIAL PRIMARY KEY,
+        name TEXT,
+        brand TEXT,
+        cost_price REAL,
+        selling_price REAL,
+        stock INTEGER,
+        category TEXT,
+        discount REAL DEFAULT 0,
+        action TEXT DEFAULT 'deleted',
+        source TEXT DEFAULT 'product',
+        deleted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        batch_id INTEGER,
+        batch_quantity INTEGER,
+        batch_remaining INTEGER,
+        product_id INTEGER
+    );
 
-CREATE TABLE IF NOT EXISTS sales_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sale_id INTEGER,
-    product_id INTEGER,
-    batch_id INTEGER,
-    quantity INTEGER,
-    cost_price REAL,
-    selling_price REAL,
-    profit REAL,
-    unit_id INTEGER,
-    unit_quantity REAL
-);
+    CREATE TABLE IF NOT EXISTS purchases (
+        id SERIAL PRIMARY KEY,
+        product_name TEXT NOT NULL,
+        brand TEXT,
+        category TEXT,
+        quantity INTEGER,
+        cost_price REAL,
+        discount REAL DEFAULT 0,
+        total REAL,
+        selling_price REAL,
+        date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        remaining_stock INTEGER DEFAULT 0
+    );
 
-CREATE TABLE IF NOT EXISTS product_units (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    unit_name TEXT,
-    conversion_factor REAL,
-    selling_price REAL,
-    FOREIGN KEY (product_id) REFERENCES products(id)
-);
-"""
+    CREATE TABLE IF NOT EXISTS purchase_batches (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER,
+        quantity INTEGER,
+        remaining_quantity INTEGER,
+        cost_price REAL,
+        discount REAL,
+        selling_price REAL,
+        date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        action TEXT DEFAULT 'created'
+    );
 
-# ---------- USERS SCHEMA ----------
-AUTH_SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
+    CREATE TABLE IF NOT EXISTS sales_items (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER,
+        product_id INTEGER,
+        batch_id INTEGER,
+        quantity INTEGER,
+        cost_price REAL,
+        selling_price REAL,
+        profit REAL,
+        unit_id INTEGER,
+        unit_quantity REAL
+    );
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.executescript(SCHEMA)
+    CREATE TABLE IF NOT EXISTS product_units (
+        id SERIAL PRIMARY KEY,
+        product_id INTEGER,
+        unit_name TEXT,
+        conversion_factor REAL,
+        selling_price REAL
+    );
 
-    # ---------- SAFE MIGRATIONS ----------
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    """
 
-    # PRODUCTS
-    try: cursor.execute("ALTER TABLE products ADD COLUMN category TEXT")
-    except: pass
-    try: cursor.execute("ALTER TABLE products ADD COLUMN discount REAL DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE products ADD COLUMN base_unit TEXT DEFAULT 'piece'")
-    except: pass
+    # PostgreSQL migration statements (ALTER TABLE) – they will fail if column already exists,
+    # so we wrap each in a try/except block inside the connection function.
+    POSTGRES_MIGRATIONS = [
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS discount REAL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS base_unit TEXT DEFAULT 'piece'",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS subtotal REAL DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS product_id INTEGER",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS reversed INTEGER DEFAULT 0",
+        "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0",
+        "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS remaining_stock INTEGER DEFAULT 0",
+        "ALTER TABLE purchase_batches ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0",
+        "ALTER TABLE purchase_batches ADD COLUMN IF NOT EXISTS action TEXT DEFAULT 'created'",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS category TEXT",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS discount REAL DEFAULT 0",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS action TEXT DEFAULT 'deleted'",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'product'",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS batch_id INTEGER",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS batch_quantity INTEGER",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS batch_remaining INTEGER",
+        "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS product_id INTEGER",
+        "ALTER TABLE sales_items ADD COLUMN IF NOT EXISTS unit_id INTEGER",
+        "ALTER TABLE sales_items ADD COLUMN IF NOT EXISTS unit_quantity REAL",
+        "CREATE TABLE IF NOT EXISTS product_units (id SERIAL PRIMARY KEY, product_id INTEGER, unit_name TEXT, conversion_factor REAL, selling_price REAL)"
+    ]
 
-    # SALES
-    try: cursor.execute("ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE sales ADD COLUMN subtotal REAL DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE sales ADD COLUMN product_id INTEGER")
-    except: pass
-    # NEW: reversed column for sale reversal (0 = not reversed, 1 = reversed)
-    try: cursor.execute("ALTER TABLE sales ADD COLUMN reversed INTEGER DEFAULT 0")
-    except: pass
+    def get_connection():
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor = conn.cursor()
+        # Create tables if not exist
+        cursor.execute(SCHEMA)
+        # Apply migrations (ALTER TABLE … IF NOT EXISTS)
+        for migration in POSTGRES_MIGRATIONS:
+            try:
+                cursor.execute(migration)
+            except Exception as e:
+                # Column might already exist; ignore
+                pass
+        conn.commit()
+        return conn
 
-    # PURCHASES
-    try: cursor.execute("ALTER TABLE purchases ADD COLUMN selling_price REAL DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE purchases ADD COLUMN remaining_stock INTEGER DEFAULT 0")
-    except: pass
+else:
+    # ---------- SQLite (local development) ----------
+    import sqlite3
+    print("Using SQLite (local)")
 
-    # PURCHASE BATCHES
-    try: cursor.execute("ALTER TABLE purchase_batches ADD COLUMN selling_price REAL DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE purchase_batches ADD COLUMN action TEXT DEFAULT 'created'")
-    except: pass
+    SCHEMA = """
+    CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        brand TEXT,
+        cost_price REAL,
+        selling_price REAL,
+        stock INTEGER,
+        category TEXT,
+        discount REAL DEFAULT 0,
+        base_unit TEXT DEFAULT 'piece'
+    );
 
-    # DELETED PRODUCTS - original columns
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN category TEXT")
-    except: pass
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN discount REAL DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN action TEXT DEFAULT 'deleted'")
-    except: pass
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN source TEXT DEFAULT 'product'")
-    except: pass
+    CREATE TABLE IF NOT EXISTS sales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subtotal REAL DEFAULT 0,
+        discount REAL DEFAULT 0,
+        total REAL,
+        profit REAL,
+        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
 
-    # DELETED PRODUCTS - batch restore columns
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN batch_id INTEGER")
-    except: pass
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN batch_quantity INTEGER")
-    except: pass
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN batch_remaining INTEGER")
-    except: pass
+    CREATE TABLE IF NOT EXISTS deleted_products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        brand TEXT,
+        cost_price REAL,
+        selling_price REAL,
+        stock INTEGER,
+        category TEXT,
+        discount REAL DEFAULT 0,
+        action TEXT DEFAULT 'deleted',
+        source TEXT DEFAULT 'product',
+        deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        batch_id INTEGER,
+        batch_quantity INTEGER,
+        batch_remaining INTEGER,
+        product_id INTEGER
+    );
 
-    # DELETED PRODUCTS - product_id column (CRITICAL for batch tracking)
-    try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN product_id INTEGER")
-    except: pass
+    CREATE TABLE IF NOT EXISTS purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_name TEXT NOT NULL,
+        brand TEXT,
+        category TEXT,
+        quantity INTEGER,
+        cost_price REAL,
+        discount REAL DEFAULT 0,
+        total REAL,
+        selling_price REAL,
+        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        remaining_stock INTEGER DEFAULT 0
+    );
 
-    # SALES_ITEMS - unit support columns
-    try: cursor.execute("ALTER TABLE sales_items ADD COLUMN unit_id INTEGER")
-    except: pass
-    try: cursor.execute("ALTER TABLE sales_items ADD COLUMN unit_quantity REAL")
-    except: pass
+    CREATE TABLE IF NOT EXISTS purchase_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER,
+        quantity INTEGER,
+        remaining_quantity INTEGER,
+        cost_price REAL,
+        discount REAL,
+        selling_price REAL,
+        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        action TEXT DEFAULT 'created'
+    );
 
-    # PRODUCT_UNITS table
-    try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS product_units (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product_id INTEGER,
-                unit_name TEXT,
-                conversion_factor REAL,
-                selling_price REAL,
-                FOREIGN KEY (product_id) REFERENCES products(id)
-            )
-        """)
-    except: pass
+    CREATE TABLE IF NOT EXISTS sales_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER,
+        product_id INTEGER,
+        batch_id INTEGER,
+        quantity INTEGER,
+        cost_price REAL,
+        selling_price REAL,
+        profit REAL,
+        unit_id INTEGER,
+        unit_quantity REAL
+    );
 
-    conn.commit()
+    CREATE TABLE IF NOT EXISTS product_units (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER,
+        unit_name TEXT,
+        conversion_factor REAL,
+        selling_price REAL,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    """
 
-    # ---------- AUTH DB ----------
-    auth_conn = sqlite3.connect(AUTH_DB_PATH)
-    auth_cursor = auth_conn.cursor()
-    auth_cursor.executescript(AUTH_SCHEMA)
-    auth_conn.commit()
-    auth_conn.close()
+    AUTH_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
 
-    return conn
+    def get_connection():
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.executescript(SCHEMA)
+
+        # ---------- SAFE MIGRATIONS ----------
+        # PRODUCTS
+        try: cursor.execute("ALTER TABLE products ADD COLUMN category TEXT")
+        except: pass
+        try: cursor.execute("ALTER TABLE products ADD COLUMN discount REAL DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE products ADD COLUMN base_unit TEXT DEFAULT 'piece'")
+        except: pass
+
+        # SALES
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN subtotal REAL DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN product_id INTEGER")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN reversed INTEGER DEFAULT 0")
+        except: pass
+
+        # PURCHASES
+        try: cursor.execute("ALTER TABLE purchases ADD COLUMN selling_price REAL DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE purchases ADD COLUMN remaining_stock INTEGER DEFAULT 0")
+        except: pass
+
+        # PURCHASE BATCHES
+        try: cursor.execute("ALTER TABLE purchase_batches ADD COLUMN selling_price REAL DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE purchase_batches ADD COLUMN action TEXT DEFAULT 'created'")
+        except: pass
+
+        # DELETED PRODUCTS
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN category TEXT")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN discount REAL DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN action TEXT DEFAULT 'deleted'")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN source TEXT DEFAULT 'product'")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN batch_id INTEGER")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN batch_quantity INTEGER")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN batch_remaining INTEGER")
+        except: pass
+        try: cursor.execute("ALTER TABLE deleted_products ADD COLUMN product_id INTEGER")
+        except: pass
+
+        # SALES_ITEMS
+        try: cursor.execute("ALTER TABLE sales_items ADD COLUMN unit_id INTEGER")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales_items ADD COLUMN unit_quantity REAL")
+        except: pass
+
+        # PRODUCT_UNITS table
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS product_units (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER,
+                    unit_name TEXT,
+                    conversion_factor REAL,
+                    selling_price REAL,
+                    FOREIGN KEY (product_id) REFERENCES products(id)
+                )
+            """)
+        except: pass
+
+        conn.commit()
+
+        # ---------- AUTH DB ----------
+        auth_conn = sqlite3.connect(AUTH_DB_PATH)
+        auth_cursor = auth_conn.cursor()
+        auth_cursor.executescript(AUTH_SCHEMA)
+        auth_conn.commit()
+        auth_conn.close()
+
+        return conn

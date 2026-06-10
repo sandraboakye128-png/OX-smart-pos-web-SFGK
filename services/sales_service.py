@@ -3,7 +3,7 @@ from database.db import get_connection
 from datetime import datetime
 
 # ---------------------------
-# GET PRODUCTS FOR SALE (FIXED - Excludes only products permanently deleted as a whole)
+# GET PRODUCTS FOR SALE
 # ---------------------------
 def get_products_for_sale():
     conn = get_connection()
@@ -43,7 +43,7 @@ def get_batches_for_product(product_id):
     cursor.execute("""
         SELECT id, quantity, remaining_quantity, cost_price, selling_price, discount, date
         FROM purchase_batches
-        WHERE product_id=? AND remaining_quantity > 0
+        WHERE product_id = %s AND remaining_quantity > 0
         ORDER BY date ASC
     """, (product_id,))
     rows = cursor.fetchall()
@@ -71,7 +71,7 @@ def get_batch_by_id(batch_id):
     cursor.execute("""
         SELECT id, product_id, remaining_quantity, cost_price, selling_price
         FROM purchase_batches
-        WHERE id=?
+        WHERE id = %s
     """, (batch_id,))
     row = cursor.fetchone()
     conn.close()
@@ -91,13 +91,13 @@ def get_batch_by_id(batch_id):
 # ---------------------------
 def update_product_stock(cursor, product_id):
     cursor.execute("""
-        SELECT IFNULL(SUM(remaining_quantity),0)
+        SELECT COALESCE(SUM(remaining_quantity), 0)
         FROM purchase_batches
-        WHERE product_id=?
+        WHERE product_id = %s
     """, (product_id,))
     new_stock = cursor.fetchone()[0]
     cursor.execute("""
-        UPDATE products SET stock=? WHERE id=?
+        UPDATE products SET stock = %s WHERE id = %s
     """, (int(new_stock), product_id))
 
 
@@ -121,11 +121,13 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
     else:
         sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Insert sale and get the generated ID (PostgreSQL uses RETURNING)
     cursor.execute("""
         INSERT INTO sales (subtotal, discount, total, profit, date)
-        VALUES (0, 0, 0, 0, ?)
+        VALUES (0, 0, 0, 0, %s)
+        RETURNING id
     """, (sale_date_str,))
-    sale_id = cursor.lastrowid
+    sale_id = cursor.fetchone()[0]
 
     receipt_data = []
 
@@ -171,14 +173,14 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
 
                 cursor.execute("""
                     UPDATE purchase_batches
-                    SET remaining_quantity = remaining_quantity - ?
-                    WHERE id=?
+                    SET remaining_quantity = remaining_quantity - %s
+                    WHERE id = %s
                 """, (sell_qty, batch["batch_id"]))
 
                 cursor.execute("""
                     INSERT INTO sales_items
                     (sale_id, product_id, batch_id, quantity, cost_price, selling_price, profit)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (sale_id, product_id, batch["batch_id"], sell_qty, batch_cost, batch_selling, batch_profit))
 
                 batches_used.append({"batch_id": batch["batch_id"], "qty": sell_qty})
@@ -218,14 +220,14 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
 
                 cursor.execute("""
                     UPDATE purchase_batches
-                    SET remaining_quantity = remaining_quantity - ?
-                    WHERE id=?
+                    SET remaining_quantity = remaining_quantity - %s
+                    WHERE id = %s
                 """, (sell_qty, b["batch_id"]))
 
                 cursor.execute("""
                     INSERT INTO sales_items
                     (sale_id, product_id, batch_id, quantity, cost_price, selling_price, profit)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (sale_id, product_id, b["batch_id"], sell_qty, b["cost_price"], selling_price, batch_profit))
 
                 batches_used.append({"batch_id": b["batch_id"], "qty": sell_qty})
@@ -244,8 +246,8 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
 
     cursor.execute("""
         UPDATE sales
-        SET subtotal=?, discount=?, total=?, profit=?
-        WHERE id=?
+        SET subtotal = %s, discount = %s, total = %s, profit = %s
+        WHERE id = %s
     """, (total_subtotal, total_discount, grand_total, net_profit, sale_id))
 
     conn.commit()

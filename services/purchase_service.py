@@ -3,16 +3,14 @@ from datetime import datetime
 
 # --------------------------- UPDATE PRODUCT STOCK ---------------------------
 def update_product_stock(cursor, product_id):
-    """Recalculate stock for a product based on all batches."""
     cursor.execute("""
-        SELECT SUM(remaining_quantity)
+        SELECT COALESCE(SUM(remaining_quantity), 0)
         FROM purchase_batches
-        WHERE product_id=?
+        WHERE product_id = %s
     """, (product_id,))
     new_stock = cursor.fetchone()[0] or 0
-
     cursor.execute(
-        "UPDATE products SET stock=? WHERE id=?",
+        "UPDATE products SET stock = %s WHERE id = %s",
         (new_stock, product_id)
     )
 
@@ -34,7 +32,7 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
         cursor.execute("""
             INSERT INTO purchases
             (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (name, brand, category, quantity, cost_price, discount, total, selling_price, datetime.now()))
 
         # Get or create product (check if not permanently deleted)
@@ -42,33 +40,33 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
             SELECT p.id 
             FROM products p
             LEFT JOIN deleted_products dp ON dp.product_id = p.id AND dp.action = 'PERMANENTLY DELETED' AND dp.source = 'product'
-            WHERE p.name=? AND p.brand=? AND dp.id IS NULL
+            WHERE p.name = %s AND p.brand = %s AND dp.id IS NULL
         """, (name, brand))
         product = cursor.fetchone()
 
         if product:
             product_id = product[0]
-            # Only update category, NOT other fields
             cursor.execute("""
                 UPDATE products
-                SET category=?
-                WHERE id=?
+                SET category = %s
+                WHERE id = %s
             """, (category, product_id))
         else:
             cursor.execute("""
                 INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
             """, (name, brand, cost_price, selling_price, 0, category))
-            product_id = cursor.lastrowid
+            product_id = cursor.fetchone()[0]
 
         # Create batch
         cursor.execute("""
             INSERT INTO purchase_batches
             (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (product_id, quantity, quantity, cost_price, selling_price, discount, datetime.now(), "added"))
-
-        batch_id = cursor.lastrowid
+        batch_id = cursor.fetchone()[0]
 
         # Recalculate stock
         update_product_stock(cursor, product_id)
@@ -91,44 +89,41 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     try:
         cursor = conn.cursor()
 
-        # Get linked product_id
         cursor.execute(
-            "SELECT product_id FROM purchase_batches WHERE id=?",
+            "SELECT product_id FROM purchase_batches WHERE id = %s",
             (batch_id,)
         )
         result = cursor.fetchone()
-
         if not result:
             raise ValueError("Batch not found")
-
         product_id = result[0]
 
         # Archive old batch data
         cursor.execute("""
             SELECT quantity, remaining_quantity, cost_price, selling_price, discount, date, action
             FROM purchase_batches
-            WHERE id=?
+            WHERE id = %s
         """, (batch_id,))
         old = cursor.fetchone()
         if old:
             cursor.execute("""
                 INSERT INTO deleted_products
                 (name, brand, cost_price, selling_price, stock, category, discount, action, product_id, source, batch_id, batch_quantity, batch_remaining)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (name, brand, old[2], old[3], old[1], category, old[4], "updated", product_id, "product", batch_id, old[0], old[1]))
 
         # Update only the batch record
         cursor.execute("""
             UPDATE purchase_batches
-            SET quantity=?, remaining_quantity=?, cost_price=?, selling_price=?, discount=?, date=?, action=?
-            WHERE id=?
+            SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s
+            WHERE id = %s
         """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", batch_id))
 
         # Update only category in products table
         cursor.execute("""
             UPDATE products
-            SET category=?
-            WHERE id=?
+            SET category = %s
+            WHERE id = %s
         """, (category, product_id))
 
         # Recalculate stock
@@ -139,18 +134,16 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
         conn.close()
 
 
-# --------------------------- GET ALL PURCHASES (FIXED - EXCLUDE ONLY PERMANENTLY DELETED PRODUCTS) ---------------------------
+# --------------------------- GET ALL PURCHASES ---------------------------
 def get_all_purchases():
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        # FIXED: Only exclude products that are PERMANENTLY DELETED as a WHOLE PRODUCT
-        # Not batches that were permanently deleted
         cursor.execute("""
             SELECT b.id, p.name, p.brand, p.category,
                    b.quantity, b.remaining_quantity,
                    b.cost_price, b.discount, b.selling_price,
-                   (b.cost_price*b.quantity - b.discount) AS total,
+                   (b.cost_price * b.quantity - b.discount) AS total,
                    b.date, b.action
             FROM purchase_batches b
             JOIN products p ON p.id = b.product_id
@@ -163,8 +156,6 @@ def get_all_purchases():
             ORDER BY b.date DESC
         """)
         rows = cursor.fetchall()
-        print(f"Found {len(rows)} batches in database")  # Debug print
-        
         return [
             {
                 "batch_id": r[0],
@@ -186,7 +177,7 @@ def get_all_purchases():
         conn.close()
 
 
-# --------------------------- GET PURCHASES BY DATE RANGE (FIXED) ---------------------------
+# --------------------------- GET PURCHASES BY DATE RANGE ---------------------------
 def get_purchases_by_date_range(start_date, end_date):
     conn = get_connection()
     try:
@@ -195,11 +186,11 @@ def get_purchases_by_date_range(start_date, end_date):
             SELECT b.id, p.name, p.brand, p.category,
                    b.quantity, b.remaining_quantity,
                    b.cost_price, b.discount, b.selling_price,
-                   (b.cost_price*b.quantity - b.discount) AS total,
+                   (b.cost_price * b.quantity - b.discount) AS total,
                    b.date, b.action
             FROM purchase_batches b
             JOIN products p ON p.id = b.product_id
-            WHERE DATE(b.date) BETWEEN ? AND ?
+            WHERE b.date::date BETWEEN %s AND %s
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
                 WHERE dp.product_id = p.id 
@@ -230,7 +221,7 @@ def get_purchases_by_date_range(start_date, end_date):
         conn.close()
 
 
-# --------------------------- AUTOCOMPLETE SUGGESTIONS (FIXED) ---------------------------
+# --------------------------- AUTOCOMPLETE SUGGESTIONS ---------------------------
 def get_product_suggestions(keyword):
     conn = get_connection()
     try:
@@ -238,7 +229,7 @@ def get_product_suggestions(keyword):
         cursor.execute("""
             SELECT DISTINCT p.name, p.brand, p.category
             FROM products p
-            WHERE p.name LIKE ? 
+            WHERE p.name ILIKE %s 
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
                 WHERE dp.product_id = p.id 
@@ -264,7 +255,7 @@ def get_category_suggestions(keyword):
         cursor.execute("""
             SELECT DISTINCT p.category
             FROM products p
-            WHERE p.category LIKE ? 
+            WHERE p.category ILIKE %s 
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
                 WHERE dp.product_id = p.id 

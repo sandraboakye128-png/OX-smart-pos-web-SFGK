@@ -4,32 +4,33 @@ def get_summary_multi(period="daily"):
     conn = get_connection()
     cursor = conn.cursor()
 
-    query_map = {
-        "daily": "DATE(s.date)=DATE('now','localtime')",
-        "weekly": "DATE(s.date) >= DATE('now','-6 days')",
-        "monthly": "strftime('%m', s.date)=strftime('%m','now')",
-        "yearly": "strftime('%Y', s.date)=strftime('%Y','now')"
-    }
-    where_clause = query_map.get(period, "1=1")
+    if period == "weekly":
+        date_filter = "s.date >= CURRENT_DATE - INTERVAL '6 days'"
+    elif period == "monthly":
+        date_filter = "EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)"
+    elif period == "yearly":
+        date_filter = "EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)"
+    else:  # daily
+        date_filter = "s.date::date = CURRENT_DATE"
 
     # Total sales, discount, and net profit from sales table
     cursor.execute(f"""
         SELECT 
-            IFNULL(SUM(s.total),0),
-            IFNULL(SUM(s.discount),0),
-            IFNULL(SUM(s.profit),0)
+            COALESCE(SUM(s.total), 0),
+            COALESCE(SUM(s.discount), 0),
+            COALESCE(SUM(s.profit), 0)
         FROM sales s
-        WHERE {where_clause}
+        WHERE {date_filter}
         AND s.reversed = 0
     """)
     total_sales, total_discount, total_profit = cursor.fetchone()
 
     # Items sold from sales_items
     cursor.execute(f"""
-        SELECT IFNULL(SUM(si.quantity),0)
+        SELECT COALESCE(SUM(si.quantity), 0)
         FROM sales_items si
         JOIN sales s ON si.sale_id = s.id
-        WHERE {where_clause}
+        WHERE {date_filter}
         AND s.reversed = 0
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
@@ -48,13 +49,14 @@ def get_top_products_multi(period="daily", limit=10):
     conn = get_connection()
     cursor = conn.cursor()
 
-    query_map = {
-        "daily": "DATE(s.date)=DATE('now','localtime')",
-        "weekly": "DATE(s.date) >= DATE('now','-6 days')",
-        "monthly": "strftime('%m', s.date)=strftime('%m','now')",
-        "yearly": "strftime('%Y', s.date)=strftime('%Y','now')"
-    }
-    where_clause = query_map.get(period, "1=1")
+    if period == "weekly":
+        date_filter = "s.date >= CURRENT_DATE - INTERVAL '6 days'"
+    elif period == "monthly":
+        date_filter = "EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)"
+    elif period == "yearly":
+        date_filter = "EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)"
+    else:  # daily
+        date_filter = "s.date::date = CURRENT_DATE"
 
     cursor.execute(f"""
         SELECT 
@@ -62,7 +64,7 @@ def get_top_products_multi(period="daily", limit=10):
         FROM sales_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON p.id = si.product_id
-        WHERE {where_clause}
+        WHERE {date_filter}
         AND s.reversed = 0
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
@@ -70,9 +72,9 @@ def get_top_products_multi(period="daily", limit=10):
             AND dp.action = 'PERMANENTLY DELETED' 
             AND dp.source = 'product'
         )
-        GROUP BY si.product_id
+        GROUP BY si.product_id, p.name, p.brand, p.category
         ORDER BY qty DESC
-        LIMIT ?
+        LIMIT %s
     """, (limit,))
 
     data = cursor.fetchall()
@@ -85,20 +87,19 @@ def get_sales_trend_multi(period="daily"):
     cursor = conn.cursor()
 
     if period == "daily":
-        group = "strftime('%H', s.date)"
+        group_expr = "EXTRACT(HOUR FROM s.date)"
     elif period == "weekly":
-        group = "strftime('%w', s.date)"
+        group_expr = "EXTRACT(DOW FROM s.date)"   # 0=Sunday
     elif period == "monthly":
-        group = "strftime('%d', s.date)"
-    else:
-        group = "strftime('%m', s.date)"
+        group_expr = "EXTRACT(DAY FROM s.date)"
+    else:  # yearly
+        group_expr = "EXTRACT(MONTH FROM s.date)"
 
-    # Sales total and net profit both from sales table
     cursor.execute(f"""
         SELECT 
-            {group} as label,
-            IFNULL(SUM(s.total),0) as sales_total,
-            IFNULL(SUM(s.profit),0) as profit_total
+            {group_expr} as label,
+            COALESCE(SUM(s.total), 0) as sales_total,
+            COALESCE(SUM(s.profit), 0) as profit_total
         FROM sales s
         WHERE s.reversed = 0
         GROUP BY label

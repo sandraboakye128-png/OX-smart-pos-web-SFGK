@@ -1,20 +1,17 @@
 from database.db import get_connection
 from datetime import date
 
-
 # ----------------- TODAY'S TOTAL SALES -----------------
 def get_today_sales(selected_date=None):
     conn = get_connection()
     cursor = conn.cursor()
-
     dt = selected_date or date.today()
-    dt = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+    dt = dt.isoformat()
 
-    # Only include sales that have at least one item not from a permanently deleted product
     cursor.execute("""
-        SELECT IFNULL(SUM(s.total), 0)
+        SELECT COALESCE(SUM(s.total), 0)
         FROM sales s
-        WHERE DATE(s.date)=?
+        WHERE s.date::date = %s
         AND s.reversed = 0
         AND EXISTS (
             SELECT 1 FROM sales_items si
@@ -28,7 +25,6 @@ def get_today_sales(selected_date=None):
             )
         )
     """, (dt,))
-
     total = cursor.fetchone()[0]
     conn.close()
     return total
@@ -38,14 +34,13 @@ def get_today_sales(selected_date=None):
 def get_today_profit(selected_date=None):
     conn = get_connection()
     cursor = conn.cursor()
-
     dt = selected_date or date.today()
-    dt = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+    dt = dt.isoformat()
 
     cursor.execute("""
-        SELECT IFNULL(SUM(s.profit), 0)
+        SELECT COALESCE(SUM(s.profit), 0)
         FROM sales s
-        WHERE DATE(s.date)=?
+        WHERE s.date::date = %s
         AND s.reversed = 0
         AND EXISTS (
             SELECT 1 FROM sales_items si
@@ -59,7 +54,6 @@ def get_today_profit(selected_date=None):
             )
         )
     """, (dt,))
-
     profit = cursor.fetchone()[0]
     conn.close()
     return profit
@@ -69,7 +63,6 @@ def get_today_profit(selected_date=None):
 def get_total_products():
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute("""
         SELECT COUNT(*) 
         FROM products p
@@ -81,7 +74,6 @@ def get_total_products():
         )
     """)
     total = cursor.fetchone()[0]
-
     conn.close()
     return total
 
@@ -90,11 +82,10 @@ def get_total_products():
 def get_low_stock_products(threshold=10):
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute("""
         SELECT p.name, p.brand, p.category, p.stock
         FROM products p
-        WHERE p.stock <= ?
+        WHERE p.stock <= %s
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
@@ -103,7 +94,6 @@ def get_low_stock_products(threshold=10):
         )
         ORDER BY p.stock ASC
     """, (threshold,))
-
     products = cursor.fetchall()
     conn.close()
     return products
@@ -113,11 +103,10 @@ def get_low_stock_products(threshold=10):
 def get_weekly_sales():
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute("""
-        SELECT DATE(s.date), IFNULL(SUM(s.total), 0)
+        SELECT s.date::date, COALESCE(SUM(s.total), 0)
         FROM sales s
-        WHERE DATE(s.date) >= DATE('now','-6 day')
+        WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
         AND s.reversed = 0
         AND EXISTS (
             SELECT 1 FROM sales_items si
@@ -130,10 +119,9 @@ def get_weekly_sales():
                 AND dp.source = 'product'
             )
         )
-        GROUP BY DATE(s.date)
-        ORDER BY DATE(s.date)
+        GROUP BY s.date::date
+        ORDER BY s.date::date
     """)
-
     data = cursor.fetchall()
     conn.close()
     return data
@@ -143,7 +131,6 @@ def get_weekly_sales():
 def get_top_products(selected_date=None, limit=5):
     conn = get_connection()
     cursor = conn.cursor()
-
     params = []
     query = """
         SELECT p.name, p.brand, p.category, SUM(si.quantity) as qty
@@ -158,15 +145,12 @@ def get_top_products(selected_date=None, limit=5):
             AND dp.source = 'product'
         )
     """
-
     if selected_date:
-        dt = selected_date.isoformat() if hasattr(selected_date, "isoformat") else str(selected_date)
-        query += " AND DATE(s.date)=?"
+        dt = selected_date.isoformat()
+        query += " AND s.date::date = %s"
         params.append(dt)
-
-    query += " GROUP BY si.product_id ORDER BY qty DESC LIMIT ?"
+    query += " GROUP BY si.product_id, p.name, p.brand, p.category ORDER BY qty DESC LIMIT %s"
     params.append(limit)
-
     cursor.execute(query, params)
     products = cursor.fetchall()
     conn.close()
@@ -177,16 +161,15 @@ def get_top_products(selected_date=None, limit=5):
 def get_sales_history(selected_date=None):
     conn = get_connection()
     cursor = conn.cursor()
-
     if selected_date:
-        dt = selected_date.isoformat() if hasattr(selected_date, "isoformat") else str(selected_date)
+        dt = selected_date.isoformat()
         cursor.execute("""
-            SELECT DATE(s.date),
-                   IFNULL(SUM(s.total), 0) AS total_sales,
-                   IFNULL(SUM(s.profit), 0) AS total_profit,
-                   IFNULL(SUM(s.discount), 0) AS total_discount
+            SELECT s.date::date,
+                   COALESCE(SUM(s.total), 0) AS total_sales,
+                   COALESCE(SUM(s.profit), 0) AS total_profit,
+                   COALESCE(SUM(s.discount), 0) AS total_discount
             FROM sales s
-            WHERE DATE(s.date) = ?
+            WHERE s.date::date = %s
             AND s.reversed = 0
             AND EXISTS (
                 SELECT 1 FROM sales_items si
@@ -199,14 +182,14 @@ def get_sales_history(selected_date=None):
                     AND dp.source = 'product'
                 )
             )
-            GROUP BY DATE(s.date)
+            GROUP BY s.date::date
         """, (dt,))
     else:
         cursor.execute("""
-            SELECT DATE(s.date),
-                   IFNULL(SUM(s.total), 0) AS total_sales,
-                   IFNULL(SUM(s.profit), 0) AS total_profit,
-                   IFNULL(SUM(s.discount), 0) AS total_discount
+            SELECT s.date::date,
+                   COALESCE(SUM(s.total), 0) AS total_sales,
+                   COALESCE(SUM(s.profit), 0) AS total_profit,
+                   COALESCE(SUM(s.discount), 0) AS total_discount
             FROM sales s
             WHERE s.reversed = 0
             AND EXISTS (
@@ -220,11 +203,9 @@ def get_sales_history(selected_date=None):
                     AND dp.source = 'product'
                 )
             )
-            GROUP BY DATE(s.date)
-            ORDER BY DATE(s.date) DESC
+            GROUP BY s.date::date
+            ORDER BY s.date::date DESC
         """)
-
     rows = cursor.fetchall()
     conn.close()
-    # Convert to list of tuples (date, total_sales, total_profit, total_discount)
     return [(r[0], r[1], r[2], r[3]) for r in rows]

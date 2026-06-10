@@ -3,165 +3,109 @@ from datetime import datetime
 
 # ---------------- RECALCULATE STOCK ----------------
 def recalc_stock(cursor, product_id):
-    """Recalculate stock for a product based on all batches with remaining_quantity > 0"""
     cursor.execute("""
-        SELECT SUM(remaining_quantity)
+        SELECT COALESCE(SUM(remaining_quantity), 0)
         FROM purchase_batches
-        WHERE product_id=? AND remaining_quantity > 0
+        WHERE product_id = %s AND remaining_quantity > 0
     """, (product_id,))
     stock = cursor.fetchone()[0] or 0
-    cursor.execute("UPDATE products SET stock=? WHERE id=?", (stock, product_id))
+    cursor.execute("UPDATE products SET stock = %s WHERE id = %s", (stock, product_id))
     return stock
 
 # ---------------- DELETE SINGLE BATCH (KEEPS HISTORY) ----------------
 def delete_batch(batch_id):
-    """Delete batch but keep sales history for restoration."""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Get batch details
-    cursor.execute("SELECT product_id, quantity, remaining_quantity, cost_price, selling_price, discount FROM purchase_batches WHERE id=?", (batch_id,))
+    cursor.execute("SELECT product_id, quantity, remaining_quantity, cost_price, selling_price, discount FROM purchase_batches WHERE id = %s", (batch_id,))
     batch = cursor.fetchone()
     if not batch:
         conn.close()
         return False
-    
     product_id, batch_qty, batch_rem, cost_price, selling_price, discount = batch
 
-    # Get product details
-    cursor.execute("SELECT name, brand, category FROM products WHERE id=?", (product_id,))
+    cursor.execute("SELECT name, brand, category FROM products WHERE id = %s", (product_id,))
     product = cursor.fetchone()
     if product:
         cursor.execute("""
             INSERT INTO deleted_products
             (name, brand, cost_price, selling_price, stock, category, discount, action, source, batch_id, batch_quantity, batch_remaining, product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (product[0], product[1], cost_price, selling_price, batch_rem, product[2], discount, "BATCH DELETED", "batch", batch_id, batch_qty, batch_rem, product_id))
 
-    # Delete the batch
-    cursor.execute("DELETE FROM purchase_batches WHERE id=?", (batch_id,))
-    
-    # Recalculate stock for the product
+    cursor.execute("DELETE FROM purchase_batches WHERE id = %s", (batch_id,))
     new_stock = recalc_stock(cursor, product_id)
     conn.commit()
     conn.close()
-    print(f"Batch {batch_id} deleted. Product {product_id} new stock: {new_stock}")
     return True
 
 # ---------------- DELETE SINGLE BATCH (CLEAN EVERYTHING) ----------------
 def delete_batch_clean_all(batch_id):
-    """
-    Delete ONLY the selected batch AND its associated sales history.
-    Does NOT affect other batches of the same product.
-    CANNOT be restored!
-    """
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Get batch details
-    cursor.execute("SELECT product_id, quantity, remaining_quantity, cost_price, selling_price, discount FROM purchase_batches WHERE id=?", (batch_id,))
+    cursor.execute("SELECT product_id, quantity, remaining_quantity, cost_price, selling_price, discount FROM purchase_batches WHERE id = %s", (batch_id,))
     batch = cursor.fetchone()
     if not batch:
         conn.close()
         return False
-    
     product_id, batch_qty, batch_rem, cost_price, selling_price, discount = batch
 
-    # Get product details
-    cursor.execute("SELECT name, brand, category FROM products WHERE id=?", (product_id,))
+    cursor.execute("SELECT name, brand, category FROM products WHERE id = %s", (product_id,))
     product = cursor.fetchone()
     if product:
         cursor.execute("""
             INSERT INTO deleted_products
             (name, brand, cost_price, selling_price, stock, category, discount, action, source, batch_id, batch_quantity, batch_remaining, product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (product[0], product[1], cost_price, selling_price, batch_rem, product[2], discount, "PERMANENTLY DELETED", "batch", batch_id, batch_qty, batch_rem, product_id))
 
-    # Delete ONLY sales_items for this specific batch
-    cursor.execute("DELETE FROM sales_items WHERE batch_id=?", (batch_id,))
-    
-    # Delete ONLY this batch
-    cursor.execute("DELETE FROM purchase_batches WHERE id=?", (batch_id,))
-    
-    # Recalculate stock for the product (other batches remain)
+    cursor.execute("DELETE FROM sales_items WHERE batch_id = %s", (batch_id,))
+    cursor.execute("DELETE FROM purchase_batches WHERE id = %s", (batch_id,))
     new_stock = recalc_stock(cursor, product_id)
     conn.commit()
     conn.close()
-    print(f"Batch {batch_id} permanently deleted. Product {product_id} new stock: {new_stock}")
     return True
 
 # ---------------- DELETE FULL PRODUCT (KEEPS HISTORY) ----------------
 def delete_product_keep_history(product_id):
-    """Delete product but keep sales and purchase history for restoration."""
     conn = get_connection()
     cursor = conn.cursor()
-
-    # Get product details
-    cursor.execute(
-        "SELECT name, brand, cost_price, selling_price, stock, category, discount "
-        "FROM products WHERE id=?",
-        (product_id,)
-    )
+    cursor.execute("SELECT name, brand, cost_price, selling_price, stock, category, discount FROM products WHERE id = %s", (product_id,))
     product = cursor.fetchone()
-    
     if product:
-        # Archive each batch individually before deleting
-        cursor.execute("""
-            SELECT id, quantity, remaining_quantity, cost_price, selling_price, discount
-            FROM purchase_batches WHERE product_id=?
-        """, (product_id,))
+        cursor.execute("SELECT id, quantity, remaining_quantity, cost_price, selling_price, discount FROM purchase_batches WHERE product_id = %s", (product_id,))
         batches = cursor.fetchall()
-        
         for batch in batches:
             batch_id, batch_qty, batch_rem, cost_price, selling_price, discount = batch
             cursor.execute("""
                 INSERT INTO deleted_products
                 (name, brand, cost_price, selling_price, stock, category, discount, action, source, batch_id, batch_quantity, batch_remaining, product_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (product[0], product[1], cost_price, selling_price, batch_rem, product[2], discount, "BATCH DELETED", "product_delete", batch_id, batch_qty, batch_rem, product_id))
-        
-        # Archive the product itself
         cursor.execute("""
             INSERT INTO deleted_products 
             (name, brand, cost_price, selling_price, stock, category, discount, action, source, product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (*product, "PRODUCT DELETED", "product", product_id))
-
-    # Delete all batches and the product
-    cursor.execute("DELETE FROM purchase_batches WHERE product_id=?", (product_id,))
-    cursor.execute("DELETE FROM products WHERE id=?", (product_id,))
-
+    cursor.execute("DELETE FROM purchase_batches WHERE product_id = %s", (product_id,))
+    cursor.execute("DELETE FROM products WHERE id = %s", (product_id,))
     conn.commit()
     conn.close()
 
 # ---------------- DELETE PRODUCT (CLEAN EVERYTHING) ----------------
 def delete_product_clean_all(product_id):
-    """
-    Delete product AND all associated history (sales, purchases).
-    CANNOT be restored!
-    """
     conn = get_connection()
     cursor = conn.cursor()
-
-    # Get product details for archive (mark as PERMANENTLY DELETED)
-    cursor.execute(
-        "SELECT name, brand, cost_price, selling_price, stock, category, discount "
-        "FROM products WHERE id=?",
-        (product_id,)
-    )
+    cursor.execute("SELECT name, brand, cost_price, selling_price, stock, category, discount FROM products WHERE id = %s", (product_id,))
     product = cursor.fetchone()
     if product:
         cursor.execute("""
             INSERT INTO deleted_products 
             (name, brand, cost_price, selling_price, stock, category, discount, action, source, product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (*product, "PERMANENTLY DELETED", "product", product_id))
-
-    # Delete ALL related data
-    cursor.execute("DELETE FROM purchase_batches WHERE product_id=?", (product_id,))
-    cursor.execute("DELETE FROM sales_items WHERE product_id=?", (product_id,))
-    cursor.execute("DELETE FROM products WHERE id=?", (product_id,))
-
+    cursor.execute("DELETE FROM purchase_batches WHERE product_id = %s", (product_id,))
+    cursor.execute("DELETE FROM sales_items WHERE product_id = %s", (product_id,))
+    cursor.execute("DELETE FROM products WHERE id = %s", (product_id,))
     conn.commit()
     conn.close()
 
@@ -171,39 +115,32 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     cost_price = float(cost_price)
     discount = float(discount or 0)
     selling_price = float(selling_price)
-
     conn = get_connection()
     try:
         cursor = conn.cursor()
-
         cursor.execute("""
             SELECT pb.product_id, pb.quantity, pb.remaining_quantity, pb.cost_price, pb.selling_price, pb.discount,
                    p.name, p.brand, p.category
             FROM purchase_batches pb
             JOIN products p ON p.id = pb.product_id
-            WHERE pb.id=?
+            WHERE pb.id = %s
         """, (batch_id,))
         old = cursor.fetchone()
         if not old:
             raise ValueError("Batch not found")
-
         (product_id, old_qty, old_rem, old_cost, old_selling, old_disc,
          old_name, old_brand, old_category) = old
-
         cursor.execute("""
             INSERT INTO deleted_products
             (name, brand, cost_price, selling_price, stock, category, discount, action, source, batch_id, batch_quantity, batch_remaining, product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (old_name, old_brand, old_cost, old_selling, old_rem, old_category, old_disc, "UPDATED", "product", batch_id, old_qty, old_rem, product_id))
-
         cursor.execute("""
             UPDATE purchase_batches
-            SET quantity=?, remaining_quantity=?, cost_price=?, selling_price=?, discount=?, date=?, action=?
-            WHERE id=?
+            SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s
+            WHERE id = %s
         """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", batch_id))
-
-        cursor.execute("UPDATE products SET category=? WHERE id=?", (category, product_id))
-
+        cursor.execute("UPDATE products SET category = %s WHERE id = %s", (category, product_id))
         recalc_stock(cursor, product_id)
         conn.commit()
     except Exception as e:
@@ -223,7 +160,6 @@ def get_all_products():
     """)
     rows = cursor.fetchall()
     conn.close()
-
     products = []
     for r in rows:
         products.append({
@@ -257,14 +193,13 @@ def restore_archive(archive_id):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM deleted_products WHERE id=?", (archive_id,))
+        cursor.execute("SELECT * FROM deleted_products WHERE id = %s", (archive_id,))
         row = cursor.fetchone()
         if not row:
             raise ValueError("Archive record not found")
-
-        columns = [col[1] for col in cursor.execute("PRAGMA table_info(deleted_products)")]
+        # Get column names (PostgreSQL: use cursor.description)
+        columns = [desc[0] for desc in cursor.description]
         record = dict(zip(columns, row))
-
         name = record['name']
         brand = record['brand']
         category = record['category']
@@ -279,135 +214,107 @@ def restore_archive(archive_id):
         batch_rem = record.get('batch_remaining')
         product_id = record.get('product_id')
         deleted_action = record.get('action')
-
-        # Check if this is a permanent deletion - cannot restore
         if deleted_action == "PERMANENTLY DELETED":
             raise ValueError("This item was permanently deleted and cannot be restored!")
-
-        # ------------------------------------------------------------
-        # CASE 1: Restore a single batch (from batch deletion with history)
-        # ------------------------------------------------------------
+        # Restore logic (same as before, but using PostgreSQL syntax)
         if source == 'batch' and batch_id:
-            # Check if product still exists
-            cursor.execute("SELECT id FROM products WHERE id=?", (product_id,))
+            cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
             prod = cursor.fetchone()
             if not prod:
-                # Recreate the product first
                 cursor.execute("""
                     INSERT INTO products (name, brand, cost_price, selling_price, stock, category, discount)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                 """, (name, brand, cost_price, selling_price, 0, category, discount))
-                product_id = cursor.lastrowid
-            
-            # Restore the batch
+                product_id = cursor.fetchone()[0]
             cursor.execute("""
                 INSERT INTO purchase_batches
                 (id, product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (batch_id, product_id, batch_qty, batch_rem, cost_price, selling_price, discount, datetime.now(), "restored"))
             recalc_stock(cursor, product_id)
-
-        # ------------------------------------------------------------
-        # CASE 2: Restore from product deletion (restore all batches)
-        # ------------------------------------------------------------
         elif source == 'product_delete' and product_id:
-            # Check if product already exists
-            cursor.execute("SELECT id FROM products WHERE name=? AND brand=?", (name, brand))
+            cursor.execute("SELECT id FROM products WHERE name = %s AND brand = %s", (name, brand))
             prod = cursor.fetchone()
             if prod:
                 product_id = prod[0]
             else:
-                # Recreate the product
                 cursor.execute("""
                     INSERT INTO products (id, name, brand, cost_price, selling_price, stock, category, discount)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (product_id, name, brand, cost_price, selling_price, 0, category, discount))
-            
-            # Find all batches for this product in deleted_products
             cursor.execute("""
                 SELECT batch_id, batch_quantity, batch_remaining, cost_price, selling_price, discount
                 FROM deleted_products
-                WHERE product_id=? AND source='product_delete' AND action='BATCH DELETED'
+                WHERE product_id = %s AND source = 'product_delete' AND action = 'BATCH DELETED'
             """, (product_id,))
             batches = cursor.fetchall()
-            
             for batch in batches:
                 old_batch_id, old_qty, old_rem, old_cost, old_selling, old_disc = batch
                 cursor.execute("""
-                    INSERT OR IGNORE INTO purchase_batches
+                    INSERT INTO purchase_batches
                     (id, product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (old_batch_id, product_id, old_qty, old_rem, old_cost, old_selling, old_disc, datetime.now(), "restored"))
-            
             recalc_stock(cursor, product_id)
-
-        # ------------------------------------------------------------
-        # CASE 3: Restore from updated batch
-        # ------------------------------------------------------------
         elif action == "UPDATED" and batch_id:
-            cursor.execute("SELECT id FROM purchase_batches WHERE id=?", (batch_id,))
+            cursor.execute("SELECT id FROM purchase_batches WHERE id = %s", (batch_id,))
             if cursor.fetchone():
                 cursor.execute("""
                     UPDATE purchase_batches
-                    SET quantity=?, remaining_quantity=?, cost_price=?, selling_price=?, discount=?, date=?, action=?
-                    WHERE id=?
+                    SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s
+                    WHERE id = %s
                 """, (batch_qty, batch_rem, cost_price, selling_price, discount, datetime.now(), "restored", batch_id))
                 if product_id:
                     recalc_stock(cursor, product_id)
             else:
-                # Batch missing - restore it
                 if not product_id:
-                    cursor.execute("SELECT id FROM products WHERE name=? AND brand=?", (name, brand))
+                    cursor.execute("SELECT id FROM products WHERE name = %s AND brand = %s", (name, brand))
                     prod = cursor.fetchone()
                     if prod:
                         product_id = prod[0]
                     else:
                         cursor.execute("""
                             INSERT INTO products (name, brand, cost_price, selling_price, stock, category, discount)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id
                         """, (name, brand, cost_price, selling_price, 0, category, discount))
-                        product_id = cursor.lastrowid
+                        product_id = cursor.fetchone()[0]
                 cursor.execute("""
                     INSERT INTO purchase_batches
                     (id, product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (batch_id, product_id, batch_qty, batch_rem, cost_price, selling_price, discount, datetime.now(), "restored"))
                 recalc_stock(cursor, product_id)
-
-        # ------------------------------------------------------------
-        # CASE 4: Regular product deletion (old format)
-        # ------------------------------------------------------------
         elif source == 'product' and deleted_action == "DELETED":
-            cursor.execute("SELECT id FROM products WHERE name=? AND brand=?", (name, brand))
+            cursor.execute("SELECT id FROM products WHERE name = %s AND brand = %s", (name, brand))
             prod = cursor.fetchone()
             if prod:
                 product_id = prod[0]
                 cursor.execute("""
                     INSERT INTO purchase_batches
                     (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (product_id, stock, stock, cost_price, selling_price, discount, datetime.now(), "restored"))
                 recalc_stock(cursor, product_id)
             else:
                 cursor.execute("""
                     INSERT INTO products
                     (name, brand, cost_price, selling_price, stock, category, discount)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                 """, (name, brand, cost_price, selling_price, 0, category, discount))
-                product_id = cursor.lastrowid
+                product_id = cursor.fetchone()[0]
                 cursor.execute("""
                     INSERT INTO purchase_batches
                     (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (product_id, stock, stock, cost_price, selling_price, discount, datetime.now(), "restored"))
                 recalc_stock(cursor, product_id)
-
-        # Delete the archive record(s) for this restoration
         if source == 'product_delete' and product_id:
-            cursor.execute("DELETE FROM deleted_products WHERE product_id=? AND source='product_delete'", (product_id,))
+            cursor.execute("DELETE FROM deleted_products WHERE product_id = %s AND source = 'product_delete'", (product_id,))
         else:
-            cursor.execute("DELETE FROM deleted_products WHERE id=?", (archive_id,))
-        
+            cursor.execute("DELETE FROM deleted_products WHERE id = %s", (archive_id,))
         conn.commit()
         return True
     except Exception as e:
