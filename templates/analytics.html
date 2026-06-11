@@ -7,9 +7,25 @@
         <h1 class="text-3xl font-bold text-indigo-600">📊 Analytics Dashboard</h1>
         <div class="flex gap-2">
             <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
-            <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Week</button>
-            <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Month</button>
-            <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Year</button>
+            <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
+            <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
+            <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
+            <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
+        </div>
+    </div>
+
+    <!-- Date Range Picker -->
+    <div class="bg-white rounded-xl shadow-md p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">From Date</label>
+                <input type="date" id="startDate" class="border rounded-lg px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">To Date</label>
+                <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
+            </div>
+            <button id="applyCustomRange" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Range</button>
         </div>
     </div>
 
@@ -51,6 +67,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let currentPeriod = 'daily';
+    let customStartDate = null;
+    let customEndDate = null;
     let trendChart = null;
 
     // Helper: format currency
@@ -58,9 +76,65 @@
         return '₵' + amount.toFixed(2);
     }
 
+    // Get date range based on period
+    function getDateRange() {
+        const now = new Date();
+        let startDate = null;
+        let endDate = null;
+        
+        if (customStartDate && customEndDate) {
+            return { start_date: customStartDate, end_date: customEndDate };
+        }
+        
+        switch(currentPeriod) {
+            case 'daily':
+                startDate = new Date(now);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'weekly':
+                // Start of current week (Sunday)
+                startDate = new Date(now);
+                startDate.setDate(now.getDate() - now.getDay());
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'monthly':
+                // Start of current month
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'yearly':
+                // Start of current year
+                startDate = new Date(now.getFullYear(), 0, 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'all':
+                startDate = null;
+                endDate = null;
+                break;
+        }
+        
+        return { 
+            start_date: startDate ? startDate.toISOString().split('T')[0] : null,
+            end_date: endDate ? endDate.toISOString().split('T')[0] : null
+        };
+    }
+
     // Load summary data
     async function loadSummary() {
-        const res = await fetch(`/api/analytics/summary?period=${currentPeriod}`);
+        const range = getDateRange();
+        let url = `/api/analytics/summary?period=${currentPeriod}`;
+        if (range.start_date && range.end_date) {
+            url = `/api/analytics/summary?start_date=${range.start_date}&end_date=${range.end_date}`;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         document.getElementById('itemsSold').innerText = data.items_sold;
         document.getElementById('revenue').innerText = formatMoney(data.total);
@@ -70,7 +144,12 @@
 
     // Load trend data and update chart
     async function loadTrend() {
-        const res = await fetch(`/api/analytics/trend?period=${currentPeriod}`);
+        const range = getDateRange();
+        let url = `/api/analytics/trend?period=${currentPeriod}`;
+        if (range.start_date && range.end_date) {
+            url = `/api/analytics/trend?start_date=${range.start_date}&end_date=${range.end_date}`;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         const labels = data.map(item => item.label);
         const sales = data.map(item => item.sales);
@@ -121,7 +200,12 @@
 
     // Load top products
     async function loadTopProducts() {
-        const res = await fetch(`/api/analytics/top_products?period=${currentPeriod}&limit=10`);
+        const range = getDateRange();
+        let url = `/api/analytics/top_products?period=${currentPeriod}&limit=10`;
+        if (range.start_date && range.end_date) {
+            url = `/api/analytics/top_products?start_date=${range.start_date}&end_date=${range.end_date}&limit=10`;
+        }
+        const res = await fetch(url);
         const products = await res.json();
         const container = document.getElementById('topProductsList');
         if (products.length === 0) {
@@ -131,8 +215,16 @@
         container.innerHTML = '';
         products.forEach(p => {
             const div = document.createElement('div');
-            div.className = 'border-b pb-2';
-            div.innerHTML = `<span class="font-medium">• ${p.name} (${p.brand} | ${p.category})</span> — <span class="font-bold">${p.quantity} sold</span>`;
+            div.className = 'border-b pb-2 flex justify-between items-center';
+            div.innerHTML = `
+                <div>
+                    <span class="font-medium">${p.name}</span>
+                    <span class="text-sm text-gray-500"> (${p.brand || 'No brand'} | ${p.category || 'No category'})</span>
+                </div>
+                <div>
+                    <span class="font-bold text-indigo-600">${p.quantity} sold</span>
+                </div>
+            `;
             container.appendChild(div);
         });
     }
@@ -148,9 +240,37 @@
     document.querySelectorAll('.period-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             currentPeriod = btn.getAttribute('data-period');
+            customStartDate = null;
+            customEndDate = null;
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
             reloadAnalytics();
         });
     });
+
+    // Custom date range handler
+    document.getElementById('applyCustomRange').addEventListener('click', () => {
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        if (startDate && endDate) {
+            customStartDate = startDate;
+            customEndDate = endDate;
+            currentPeriod = 'custom';
+            reloadAnalytics();
+        } else {
+            alert('Please select both start and end dates.');
+        }
+    });
+
+    // Set default date range to this week
+    function setDefaultDates() {
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        document.getElementById('startDate').value = startOfWeek.toISOString().split('T')[0];
+        document.getElementById('endDate').value = now.toISOString().split('T')[0];
+    }
+    setDefaultDates();
 
     // Initial load
     reloadAnalytics();

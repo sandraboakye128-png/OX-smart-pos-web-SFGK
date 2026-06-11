@@ -291,6 +291,7 @@
 
     // ---------- Payment Modal Functions ----------
     function selectPayment(method, event) {
+        console.log("✅ Payment method selected:", method);
         selectedPaymentMethod = method;
         selectedChequeNumber = null;
         document.getElementById('chequeInputContainer').classList.add('hidden');
@@ -305,6 +306,7 @@
     }
 
     function showChequeInput(event) {
+        console.log("✅ Cheque payment selected");
         selectedPaymentMethod = 'cheque';
         document.getElementById('chequeInputContainer').classList.remove('hidden');
         
@@ -346,6 +348,9 @@
     async function executeSale() {
         if (!pendingSaleCallback) return;
         
+        console.log("🚀 Executing sale with payment method:", selectedPaymentMethod);
+        console.log("🚀 Cheque number:", selectedChequeNumber);
+        
         const cartItems = pendingSaleCallback.cart.map(item => ({ 
             product: item.product, 
             qty: item.qty, 
@@ -367,6 +372,8 @@
             cheque_number: selectedChequeNumber
         };
         
+        console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
+        
         const res = await fetch('/api/sales/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -374,6 +381,8 @@
         });
         
         const data = await res.json();
+        console.log("📥 Response data:", data);
+        
         if (data.success) {
             lastSale = data;
             document.getElementById('receiptPreview').innerHTML = `<pre class="whitespace-pre-wrap">${data.receipt_text}</pre>`;
@@ -665,8 +674,10 @@
         document.getElementById('paymentModal').classList.remove('hidden');
     });
 
-    // Confirm Payment Button - FIXED TRIAL BEHAVIOR
+    // Confirm Payment Button - FIXED with proper payment capture
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
+        console.log("🔘 Confirm button clicked. Current payment method:", selectedPaymentMethod);
+        
         if (!selectedPaymentMethod) {
             alert('Please select a payment method.');
             return;
@@ -674,12 +685,15 @@
         
         if (selectedPaymentMethod === 'cheque') {
             const chequeNumber = document.getElementById('chequeNumber').value.trim();
+            console.log("💰 Cheque number entered:", chequeNumber);
             if (!chequeNumber) {
                 alert('Please enter cheque number.');
                 return;
             }
             selectedChequeNumber = chequeNumber;
         }
+        
+        console.log("✅ Final payment data - Method:", selectedPaymentMethod, "Cheque:", selectedChequeNumber);
         
         // Close payment modal
         closePaymentModal();
@@ -710,6 +724,7 @@
     });
 
     document.getElementById('cancelPaymentBtn').addEventListener('click', () => {
+        console.log("❌ Payment cancelled");
         closePaymentModal();
         pendingSaleCallback = null;
     });

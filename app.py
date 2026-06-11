@@ -763,7 +763,7 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API (PostgreSQL version with payment info) =====================
+# ===================== TODAY'S SALES API =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
@@ -867,12 +867,12 @@ def api_today_sales():
             'subtotal': float(r[6]),
             'discount': float(r[7]),
             'total': float(r[8]),
-            'profit': float(r[9]),       # gross profit per item
+            'profit': float(r[9]),
             'batch_id': r[10],
             'cost_price': float(r[11]),
             'sale_date': r[12].isoformat() if hasattr(r[12], 'isoformat') else str(r[12]),
             'is_deleted_batch': bool(r[13]),
-            'net_profit': float(r[14]),   # net profit for the sale
+            'net_profit': float(r[14]),
             'payment_method': r[15] if len(r) > 15 else 'cash',
             'cheque_number': r[16] if len(r) > 16 else None
         })
@@ -950,12 +950,21 @@ def api_today_sales_pdf():
                      download_name=f"SalesReport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== ANALYTICS API =====================
+# ===================== ANALYTICS API (UPDATED WITH DATE RANGES) =====================
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
     period = request.args.get('period', 'daily')
-    items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(period)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    
+    if start_date and end_date:
+        items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(
+            period, start_date, end_date
+        )
+    else:
+        items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(period)
+    
     return jsonify({
         'items_sold': items_sold,
         'subtotal': total_sales,
@@ -968,15 +977,29 @@ def api_analytics_summary():
 @login_required
 def api_analytics_trend():
     period = request.args.get('period', 'daily')
-    trend = get_sales_trend_multi(period)
-    return jsonify([{'label': t[0], 'sales': t[1], 'profit': t[2]} for t in trend])
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    
+    if start_date and end_date:
+        trend = get_sales_trend_multi(period, start_date, end_date)
+    else:
+        trend = get_sales_trend_multi(period)
+    
+    return jsonify(trend)
 
 @app.route('/api/analytics/top_products', methods=['GET'])
 @login_required
 def api_analytics_top_products():
     period = request.args.get('period', 'daily')
     limit = int(request.args.get('limit', 10))
-    products = get_top_products_multi(period, limit)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    
+    if start_date and end_date:
+        products = get_top_products_multi(period, limit, start_date, end_date)
+    else:
+        products = get_top_products_multi(period, limit)
+    
     result = [{'name': r[0], 'brand': r[1] or '', 'category': r[2] or '', 'quantity': int(r[3])} for r in products]
     return jsonify(result)
 
