@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Two-column layout (unchanged) -->
+    <!-- Two-column layout -->
     <div class="flex flex-wrap -mx-4">
         <!-- LEFT PANEL: Products & Form -->
         <div class="w-full lg:w-1/2 px-4 mb-6">
@@ -144,7 +144,7 @@
     // Payment handling variables
     let selectedPaymentMethod = null;
     let selectedChequeNumber = null;
-    let pendingSaleData = null;
+    let pendingSaleCallback = null;
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -173,7 +173,7 @@
         }
     }
 
-    // Show license modal (similar to desktop popup)
+    // Show license modal and return promise
     function showLicenseModal(allowCancel = true) {
         return new Promise(async (resolve) => {
             const modal = document.getElementById('licenseModal');
@@ -183,13 +183,9 @@
             const cancelBtn = document.getElementById('licenseCancelBtn');
             const okBtn = document.getElementById('licenseOkBtn');
 
-            // Clear previous timer
             if (licenseTimerInterval) clearInterval(licenseTimerInterval);
-
-            // Update status from server (fresh)
             await loadLicenseStatus();
 
-            // Build message
             let message = '';
             let showTimer = false;
             let remaining = licenseRemainingSeconds;
@@ -223,7 +219,6 @@
             if (!allowCancel) cancelBtn.style.display = 'none';
             else cancelBtn.style.display = 'inline-block';
 
-            // Timer update
             if (showTimer && remaining > 0) {
                 let currentRemaining = remaining;
                 licenseTimerInterval = setInterval(async () => {
@@ -295,7 +290,6 @@
         selectedChequeNumber = null;
         document.getElementById('chequeInputContainer').classList.add('hidden');
         
-        // Highlight selected option
         document.querySelectorAll('.payment-option').forEach(btn => {
             btn.classList.remove('bg-indigo-50', 'border-indigo-500');
         });
@@ -309,7 +303,6 @@
         selectedPaymentMethod = 'cheque';
         document.getElementById('chequeInputContainer').classList.remove('hidden');
         
-        // Highlight selected option
         document.querySelectorAll('.payment-option').forEach(btn => {
             btn.classList.remove('bg-indigo-50', 'border-indigo-500');
         });
@@ -323,9 +316,7 @@
         document.getElementById('paymentModal').classList.add('hidden');
         selectedPaymentMethod = null;
         selectedChequeNumber = null;
-        pendingSaleData = null;
         document.getElementById('chequeNumber').value = '';
-        // Reset highlighting
         document.querySelectorAll('.payment-option').forEach(btn => {
             btn.classList.remove('bg-indigo-50', 'border-indigo-500');
         });
@@ -347,37 +338,17 @@
         return null;
     }
 
-    async function processSaleWithPayment() {
-        if (!pendingSaleData) return;
+    async function executeSale() {
+        if (!pendingSaleCallback) return;
         
-        // Check license
-        const licenseData = await loadLicenseStatus();
-        let canProceed = false;
-
-        if (licenseData.licensed) {
-            canProceed = true;
-        } else if (licenseData.trial_active) {
-            const userChoseProceed = await showLicenseModal(true);
-            canProceed = true;
-        } else {
-            const activated = await showLicenseModal(false);
-            canProceed = activated;
-        }
-
-        if (!canProceed) {
-            console.log("License check failed, sale not allowed");
-            return;
-        }
-
-        // Prepare sale data
-        const cartItems = pendingSaleData.cart.map(item => ({ 
+        const cartItems = pendingSaleCallback.cart.map(item => ({ 
             product: item.product, 
             qty: item.qty, 
             discount: item.discount 
         }));
         
         const selectedBatches = [];
-        pendingSaleData.cart.forEach(item => {
+        pendingSaleCallback.cart.forEach(item => {
             item.selectedBatches.forEach(b => {
                 selectedBatches.push({ batch_id: b.batch_id, qty: b.qty, product_id: item.product.id });
             });
@@ -385,7 +356,7 @@
         
         const payload = { 
             cart_items: cartItems, 
-            sale_datetime: pendingSaleData.saleDatetime, 
+            sale_datetime: pendingSaleCallback.saleDatetime, 
             selected_batches: selectedBatches,
             payment_method: selectedPaymentMethod,
             cheque_number: selectedChequeNumber
@@ -406,12 +377,13 @@
             updateCart();
             loadProducts();
             alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || selectedPaymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
-            pendingSaleData = null;
-            selectedPaymentMethod = null;
-            selectedChequeNumber = null;
         } else {
             alert('Error: ' + data.error);
         }
+        
+        pendingSaleCallback = null;
+        selectedPaymentMethod = null;
+        selectedChequeNumber = null;
     }
 
     // ---------- Original Sales Page Functions ----------
@@ -660,25 +632,35 @@
         await openBatchSelector(currentProduct, qty);
     });
 
-    // MODIFIED: Complete Sale with Payment Selection First
+    // Complete Sale Button - Show Payment Modal First
     document.getElementById('completeSaleBtn').addEventListener('click', async () => {
         if (cart.length === 0) {
             alert('Cart is empty.');
             return;
         }
-
-        // Show payment modal first
-        selectedPaymentMethod = null;
-        document.getElementById('paymentModal').classList.remove('hidden');
         
-        // Store cart data temporarily
-        pendingSaleData = {
+        // Store cart data for later
+        pendingSaleCallback = {
             cart: [...cart],
             saleDatetime: getSaleDateTime()
         };
+        
+        // Reset payment selection
+        selectedPaymentMethod = null;
+        selectedChequeNumber = null;
+        document.getElementById('chequeNumber').value = '';
+        document.getElementById('chequeInputContainer').classList.add('hidden');
+        
+        // Remove highlighting from payment options
+        document.querySelectorAll('.payment-option').forEach(btn => {
+            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
+        });
+        
+        // Show payment modal
+        document.getElementById('paymentModal').classList.remove('hidden');
     });
 
-    // Confirm payment and proceed with sale
+    // Confirm Payment Button
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
         if (!selectedPaymentMethod) {
             alert('Please select a payment method.');
@@ -697,12 +679,29 @@
         // Close payment modal
         closePaymentModal();
         
-        // Now process the sale with license check
-        await processSaleWithPayment();
+        // Check license and proceed
+        const licenseData = await loadLicenseStatus();
+        let canProceed = false;
+
+        if (licenseData.licensed) {
+            canProceed = true;
+        } else if (licenseData.trial_active) {
+            canProceed = await showLicenseModal(true);
+        } else {
+            canProceed = await showLicenseModal(false);
+        }
+
+        if (canProceed) {
+            await executeSale();
+        } else {
+            pendingSaleCallback = null;
+            alert('Sale cancelled or license check failed.');
+        }
     });
 
     document.getElementById('cancelPaymentBtn').addEventListener('click', () => {
         closePaymentModal();
+        pendingSaleCallback = null;
     });
 
     // Print receipt
