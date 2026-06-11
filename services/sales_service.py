@@ -1,5 +1,5 @@
 import os
-from database.db import get_connection
+from database.db import get_connection, get_db_connection, get_param_style
 from datetime import datetime
 from functools import wraps
 import time
@@ -23,7 +23,7 @@ def handle_timeout(func):
     return wrapper
 
 # ---------------------------
-# GET PRODUCTS FOR SALE (Optimized)
+# GET PRODUCTS FOR SALE
 # ---------------------------
 def get_products_for_sale():
     conn = get_connection()
@@ -54,10 +54,11 @@ def get_products_for_sale():
             for r in rows
         ]
     finally:
-        conn.close()
+        from database.db import return_connection
+        return_connection(conn)
 
 # ---------------------------
-# GET BATCHES FOR PRODUCT (Optimized with limit)
+# GET BATCHES FOR PRODUCT (FIFO order)
 # ---------------------------
 def get_batches_for_product(product_id, limit=100):
     conn = get_connection()
@@ -84,7 +85,35 @@ def get_batches_for_product(product_id, limit=100):
             for r in rows
         ]
     finally:
-        conn.close()
+        from database.db import return_connection
+        return_connection(conn)
+
+# ---------------------------
+# GET SINGLE BATCH BY ID (FIXED)
+# ---------------------------
+def get_batch_by_id(batch_id):
+    """Get a single batch by its ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, product_id, remaining_quantity, cost_price, selling_price
+            FROM purchase_batches
+            WHERE id = %s
+        """, (batch_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "batch_id": row[0],
+                "product_id": row[1],
+                "remaining_quantity": int(row[2] or 0),
+                "cost_price": float(row[3] or 0),
+                "selling_price": float(row[4] or 0),
+            }
+        return None
+    finally:
+        from database.db import return_connection
+        return_connection(conn)
 
 # ---------------------------
 # GET MULTIPLE BATCHES IN SINGLE QUERY
@@ -117,10 +146,11 @@ def get_batches_by_ids(batch_ids):
             for r in rows
         }
     finally:
-        conn.close()
+        from database.db import return_connection
+        return_connection(conn)
 
 # ---------------------------
-# UPDATE PRODUCT STOCK (Optimized)
+# UPDATE PRODUCT STOCK
 # ---------------------------
 def update_product_stock(cursor, product_id):
     cursor.execute("""
@@ -223,7 +253,7 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
                     subtotal += batch_total
                     profit += batch_profit
                     
-                    # Queue updates (using parameterized subtraction)
+                    # Queue updates
                     batch_updates.append((b["qty"], b["batch_id"]))
                     all_sales_items.append((
                         sale_id, product_id, b["batch_id"], b["qty"],
@@ -271,7 +301,7 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
                     affected_products.add(product_id)
                 
                 if remaining_qty > 0:
-                    raise ValueError(f"Insufficient stock for {product['name']}")
+                    raise ValueError(f"Insufficient stock for {product['name']}. Needed {quantity}, available {quantity - remaining_qty}")
             
             final_total = max(subtotal - discount, 0)
             total_subtotal += subtotal
@@ -287,9 +317,8 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
                 "total": final_total
             })
         
-        # 5. Execute batch updates (PostgreSQL optimized)
+        # 5. Execute batch updates
         if batch_updates:
-            # Use executemany for batch updates
             cursor.executemany("""
                 UPDATE purchase_batches 
                 SET remaining_quantity = remaining_quantity - %s 
@@ -318,7 +347,8 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
             WHERE id = %s
         """, (total_subtotal, total_discount, grand_total, net_profit, sale_id))
         
-        conn.commit()
+        from database.db import return_connection
+        return_connection(conn)
         
         return {
             "sale_id": sale_id,
@@ -331,14 +361,13 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
         }
         
     except Exception as e:
-        conn.rollback()
+        from database.db import return_connection
+        return_connection(conn)
         print(f"Sale creation failed: {str(e)}")
         raise e
-    finally:
-        conn.close()
 
 # ---------------------------
-# GET SALE DETAILS (Optimized with joins)
+# GET SALE DETAILS
 # ---------------------------
 def get_sale_details(sale_id):
     conn = get_connection()
@@ -393,4 +422,5 @@ def get_sale_details(sale_id):
             ]
         }
     finally:
-        conn.close()
+        from database.db import return_connection
+        return_connection(conn)
