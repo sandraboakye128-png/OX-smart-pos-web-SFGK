@@ -7,7 +7,7 @@ from datetime import datetime
 SHOP_NAME = "SEEK FOR GOD'S KINGDOM ENTERPRISE"
 COMPLEMENT = "DEALERS IN HOME APPLIANCES, FRIDGES,TVs,BLENDERS AND OTHER MORE"
 PHONE = "0541442431"
-DA = "HT-0000-3866 ,Zongo Road Near Town Park"
+EMAIL = "HT-0000-3866 ,Zongo Road Near Town Park"
 
 # --------------------------- DEVELOPER INFO ---------------------------
 DEV_NAME = "HUMMINGBIRD DIGITAL SOLUTIONS"
