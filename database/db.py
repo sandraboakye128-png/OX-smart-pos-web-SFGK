@@ -1,5 +1,7 @@
 import os
 import sqlite3
+from psycopg2 import pool
+import psycopg2
 
 # ---------- Ensure folders exist ----------
 DB_DIR = "database"
@@ -18,10 +20,29 @@ AUTH_DB_PATH = os.path.join(DB_DIR, "auth.db")
 DATABASE_URL = os.getenv("DATABASE_URL")
 USE_POSTGRES = DATABASE_URL is not None
 
+# ---------- Connection Pool (for PostgreSQL) ----------
+connection_pool = None
+
 if USE_POSTGRES:
-    import psycopg2
-    # Use the default cursor (returns tuples, not dictionaries)
-    print("Using PostgreSQL (Supabase) - default cursor")
+    print("Using PostgreSQL (Supabase) with connection pooling")
+    
+    # Create connection pool
+    try:
+        connection_pool = pool.SimpleConnectionPool(
+            1,                    # min connections
+            20,                   # max connections
+            DATABASE_URL,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+            connect_timeout=10,
+            options='-c statement_timeout=30000'  # 30 second statement timeout
+        )
+        print("PostgreSQL connection pool created successfully")
+    except Exception as e:
+        print(f"Failed to create connection pool: {e}")
+        connection_pool = None
 
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS products (
@@ -117,6 +138,14 @@ if USE_POSTGRES:
         role TEXT NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Add indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_batches_remaining ON purchase_batches(remaining_quantity);
+    CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
+    CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock);
+    CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
     """
 
     POSTGRES_MIGRATIONS = [
@@ -141,28 +170,69 @@ if USE_POSTGRES:
         "ALTER TABLE deleted_products ADD COLUMN IF NOT EXISTS product_id INTEGER",
         "ALTER TABLE sales_items ADD COLUMN IF NOT EXISTS unit_id INTEGER",
         "ALTER TABLE sales_items ADD COLUMN IF NOT EXISTS unit_quantity REAL",
-        "CREATE TABLE IF NOT EXISTS product_units (id SERIAL PRIMARY KEY, product_id INTEGER, unit_name TEXT, conversion_factor REAL, selling_price REAL)"
+        "CREATE TABLE IF NOT EXISTS product_units (id SERIAL PRIMARY KEY, product_id INTEGER, unit_name TEXT, conversion_factor REAL, selling_price REAL)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)"
     ]
 
     def get_connection():
-        conn = psycopg2.connect(DATABASE_URL)
-        cursor = conn.cursor()
-        # Create tables if not exist
-        cursor.execute(SCHEMA)
-        # Apply migrations (ALTER TABLE … IF NOT EXISTS)
-        for migration in POSTGRES_MIGRATIONS:
+        """Get a connection from the pool or create a new one"""
+        global connection_pool
+        
+        if connection_pool:
             try:
-                cursor.execute(migration)
-            except Exception:
-                pass  # column already exists or other benign error
-        conn.commit()
-        return conn
+                conn = connection_pool.getconn()
+                cursor = conn.cursor()
+                # Initialize schema if needed (check if tables exist)
+                cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
+                tables_exist = cursor.fetchone()[0]
+                
+                if not tables_exist:
+                    # Create tables and apply migrations
+                    cursor.execute(SCHEMA)
+                    for migration in POSTGRES_MIGRATIONS:
+                        try:
+                            cursor.execute(migration)
+                        except Exception as e:
+                            print(f"Migration warning: {e}")
+                    conn.commit()
+                
+                return conn
+            except Exception as e:
+                print(f"Error getting connection from pool: {e}")
+                # Fallback to direct connection
+                return psycopg2.connect(DATABASE_URL)
+        else:
+            # Direct connection fallback
+            conn = psycopg2.connect(DATABASE_URL)
+            cursor = conn.cursor()
+            cursor.execute(SCHEMA)
+            for migration in POSTGRES_MIGRATIONS:
+                try:
+                    cursor.execute(migration)
+                except Exception:
+                    pass
+            conn.commit()
+            return conn
+
+    def return_connection(conn):
+        """Return connection to the pool"""
+        global connection_pool
+        if connection_pool and conn:
+            try:
+                connection_pool.putconn(conn)
+            except Exception as e:
+                print(f"Error returning connection to pool: {e}")
+                try:
+                    conn.close()
+                except:
+                    pass
 
 else:
     # ---------- SQLite (local development) ----------
-    import sqlite3
     print("Using SQLite (local)")
-
+    
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,6 +320,11 @@ else:
         selling_price REAL,
         FOREIGN KEY (product_id) REFERENCES products(id)
     );
+
+    -- Indexes for SQLite
+    CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id);
+    CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
     """
 
     AUTH_SCHEMA = """
@@ -260,11 +335,23 @@ else:
         role TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+    
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     """
 
     def get_connection():
+        """Get SQLite connection with proper settings"""
         conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row  # Enable named columns
         cursor = conn.cursor()
+        
+        # Enable foreign keys
+        cursor.execute("PRAGMA foreign_keys = ON")
+        
+        # Set timeout for busy database
+        conn.execute("PRAGMA busy_timeout = 30000")
+        
+        # Create tables
         cursor.executescript(SCHEMA)
 
         # ---------- SAFE MIGRATIONS ----------
@@ -329,6 +416,16 @@ else:
             """)
         except: pass
 
+        # Create indexes
+        try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id)")
+        except: pass
+        try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id)")
+        except: pass
+        try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)")
+        except: pass
+        try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock)")
+        except: pass
+
         conn.commit()
 
         # ---------- AUTH DB ----------
@@ -339,3 +436,60 @@ else:
         auth_conn.close()
 
         return conn
+
+    def return_connection(conn):
+        """Close SQLite connection"""
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+
+# ---------- Helper function to get parameter style ----------
+def get_param_style(cursor):
+    """Return appropriate parameter placeholder based on database type"""
+    if hasattr(cursor, 'connection'):
+        if hasattr(cursor.connection, 'psycopg2_version'):
+            return "%s"  # PostgreSQL
+    return "?"  # SQLite
+
+# ---------- Context manager for automatic connection handling ----------
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_connection():
+    """Context manager for database connections"""
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        return_connection(conn)
+
+# ---------- Health check function ----------
+def check_database_health():
+    """Check if database is accessible"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        return_connection(conn)
+        return True
+    except Exception as e:
+        print(f"Database health check failed: {e}")
+        return False
+
+# ---------- Close all connections (for shutdown) ----------
+def close_all_connections():
+    """Close all connections in the pool"""
+    global connection_pool
+    if connection_pool:
+        try:
+            connection_pool.closeall()
+            print("All database connections closed")
+        except Exception as e:
+            print(f"Error closing connection pool: {e}")
