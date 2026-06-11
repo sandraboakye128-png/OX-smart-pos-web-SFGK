@@ -5,7 +5,7 @@ from datetime import datetime
 
 # --------------------------- SHOP INFO ---------------------------
 SHOP_NAME = "SEEK FOR GOD'S KINGDOM ENTERPRISE"
-COMPLEMENT = "DEALERS IN HOME APPLIANCES, FRIDGES,TVs,BLENDERS AND OTHER MORE"
+COMPLEMENT = "DEALERS IN HOME APPLIANCES, FRIDGES, TVs, BLENDERS AND OTHER MORE"
 PHONE = "0541442431"
 EMAIL = "HT-0000-3866 ,Zongo Road Near Town Park"
 
@@ -20,7 +20,7 @@ os.makedirs(RECEIPTS_DIR, exist_ok=True)
 # ==============================================================
 # THERMAL RECEIPT GENERATOR (80mm PROFESSIONAL STYLE)
 # ==============================================================
-def generate_receipt_multi(cart_items, total):
+def generate_receipt_multi(cart_items, total, payment_method='cash', cheque_number=None):
     """
     Generates a professional thermal-style 80mm receipt.
     cart_items: list of cart items from SalesPage, each containing:
@@ -29,6 +29,8 @@ def generate_receipt_multi(cart_items, total):
         - discount: discount applied to this product
         - final: final total for this product (not used directly, we compute per batch)
     total: grand total of the sale
+    payment_method: 'cash', 'momo', or 'cheque'
+    cheque_number: cheque number if payment_method is 'cheque'
     Returns: (filepath, preview_text)
     """
     now = datetime.now()
@@ -39,7 +41,7 @@ def generate_receipt_multi(cart_items, total):
 
     # ---------------- THERMAL SIZE ----------------
     width = 80 * mm
-    height = 260 * mm
+    height = 280 * mm
     c = canvas.Canvas(filename, pagesize=(width, height))
 
     y = height - 8 * mm
@@ -110,7 +112,7 @@ def generate_receipt_multi(cart_items, total):
             batch = sb["batch"]
             batch_id = batch.get("batch_id", "?")
             qty = sb["qty"]
-            price = batch["selling_price"]   # ← USE BATCH SELLING PRICE
+            price = batch["selling_price"]   # USE BATCH SELLING PRICE
             subtotal = qty * price
 
             # Product name + batch ID
@@ -148,6 +150,32 @@ def generate_receipt_multi(cart_items, total):
 
     divider()
 
+    # ---------------- PAYMENT INFORMATION ----------------
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(5 * mm, y, "PAYMENT METHOD:")
+    y -= 4 * mm
+    
+    c.setFont("Helvetica", 9)
+    if payment_method == 'cash':
+        payment_display = "💵 CASH"
+    elif payment_method == 'momo':
+        payment_display = "📱 MOBILE MONEY"
+    elif payment_method == 'cheque':
+        payment_display = f"📝 CHEQUE"
+        c.drawString(5 * mm, y, payment_display)
+        y -= 4 * mm
+        c.drawString(5 * mm, y, f"   Cheque #: {cheque_number}")
+    else:
+        payment_display = "UNKNOWN"
+        c.drawString(5 * mm, y, payment_display)
+    
+    if payment_method != 'cheque':
+        c.drawString(5 * mm, y, payment_display)
+    
+    y -= 5 * mm
+    
+    divider()
+
     # ---------------- FOOTER ----------------
     c.setFont("Helvetica", 8)
     c.drawCentredString(center, y, f"{date_str}")
@@ -180,6 +208,15 @@ def generate_receipt_multi(cart_items, total):
     # ---------------- PREVIEW TEXT ----------------
     preview_lines.append("-" * 32)
     preview_lines.append(f"TOTAL: ₵{total:.2f}")
+    
+    # Add payment info to preview
+    if payment_method == 'cash':
+        preview_lines.append("PAYMENT: CASH")
+    elif payment_method == 'momo':
+        preview_lines.append("PAYMENT: MOBILE MONEY")
+    elif payment_method == 'cheque':
+        preview_lines.append(f"PAYMENT: CHEQUE #{cheque_number}")
+    
     preview_lines.append(date_str)
     preview_lines.append("Thank you for shopping!")
     preview_lines.append("Come again anytime ❤️")

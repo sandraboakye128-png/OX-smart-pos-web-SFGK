@@ -77,7 +77,7 @@
 
     // For reversal modal
     let currentReverseSaleId = null;
-    let currentReverseItems = [];  // list of { itemData, checkboxElement }
+    let currentReverseItems = [];
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -93,6 +93,19 @@
             if (m === '>') return '&gt;';
             return m;
         });
+    }
+
+    // Helper: get payment badge HTML
+    function getPaymentBadge(paymentMethod, chequeNumber) {
+        if (paymentMethod === 'cash') {
+            return '<span class="inline-flex items-center bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">💵 Cash</span>';
+        } else if (paymentMethod === 'momo') {
+            return '<span class="inline-flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">📱 Mobile Money</span>';
+        } else if (paymentMethod === 'cheque') {
+            return `<span class="inline-flex items-center bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">📝 Cheque ${chequeNumber ? '#' + escapeHtml(chequeNumber) : ''}</span>`;
+        } else {
+            return '<span class="inline-flex items-center bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">❓ Unknown</span>';
+        }
     }
 
     // Fetch sales data from API
@@ -199,7 +212,7 @@
         }
     }
 
-    // Render sales as cards (using net_profit for summary)
+    // Render sales as cards with payment information
     function renderSales(sales) {
         const container = document.getElementById('salesList');
         if (!sales.length) {
@@ -208,7 +221,7 @@
             return;
         }
 
-        // Group items by sale_id and store net_profit (same for all items in the sale)
+        // Group items by sale_id and store all sale info
         const saleMap = new Map();
         for (const sale of sales) {
             if (!saleMap.has(sale.sale_id)) {
@@ -216,7 +229,9 @@
                     discount: sale.discount,
                     total: sale.total,
                     date: sale.sale_date,
-                    netProfit: sale.net_profit,   // net profit from sales table
+                    netProfit: sale.net_profit,
+                    payment_method: sale.payment_method || 'unknown',
+                    cheque_number: sale.cheque_number,
                     items: []
                 });
             }
@@ -225,6 +240,8 @@
 
         let html = '';
         for (const [saleId, saleGroup] of saleMap) {
+            const paymentBadge = getPaymentBadge(saleGroup.payment_method, saleGroup.cheque_number);
+            
             const itemsHtml = saleGroup.items.map(item => {
                 const statusText = item.is_deleted_batch ? '⚠️ (Batch Deleted - History Only)' : '';
                 return `
@@ -244,7 +261,10 @@
 
             html += `
                 <div class="bg-white rounded-xl shadow-md p-4 border" data-sale-id="${saleId}">
-                    <div class="text-sm text-gray-500 mb-2">Sale #${saleId} | ${saleGroup.date}</div>
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="text-sm text-gray-500">Sale #${saleId} | ${saleGroup.date}</div>
+                        <div>${paymentBadge}</div>
+                    </div>
                     ${itemsHtml}
                     <div class="mt-2 pt-2 border-t flex justify-between items-center">
                         <button class="reverse-sale-btn bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm" data-sale-id="${saleId}" data-sale-items='${JSON.stringify(saleGroup.items)}'>↺ Reverse Selected Items</button>
@@ -257,7 +277,7 @@
             `;
         }
         container.innerHTML = html;
-        updateSummary(sales);   // we pass the raw sales so that updateSummary can use net_profit
+        updateSummary(sales);
 
         // Attach click handlers for reverse buttons
         document.querySelectorAll('.reverse-sale-btn').forEach(btn => {
@@ -269,19 +289,31 @@
         });
     }
 
-    // Update summary bar using net_profit (not gross profit from items)
+    // Update summary bar using net_profit
     function updateSummary(sales) {
         const seenSales = new Set();
         let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
+        let cashTotal = 0, momoTotal = 0, chequeTotal = 0;
+        
         for (const sale of sales) {
             if (!seenSales.has(sale.sale_id)) {
                 totalSales += sale.total;
                 totalDiscount += sale.discount;
-                totalProfit += sale.net_profit;   // use net profit from sales table
+                totalProfit += sale.net_profit;
                 seenSales.add(sale.sale_id);
+                
+                // Calculate payment method totals
+                if (sale.payment_method === 'cash') {
+                    cashTotal += sale.total;
+                } else if (sale.payment_method === 'momo') {
+                    momoTotal += sale.total;
+                } else if (sale.payment_method === 'cheque') {
+                    chequeTotal += sale.total;
+                }
             }
             totalItems += sale.quantity;
         }
+        
         let periodText = '';
         if (currentStartDate && currentEndDate) {
             periodText = `📅 ${currentStartDate} to ${currentEndDate}`;
@@ -293,11 +325,15 @@
                 case 'yearly': periodText = '📅 This Year'; break;
             }
         }
+        
         document.getElementById('summaryBar').innerHTML = 
-            `${periodText}  |  🧾 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}`;
+            `${periodText}  |  🧾 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
+            <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
+            <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
+            <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
     }
 
-    // PDF Export (unchanged)
+    // PDF Export
     async function exportPDF() {
         if (!currentSalesData.length) {
             alert('No data to export.');

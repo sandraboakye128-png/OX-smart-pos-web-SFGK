@@ -171,10 +171,10 @@ def bulk_update_product_stocks(cursor, product_ids):
         update_product_stock(cursor, product_id)
 
 # ---------------------------
-# MAIN SALE CREATION FUNCTION (FIXED)
+# MAIN SALE CREATION FUNCTION (WITH PAYMENT METHOD)
 # ---------------------------
 @handle_timeout
-def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
+def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, payment_method='cash', cheque_number=None):
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -189,12 +189,12 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
         else:
             sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 2. Insert sale record
+        # 2. Insert sale record with payment fields
         cursor.execute("""
-            INSERT INTO sales (subtotal, discount, total, profit, date)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO sales (subtotal, discount, total, profit, date, payment_method, cheque_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (0, 0, 0, 0, sale_date_str))
+        """, (0, 0, 0, 0, sale_date_str, payment_method, cheque_number))
         sale_id = cursor.fetchone()[0]
         
         # Prepare data structures
@@ -349,7 +349,7 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
         # IMPORTANT: Commit the transaction BEFORE returning connection
         conn.commit()
         
-        # Prepare the result
+        # Prepare the result with payment info
         result = {
             "sale_id": sale_id,
             "items": receipt_data,
@@ -357,7 +357,9 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
             "discount": total_discount,
             "total": grand_total,
             "profit": net_profit,
-            "date": sale_date_str
+            "date": sale_date_str,
+            "payment_method": payment_method,
+            "cheque_number": cheque_number
         }
         
         # Return connection to pool AFTER preparing result
@@ -374,15 +376,15 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
         raise e
 
 # ---------------------------
-# GET SALE DETAILS
+# GET SALE DETAILS (WITH PAYMENT INFO)
 # ---------------------------
 def get_sale_details(sale_id):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Get sale header
+        # Get sale header with payment info
         cursor.execute("""
-            SELECT id, subtotal, discount, total, profit, date
+            SELECT id, subtotal, discount, total, profit, date, payment_method, cheque_number
             FROM sales
             WHERE id = %s
         """, (sale_id,))
@@ -415,6 +417,8 @@ def get_sale_details(sale_id):
             "total": float(sale[3] or 0),
             "profit": float(sale[4] or 0),
             "date": sale[5],
+            "payment_method": sale[6] if len(sale) > 6 else 'unknown',
+            "cheque_number": sale[7] if len(sale) > 7 else None,
             "items": [
                 {
                     "product_id": item[0],
@@ -441,14 +445,14 @@ def get_sale_details(sale_id):
         raise e
 
 # ---------------------------
-# GET TODAY'S SALES
+# GET TODAY'S SALES (WITH PAYMENT INFO)
 # ---------------------------
 def get_todays_sales():
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT id, subtotal, discount, total, profit, date
+            SELECT id, subtotal, discount, total, profit, date, payment_method, cheque_number
             FROM sales
             WHERE DATE(date) = CURRENT_DATE
             ORDER BY date DESC
@@ -462,7 +466,9 @@ def get_todays_sales():
                 "discount": float(r[2] or 0),
                 "total": float(r[3] or 0),
                 "profit": float(r[4] or 0),
-                "date": r[5]
+                "date": r[5],
+                "payment_method": r[6] if len(r) > 6 else 'unknown',
+                "cheque_number": r[7] if len(r) > 7 else None
             }
             for r in rows
         ]
@@ -476,4 +482,45 @@ def get_todays_sales():
         from database.db import return_connection
         return_connection(conn)
         print(f"Get today's sales failed: {str(e)}")
+        raise e
+
+# ---------------------------
+# GET SALES BY DATE RANGE (WITH PAYMENT INFO)
+# ---------------------------
+def get_sales_by_date_range(start_date, end_date):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, subtotal, discount, total, profit, date, payment_method, cheque_number
+            FROM sales
+            WHERE DATE(date) BETWEEN %s AND %s
+            ORDER BY date DESC
+        """, (start_date, end_date))
+        
+        rows = cursor.fetchall()
+        
+        result = [
+            {
+                "id": r[0],
+                "subtotal": float(r[1] or 0),
+                "discount": float(r[2] or 0),
+                "total": float(r[3] or 0),
+                "profit": float(r[4] or 0),
+                "date": r[5],
+                "payment_method": r[6] if len(r) > 6 else 'unknown',
+                "cheque_number": r[7] if len(r) > 7 else None
+            }
+            for r in rows
+        ]
+        
+        from database.db import return_connection
+        return_connection(conn)
+        
+        return result
+        
+    except Exception as e:
+        from database.db import return_connection
+        return_connection(conn)
+        print(f"Get sales by date range failed: {str(e)}")
         raise e

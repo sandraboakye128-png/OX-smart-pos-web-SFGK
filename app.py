@@ -600,8 +600,19 @@ def api_sales_complete():
     cart_items = data.get('cart_items', [])
     sale_datetime = data.get('sale_datetime')
     selected_batches = data.get('selected_batches', [])
+    payment_method = data.get('payment_method', 'cash')
+    cheque_number = data.get('cheque_number')
+    
     try:
-        result = create_multi_sale(cart_items, sale_datetime, selected_batches)
+        # Pass payment information to create_multi_sale
+        result = create_multi_sale(
+            cart_items, 
+            sale_datetime, 
+            selected_batches,
+            payment_method,
+            cheque_number
+        )
+        
         receipt_cart = []
         for idx, item in enumerate(cart_items):
             product_batches = []
@@ -620,14 +631,24 @@ def api_sales_complete():
                 'discount': item['discount'],
                 'selected_batches': product_batches
             })
-        receipt_file, receipt_text = generate_receipt_multi(receipt_cart, result['total'])
+        
+        # Pass payment info to receipt generation
+        receipt_file, receipt_text = generate_receipt_multi(
+            receipt_cart, 
+            result['total'],
+            payment_method,
+            cheque_number
+        )
+        
         return jsonify({
             'success': True,
             'sale_id': result['sale_id'],
             'total': result['total'],
             'date': result['date'],
             'receipt_text': receipt_text,
-            'receipt_file': receipt_file
+            'receipt_file': receipt_file,
+            'payment_method': payment_method,
+            'cheque_number': cheque_number
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -742,7 +763,7 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API (PostgreSQL version) =====================
+# ===================== TODAY'S SALES API (PostgreSQL version with payment info) =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
@@ -775,7 +796,9 @@ def api_today_sales():
             COALESCE(purchase_batches.cost_price, 0) as cost_price, 
             sales.date,
             CASE WHEN purchase_batches.id IS NULL THEN 1 ELSE 0 END as is_deleted_batch,
-            sales.profit as net_profit
+            sales.profit as net_profit,
+            COALESCE(sales.payment_method, 'cash') as payment_method,
+            sales.cheque_number
     """
     from_clause = """
         FROM sales
@@ -849,7 +872,9 @@ def api_today_sales():
             'cost_price': float(r[11]),
             'sale_date': r[12].isoformat() if hasattr(r[12], 'isoformat') else str(r[12]),
             'is_deleted_batch': bool(r[13]),
-            'net_profit': float(r[14])   # net profit for the sale
+            'net_profit': float(r[14]),   # net profit for the sale
+            'payment_method': r[15] if len(r) > 15 else 'cash',
+            'cheque_number': r[16] if len(r) > 16 else None
         })
     return jsonify(sales_data)
 
@@ -879,7 +904,7 @@ def api_today_sales_pdf():
             total_sales += sale['total']
             total_discount += sale['discount']
             seen_sales.add(sale_id)
-        total_profit += sale['profit']   # Note: using gross profit per item in PDF; change to net if desired.
+        total_profit += sale['profit']
         total_items += sale['quantity']
     elements.append(Paragraph(
         f"🧾 Items: {total_items}   |   💰 Sales: ₵{total_sales:.2f}   |   "
@@ -888,9 +913,12 @@ def api_today_sales_pdf():
     ))
     elements.append(Spacer(1, 0.3*cm))
     table_data = [["Name", "Brand", "Category", "Qty", "Price", "Subtotal", 
-                   "Discount", "Total", "Profit", "Batch", "Cost", "Sale Date", "Status"]]
+                   "Discount", "Total", "Profit", "Batch", "Cost", "Sale Date", "Payment", "Status"]]
     for s in sales_data:
         status = "Deleted Batch" if s['is_deleted_batch'] else "Active"
+        payment_display = s.get('payment_method', 'cash').upper()
+        if s.get('cheque_number'):
+            payment_display += f" #{s['cheque_number']}"
         row = [
             s['name'], s['brand'], s['category'],
             str(s['quantity']),
@@ -902,6 +930,7 @@ def api_today_sales_pdf():
             str(s['batch_id']) if s['batch_id'] != -1 else "DELETED",
             f"₵{s['cost_price']:.2f}",
             s['sale_date'],
+            payment_display,
             status
         ]
         table_data.append(row)
@@ -912,7 +941,7 @@ def api_today_sales_pdf():
         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('ALIGN', (3,1), (-1,-1), 'CENTER'),
-        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('FONTSIZE', (0,0), (-1,-1), 7),
     ]))
     elements.append(table)
     doc.build(elements)

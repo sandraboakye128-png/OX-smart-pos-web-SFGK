@@ -37,6 +37,7 @@ if USE_POSTGRES:
             keepalives_interval=10,
             keepalives_count=5,
             connect_timeout=10,
+            sslmode='require',     # Add SSL mode for Supabase
             options='-c statement_timeout=30000'  # 30 second statement timeout
         )
         print("PostgreSQL connection pool created successfully")
@@ -63,7 +64,9 @@ if USE_POSTGRES:
         discount REAL DEFAULT 0,
         total REAL,
         profit REAL,
-        date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        payment_method VARCHAR(50) DEFAULT 'cash',
+        cheque_number VARCHAR(100)
     );
 
     CREATE TABLE IF NOT EXISTS deleted_products (
@@ -146,6 +149,7 @@ if USE_POSTGRES:
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
     CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock);
     CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+    CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
     """
 
     POSTGRES_MIGRATIONS = [
@@ -156,6 +160,8 @@ if USE_POSTGRES:
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS subtotal REAL DEFAULT 0",
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS product_id INTEGER",
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS reversed INTEGER DEFAULT 0",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'cash'",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS cheque_number VARCHAR(100)",
         "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0",
         "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS remaining_stock INTEGER DEFAULT 0",
         "ALTER TABLE purchase_batches ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0",
@@ -173,7 +179,8 @@ if USE_POSTGRES:
         "CREATE TABLE IF NOT EXISTS product_units (id SERIAL PRIMARY KEY, product_id INTEGER, unit_name TEXT, conversion_factor REAL, selling_price REAL)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id)",
         "CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id)",
-        "CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)"
+        "CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)"
     ]
 
     def get_connection():
@@ -192,14 +199,14 @@ if USE_POSTGRES:
                 print(f"Error getting connection from pool: {e}")
                 # Try to create a new direct connection
                 try:
-                    conn = psycopg2.connect(DATABASE_URL)
+                    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
                     return conn
                 except Exception as e2:
                     print(f"Failed to create fallback connection: {e2}")
                     raise
         else:
             # Direct connection fallback
-            conn = psycopg2.connect(DATABASE_URL)
+            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
             cursor = conn.cursor()
             
             # Check if tables exist
@@ -268,7 +275,9 @@ else:
         discount REAL DEFAULT 0,
         total REAL,
         profit REAL,
-        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        payment_method VARCHAR(50) DEFAULT 'cash',
+        cheque_number VARCHAR(100)
     );
 
     CREATE TABLE IF NOT EXISTS deleted_products (
@@ -341,6 +350,7 @@ else:
     CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id);
     CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id);
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
+    CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
     """
 
     AUTH_SCHEMA = """
@@ -385,6 +395,10 @@ else:
         try: cursor.execute("ALTER TABLE sales ADD COLUMN product_id INTEGER")
         except: pass
         try: cursor.execute("ALTER TABLE sales ADD COLUMN reversed INTEGER DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN payment_method VARCHAR(50) DEFAULT 'cash'")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN cheque_number VARCHAR(100)")
         except: pass
 
         try: cursor.execute("ALTER TABLE purchases ADD COLUMN selling_price REAL DEFAULT 0")
@@ -440,6 +454,8 @@ else:
         try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)")
         except: pass
         try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock)")
+        except: pass
+        try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)")
         except: pass
 
         conn.commit()
