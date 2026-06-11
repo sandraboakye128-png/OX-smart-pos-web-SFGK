@@ -173,7 +173,7 @@
         }
     }
 
-    // Show license modal and return promise
+    // Show license modal and return promise - FIXED TRIAL BEHAVIOR
     function showLicenseModal(allowCancel = true) {
         return new Promise(async (resolve) => {
             const modal = document.getElementById('licenseModal');
@@ -189,13 +189,14 @@
             let message = '';
             let showTimer = false;
             let remaining = licenseRemainingSeconds;
+            let isTrialActive = licenseTrialActive;
 
             if (licenseLicensed) {
                 resolve(true);
                 return;
             }
 
-            if (licenseTrialActive && remaining > 0) {
+            if (isTrialActive && remaining > 0) {
                 const days = Math.floor(remaining / 86400);
                 const hours = Math.floor((remaining % 86400) / 3600);
                 const minutes = Math.floor((remaining % 3600) / 60);
@@ -256,10 +257,14 @@
             };
 
             const handleCancel = () => {
-                if (allowCancel) {
-                    modal.classList.add('hidden');
-                    cleanup();
-                    resolve(false);
+                modal.classList.add('hidden');
+                cleanup();
+                // If trial is active, resolve true to allow sale to proceed
+                // If trial is not active (expired), resolve false
+                if (isTrialActive && remaining > 0) {
+                    resolve(true);  // Allow sale to continue with trial
+                } else {
+                    resolve(false); // Block sale
                 }
             };
 
@@ -660,7 +665,7 @@
         document.getElementById('paymentModal').classList.remove('hidden');
     });
 
-    // Confirm Payment Button
+    // Confirm Payment Button - FIXED TRIAL BEHAVIOR
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
         if (!selectedPaymentMethod) {
             alert('Please select a payment method.');
@@ -685,17 +690,22 @@
 
         if (licenseData.licensed) {
             canProceed = true;
-        } else if (licenseData.trial_active) {
-            canProceed = await showLicenseModal(true);
+        } else if (licenseData.trial_active && licenseData.remaining_seconds > 0) {
+            // Trial is active - show modal but allow sale even if user cancels
+            const userChoice = await showLicenseModal(true);
+            // During trial, always allow sale regardless of user choice
+            canProceed = true;
         } else {
-            canProceed = await showLicenseModal(false);
+            // Trial expired - must activate (no cancel option)
+            const activated = await showLicenseModal(false);
+            canProceed = activated;
         }
 
         if (canProceed) {
             await executeSale();
         } else {
             pendingSaleCallback = null;
-            alert('Sale cancelled or license check failed.');
+            alert('Sale cancelled. License required to complete sale.');
         }
     });
 
