@@ -17,24 +17,26 @@
 
     <!-- Period Filter Buttons -->
     <div class="flex flex-wrap gap-2 mb-4">
-        <button data-period="daily" class="period-btn bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg">Today</button>
-        <button data-period="weekly" class="period-btn bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg">Week</button>
-        <button data-period="monthly" class="period-btn bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg">Month</button>
-        <button data-period="yearly" class="period-btn bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg">Year</button>
+        <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
+        <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
+        <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
+        <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
+        <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
     </div>
 
     <!-- Date Range Filter -->
-    <div class="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap items-end gap-4">
-        <div>
-            <label class="block text-sm font-medium text-gray-700">From Date</label>
-            <input type="date" id="startDate" class="border rounded-lg px-3 py-2">
+    <div class="bg-white rounded-xl shadow-md p-4 mb-6">
+        <div class="flex flex-wrap items-end gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">From Date</label>
+                <input type="date" id="startDate" class="border rounded-lg px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">To Date</label>
+                <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
+            </div>
+            <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
         </div>
-        <div>
-            <label class="block text-sm font-medium text-gray-700">To Date</label>
-            <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
-        </div>
-        <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Filter</button>
-        <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
     </div>
 
     <!-- Sales List (cards) -->
@@ -108,12 +110,72 @@
         }
     }
 
+    // Get date range based on period
+    function getDateRange() {
+        const now = new Date();
+        let startDate = null;
+        let endDate = null;
+        
+        if (currentStartDate && currentEndDate) {
+            return { start_date: currentStartDate, end_date: currentEndDate };
+        }
+        
+        switch(currentPeriod) {
+            case 'daily':
+                // Today
+                startDate = new Date(now);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'weekly':
+                // Start of current week (Sunday)
+                startDate = new Date(now);
+                startDate.setDate(now.getDate() - now.getDay());
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'monthly':
+                // Start of current month
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'yearly':
+                // Start of current year
+                startDate = new Date(now.getFullYear(), 0, 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setHours(23, 59, 59, 999);
+                break;
+            case 'all':
+                // All time - no date filter
+                startDate = null;
+                endDate = null;
+                break;
+        }
+        
+        return { 
+            start_date: startDate ? startDate.toISOString().split('T')[0] : null,
+            end_date: endDate ? endDate.toISOString().split('T')[0] : null
+        };
+    }
+
     // Fetch sales data from API
     async function loadSalesData() {
+        const range = getDateRange();
         let url = '/api/today_sales?period=' + currentPeriod;
-        if (currentStartDate && currentEndDate) {
-            url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}`;
+        
+        if (range.start_date && range.end_date && currentPeriod !== 'all') {
+            url = `/api/today_sales?start_date=${range.start_date}&end_date=${range.end_date}`;
+        } else if (currentPeriod === 'all') {
+            url = '/api/today_sales?period=all';
         }
+        
+        console.log("Loading sales with URL:", url);
+        
         const res = await fetch(url);
         const data = await res.json();
         currentSalesData = data;
@@ -320,9 +382,10 @@
         } else {
             switch(currentPeriod) {
                 case 'daily': periodText = '📅 Today'; break;
-                case 'weekly': periodText = '📅 Last 7 Days'; break;
+                case 'weekly': periodText = '📅 This Week'; break;
                 case 'monthly': periodText = '📅 This Month'; break;
                 case 'yearly': periodText = '📅 This Year'; break;
+                case 'all': periodText = '📅 All Time'; break;
             }
         }
         
@@ -343,7 +406,14 @@
         if (currentStartDate && currentEndDate) {
             periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
         } else {
-            periodText = `Period: ${currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1)}`;
+            switch(currentPeriod) {
+                case 'daily': periodText = 'Today'; break;
+                case 'weekly': periodText = 'This Week'; break;
+                case 'monthly': periodText = 'This Month'; break;
+                case 'yearly': periodText = 'This Year'; break;
+                case 'all': periodText = 'All Time'; break;
+                default: periodText = currentPeriod;
+            }
         }
         const response = await fetch('/api/today_sales/pdf', {
             method: 'POST',
@@ -377,7 +447,7 @@
         if (start && end) {
             currentStartDate = start;
             currentEndDate = end;
-            currentPeriod = null;
+            currentPeriod = 'custom';
             loadSalesData();
         } else {
             alert('Please select both start and end dates.');
