@@ -131,7 +131,7 @@
 </div>
 
 <script>
-    // ---------- Existing Sales JS ----------
+    // ---------- Sales JS ----------
     let products = [];
     let currentProduct = null;
     let cart = [];
@@ -173,7 +173,7 @@
         }
     }
 
-    // Show license modal and return promise - FIXED TRIAL BEHAVIOR
+    // Show license modal
     function showLicenseModal(allowCancel = true) {
         return new Promise(async (resolve) => {
             const modal = document.getElementById('licenseModal');
@@ -259,12 +259,10 @@
             const handleCancel = () => {
                 modal.classList.add('hidden');
                 cleanup();
-                // If trial is active, resolve true to allow sale to proceed
-                // If trial is not active (expired), resolve false
                 if (isTrialActive && remaining > 0) {
-                    resolve(true);  // Allow sale to continue with trial
+                    resolve(true);
                 } else {
-                    resolve(false); // Block sale
+                    resolve(false);
                 }
             };
 
@@ -321,8 +319,6 @@
 
     function closePaymentModal() {
         document.getElementById('paymentModal').classList.add('hidden');
-        selectedPaymentMethod = null;
-        selectedChequeNumber = null;
         document.getElementById('chequeNumber').value = '';
         document.querySelectorAll('.payment-option').forEach(btn => {
             btn.classList.remove('bg-indigo-50', 'border-indigo-500');
@@ -345,11 +341,11 @@
         return null;
     }
 
-    async function executeSale() {
+    async function executeSaleWithPayment(paymentMethod, chequeNum) {
         if (!pendingSaleCallback) return;
         
-        console.log("🚀 Executing sale with payment method:", selectedPaymentMethod);
-        console.log("🚀 Cheque number:", selectedChequeNumber);
+        console.log("🚀 Executing sale with payment method:", paymentMethod);
+        console.log("🚀 Cheque number:", chequeNum);
         
         const cartItems = pendingSaleCallback.cart.map(item => ({ 
             product: item.product, 
@@ -368,8 +364,8 @@
             cart_items: cartItems, 
             sale_datetime: pendingSaleCallback.saleDatetime, 
             selected_batches: selectedBatches,
-            payment_method: selectedPaymentMethod,
-            cheque_number: selectedChequeNumber
+            payment_method: paymentMethod,
+            cheque_number: chequeNum
         };
         
         console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
@@ -390,7 +386,7 @@
             cart = [];
             updateCart();
             loadProducts();
-            alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || selectedPaymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
+            alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || paymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
         } else {
             alert('Error: ' + data.error);
         }
@@ -674,7 +670,7 @@
         document.getElementById('paymentModal').classList.remove('hidden');
     });
 
-    // Confirm Payment Button - FIXED with proper payment capture
+    // Confirm Payment Button - Fixed to preserve payment method
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
         console.log("🔘 Confirm button clicked. Current payment method:", selectedPaymentMethod);
         
@@ -693,7 +689,11 @@
             selectedChequeNumber = chequeNumber;
         }
         
-        console.log("✅ Final payment data - Method:", selectedPaymentMethod, "Cheque:", selectedChequeNumber);
+        // Store payment data before closing modal
+        const paymentMethodToUse = selectedPaymentMethod;
+        const chequeNumberToUse = selectedChequeNumber;
+        
+        console.log("✅ Final payment data - Method:", paymentMethodToUse, "Cheque:", chequeNumberToUse);
         
         // Close payment modal
         closePaymentModal();
@@ -716,7 +716,8 @@
         }
 
         if (canProceed) {
-            await executeSale();
+            // Use stored payment data, not the possibly reset variables
+            await executeSaleWithPayment(paymentMethodToUse, chequeNumberToUse);
         } else {
             pendingSaleCallback = null;
             alert('Sale cancelled. License required to complete sale.');
