@@ -89,7 +89,7 @@ def get_batches_for_product(product_id, limit=100):
         return_connection(conn)
 
 # ---------------------------
-# GET SINGLE BATCH BY ID (FIXED)
+# GET SINGLE BATCH BY ID
 # ---------------------------
 def get_batch_by_id(batch_id):
     """Get a single batch by its ID"""
@@ -126,7 +126,6 @@ def get_batches_by_ids(batch_ids):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Use ANY for PostgreSQL, or IN with placeholders
         placeholders = ','.join(['%s'] * len(batch_ids))
         cursor.execute(f"""
             SELECT id, product_id, remaining_quantity, cost_price, selling_price
@@ -172,7 +171,7 @@ def bulk_update_product_stocks(cursor, product_ids):
         update_product_stock(cursor, product_id)
 
 # ---------------------------
-# MAIN SALE CREATION FUNCTION (OPTIMIZED)
+# MAIN SALE CREATION FUNCTION (FIXED)
 # ---------------------------
 @handle_timeout
 def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
@@ -347,10 +346,11 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
             WHERE id = %s
         """, (total_subtotal, total_discount, grand_total, net_profit, sale_id))
         
-        from database.db import return_connection
-        return_connection(conn)
+        # IMPORTANT: Commit the transaction BEFORE returning connection
+        conn.commit()
         
-        return {
+        # Prepare the result
+        result = {
             "sale_id": sale_id,
             "items": receipt_data,
             "subtotal": total_subtotal,
@@ -360,7 +360,14 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None):
             "date": sale_date_str
         }
         
+        # Return connection to pool AFTER preparing result
+        from database.db import return_connection
+        return_connection(conn)
+        
+        return result
+        
     except Exception as e:
+        conn.rollback()
         from database.db import return_connection
         return_connection(conn)
         print(f"Sale creation failed: {str(e)}")
@@ -401,7 +408,7 @@ def get_sale_details(sale_id):
         
         items = cursor.fetchall()
         
-        return {
+        result = {
             "id": sale[0],
             "subtotal": float(sale[1] or 0),
             "discount": float(sale[2] or 0),
@@ -421,6 +428,52 @@ def get_sale_details(sale_id):
                 for item in items
             ]
         }
-    finally:
+        
         from database.db import return_connection
         return_connection(conn)
+        
+        return result
+        
+    except Exception as e:
+        from database.db import return_connection
+        return_connection(conn)
+        print(f"Get sale details failed: {str(e)}")
+        raise e
+
+# ---------------------------
+# GET TODAY'S SALES
+# ---------------------------
+def get_todays_sales():
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, subtotal, discount, total, profit, date
+            FROM sales
+            WHERE DATE(date) = CURRENT_DATE
+            ORDER BY date DESC
+        """)
+        rows = cursor.fetchall()
+        
+        result = [
+            {
+                "id": r[0],
+                "subtotal": float(r[1] or 0),
+                "discount": float(r[2] or 0),
+                "total": float(r[3] or 0),
+                "profit": float(r[4] or 0),
+                "date": r[5]
+            }
+            for r in rows
+        ]
+        
+        from database.db import return_connection
+        return_connection(conn)
+        
+        return result
+        
+    except Exception as e:
+        from database.db import return_connection
+        return_connection(conn)
+        print(f"Get today's sales failed: {str(e)}")
+        raise e

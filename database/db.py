@@ -183,37 +183,40 @@ if USE_POSTGRES:
         if connection_pool:
             try:
                 conn = connection_pool.getconn()
+                # Test the connection is alive
                 cursor = conn.cursor()
-                # Initialize schema if needed (check if tables exist)
-                cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
-                tables_exist = cursor.fetchone()[0]
-                
-                if not tables_exist:
-                    # Create tables and apply migrations
-                    cursor.execute(SCHEMA)
-                    for migration in POSTGRES_MIGRATIONS:
-                        try:
-                            cursor.execute(migration)
-                        except Exception as e:
-                            print(f"Migration warning: {e}")
-                    conn.commit()
-                
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
                 return conn
             except Exception as e:
                 print(f"Error getting connection from pool: {e}")
-                # Fallback to direct connection
-                return psycopg2.connect(DATABASE_URL)
+                # Try to create a new direct connection
+                try:
+                    conn = psycopg2.connect(DATABASE_URL)
+                    return conn
+                except Exception as e2:
+                    print(f"Failed to create fallback connection: {e2}")
+                    raise
         else:
             # Direct connection fallback
             conn = psycopg2.connect(DATABASE_URL)
             cursor = conn.cursor()
-            cursor.execute(SCHEMA)
-            for migration in POSTGRES_MIGRATIONS:
-                try:
-                    cursor.execute(migration)
-                except Exception:
-                    pass
-            conn.commit()
+            
+            # Check if tables exist
+            cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
+            tables_exist = cursor.fetchone()[0]
+            
+            if not tables_exist:
+                print("Creating database schema...")
+                cursor.execute(SCHEMA)
+                for migration in POSTGRES_MIGRATIONS:
+                    try:
+                        cursor.execute(migration)
+                    except Exception as e:
+                        print(f"Migration warning: {e}")
+                conn.commit()
+                print("Database schema created successfully")
+            
             return conn
 
     def return_connection(conn):
@@ -221,13 +224,26 @@ if USE_POSTGRES:
         global connection_pool
         if connection_pool and conn:
             try:
-                connection_pool.putconn(conn)
+                # Only return if it's a pooled connection (has _pool_key)
+                if hasattr(conn, '_pool_key'):
+                    connection_pool.putconn(conn)
+                else:
+                    # It's a direct connection, just close it
+                    try:
+                        conn.close()
+                    except:
+                        pass
             except Exception as e:
                 print(f"Error returning connection to pool: {e}")
                 try:
                     conn.close()
                 except:
                     pass
+        elif conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 else:
     # ---------- SQLite (local development) ----------
