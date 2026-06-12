@@ -1,12 +1,11 @@
 from database.db import get_connection
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 
 def get_summary_multi(period="daily", start_date=None, end_date=None):
     """Get sales summary for period or custom date range"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Handle custom date range (from analytics page)
     if start_date and end_date:
         cursor.execute("""
             SELECT 
@@ -19,9 +18,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             WHERE s.date::date BETWEEN %s AND %s
             AND s.reversed = 0
         """, (start_date, end_date))
-        
     elif period == "weekly":
-        # Current week (Sunday to today)
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -33,9 +30,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             WHERE s.date >= DATE_TRUNC('week', CURRENT_DATE)
             AND s.reversed = 0
         """)
-        
     elif period == "monthly":
-        # Current month
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -48,9 +43,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             AND EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE)
             AND s.reversed = 0
         """)
-        
     elif period == "yearly":
-        # Current year
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -62,9 +55,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
             AND s.reversed = 0
         """)
-        
     elif period == "all":
-        # All time
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -75,9 +66,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             LEFT JOIN sales_items si ON s.id = si.sale_id
             WHERE s.reversed = 0
         """)
-        
     else:  # daily
-        # Current day
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -128,7 +117,6 @@ def get_top_products_multi(period="daily", limit=10, start_date=None, end_date=N
             ORDER BY qty DESC
             LIMIT %s
         """, (start_date, end_date, limit))
-        
     elif period == "weekly":
         cursor.execute("""
             SELECT 
@@ -151,7 +139,6 @@ def get_top_products_multi(period="daily", limit=10, start_date=None, end_date=N
             ORDER BY qty DESC
             LIMIT %s
         """, (limit,))
-        
     elif period == "monthly":
         cursor.execute("""
             SELECT 
@@ -175,7 +162,6 @@ def get_top_products_multi(period="daily", limit=10, start_date=None, end_date=N
             ORDER BY qty DESC
             LIMIT %s
         """, (limit,))
-        
     elif period == "yearly":
         cursor.execute("""
             SELECT 
@@ -198,7 +184,6 @@ def get_top_products_multi(period="daily", limit=10, start_date=None, end_date=N
             ORDER BY qty DESC
             LIMIT %s
         """, (limit,))
-        
     elif period == "all":
         cursor.execute("""
             SELECT 
@@ -220,7 +205,6 @@ def get_top_products_multi(period="daily", limit=10, start_date=None, end_date=N
             ORDER BY qty DESC
             LIMIT %s
         """, (limit,))
-        
     else:  # daily
         cursor.execute("""
             SELECT 
@@ -266,7 +250,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
             GROUP BY DATE(s.date)
             ORDER BY label ASC
         """, (start_date, end_date))
-        
     elif period == "weekly":
         cursor.execute("""
             SELECT 
@@ -279,7 +262,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
             GROUP BY EXTRACT(DOW FROM s.date)
             ORDER BY label ASC
         """)
-        
     elif period == "monthly":
         cursor.execute("""
             SELECT 
@@ -293,7 +275,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
             GROUP BY EXTRACT(DAY FROM s.date)
             ORDER BY label ASC
         """)
-        
     elif period == "yearly":
         cursor.execute("""
             SELECT 
@@ -306,7 +287,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
             GROUP BY EXTRACT(MONTH FROM s.date)
             ORDER BY label ASC
         """)
-        
     elif period == "all":
         cursor.execute("""
             SELECT 
@@ -319,7 +299,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
             ORDER BY label ASC
             LIMIT 24
         """)
-        
     else:  # daily
         cursor.execute("""
             SELECT 
@@ -336,7 +315,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
     rows = cursor.fetchall()
     conn.close()
     
-    # Convert labels to readable format
     result = []
     for row in rows:
         label = row[0]
@@ -346,10 +324,8 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
         elif period == "monthly":
             label = f"Day {int(label)}"
         elif period == "yearly":
-            months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            idx = int(label) - 1 if label else 0
-            label = months[idx] if 0 <= idx < 12 else str(label)
+            months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            label = months[int(label) - 1] if 1 <= int(label) <= 12 else str(label)
         elif period == "all":
             if hasattr(label, 'strftime'):
                 label = label.strftime('%b %Y')
@@ -357,8 +333,6 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
                 label = str(label)
         elif period == "daily":
             label = f"{int(label)}:00"
-        else:
-            label = str(label)
             
         result.append({
             'label': str(label),
