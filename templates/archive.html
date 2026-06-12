@@ -21,7 +21,7 @@
 
     <!-- Archive List -->
     <div id="archiveList" class="space-y-4">
-        <!-- dynamic cards -->
+        <div class="text-center text-gray-400 py-8">Loading archive data...</div>
     </div>
 </div>
 
@@ -44,7 +44,7 @@
 
     // Helper: format currency
     function formatMoney(amount) {
-        return '₵' + amount.toFixed(2);
+        return '₵' + (parseFloat(amount) || 0).toFixed(2);
     }
 
     // Helper: escape HTML
@@ -85,16 +85,27 @@
     // Load archive data from API
     async function loadArchive() {
         const status = document.getElementById('statusFilter').value;
-        const res = await fetch(`/api/archive?status=${status}`);
-        const data = await res.json();
-        currentArchiveData = data;
-        renderArchive(data);
+        const container = document.getElementById('archiveList');
+        container.innerHTML = '<div class="text-center text-gray-400 py-8">Loading archive data...</div>';
+        
+        try {
+            const res = await fetch(`/api/archive?status=${status}`);
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            const data = await res.json();
+            currentArchiveData = data;
+            renderArchive(data);
+        } catch (error) {
+            console.error("Error loading archive:", error);
+            container.innerHTML = '<div class="text-center text-red-400 py-8">Error loading archive data. Please refresh the page.</div>';
+        }
     }
 
     // Render cards
     function renderArchive(items) {
         const container = document.getElementById('archiveList');
-        if (!items.length) {
+        if (!items || !items.length) {
             container.innerHTML = '<div class="text-center text-gray-400 py-8">No archive data available.</div>';
             return;
         }
@@ -122,7 +133,7 @@
             detailsDiv.className = 'text-gray-700 text-sm mb-3';
             if (item.action === 'ACTIVE') {
                 detailsDiv.innerHTML = `
-                    📦 Stock: ${item.stock} | ₵${item.cost.toFixed(2)} | ₵${item.price.toFixed(2)} | 💰 Disc: ₵${item.discount.toFixed(2)} | 📂 ${escapeHtml(item.category)}
+                    📦 Stock: ${item.stock} | ${formatMoney(item.cost)} | ${formatMoney(item.price)} | 💰 Disc: ${formatMoney(item.discount)} | 📂 ${escapeHtml(item.category)}
                 `;
             } else {
                 let details = `
@@ -173,28 +184,37 @@
 
     // View batches modal
     async function viewBatches(name, brand) {
-        const res = await fetch(`/api/archive/batches?name=${encodeURIComponent(name)}&brand=${encodeURIComponent(brand)}`);
-        const batches = await res.json();
         const modalTitle = document.getElementById('batchModalTitle');
-        modalTitle.innerText = `Batches – ${name} (${brand})`;
         const container = document.getElementById('batchList');
-        if (!batches.length) {
-            container.innerHTML = '<div class="text-gray-400 text-center">No batches found.</div>';
-        } else {
-            container.innerHTML = '';
-            batches.forEach(b => {
-                const div = document.createElement('div');
-                div.className = 'border rounded p-2 mb-2';
-                div.innerHTML = `
-                    <strong>Batch #${b.batch_id}</strong><br>
-                    Qty: ${b.quantity} | Remaining: ${b.remaining_quantity}<br>
-                    Cost: ${formatMoney(b.cost_price)} | Selling: ${formatMoney(b.selling_price)} | Disc: ${formatMoney(b.discount)}<br>
-                    Date: ${formatDate(b.date)}
-                `;
-                container.appendChild(div);
-            });
-        }
+        container.innerHTML = '<div class="text-center text-gray-400 py-4">Loading batches...</div>';
+        modalTitle.innerText = `Batches – ${name} (${brand})`;
         document.getElementById('batchModal').classList.remove('hidden');
+        
+        try {
+            const res = await fetch(`/api/archive/batches?name=${encodeURIComponent(name)}&brand=${encodeURIComponent(brand)}`);
+            if (!res.ok) throw new Error('Failed to load batches');
+            const batches = await res.json();
+            
+            if (!batches.length) {
+                container.innerHTML = '<div class="text-gray-400 text-center py-4">No batches found.</div>';
+            } else {
+                container.innerHTML = '';
+                batches.forEach(b => {
+                    const div = document.createElement('div');
+                    div.className = 'border rounded p-2 mb-2';
+                    div.innerHTML = `
+                        <strong>Batch #${b.batch_id}</strong><br>
+                        Qty: ${b.quantity} | Remaining: ${b.remaining_quantity}<br>
+                        Cost: ${formatMoney(b.cost_price)} | Selling: ${formatMoney(b.selling_price)} | Disc: ${formatMoney(b.discount)}<br>
+                        Date: ${formatDate(b.date)}
+                    `;
+                    container.appendChild(div);
+                });
+            }
+        } catch (error) {
+            console.error("Error loading batches:", error);
+            container.innerHTML = '<div class="text-center text-red-400 py-4">Error loading batches.</div>';
+        }
     }
 
     function closeBatchModal() {

@@ -604,7 +604,6 @@ def api_sales_complete():
     cheque_number = data.get('cheque_number')
     
     try:
-        # Pass payment information to create_multi_sale
         result = create_multi_sale(
             cart_items, 
             sale_datetime, 
@@ -632,7 +631,6 @@ def api_sales_complete():
                 'selected_batches': product_batches
             })
         
-        # Pass payment info to receipt generation
         receipt_file, receipt_text = generate_receipt_multi(
             receipt_cart, 
             result['total'],
@@ -763,7 +761,7 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API (FULLY FIXED) =====================
+# ===================== TODAY'S SALES API =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
@@ -776,7 +774,6 @@ def api_today_sales():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Simplified query - removed exclude_permanent for testing
     select_clause = """
         SELECT 
             sales.id, 
@@ -806,7 +803,6 @@ def api_today_sales():
     
     try:
         if start_date and end_date:
-            print(f"📅 Using custom date range: {start_date} to {end_date}")
             cursor.execute(f"""
                 {select_clause}
                 {from_clause}
@@ -816,7 +812,6 @@ def api_today_sales():
             """, (start_date, end_date))
         else:
             if period == 'weekly':
-                print("📅 Using weekly filter")
                 cursor.execute(f"""
                     {select_clause}
                     {from_clause}
@@ -825,7 +820,6 @@ def api_today_sales():
                     ORDER BY sales.date DESC
                 """)
             elif period == 'monthly':
-                print("📅 Using monthly filter")
                 cursor.execute(f"""
                     {select_clause}
                     {from_clause}
@@ -835,7 +829,6 @@ def api_today_sales():
                     ORDER BY sales.date DESC
                 """)
             elif period == 'yearly':
-                print("📅 Using yearly filter")
                 cursor.execute(f"""
                     {select_clause}
                     {from_clause}
@@ -844,15 +837,13 @@ def api_today_sales():
                     ORDER BY sales.date DESC
                 """)
             elif period == 'all':
-                print("📅 Using all time filter")
                 cursor.execute(f"""
                     {select_clause}
                     {from_clause}
                     WHERE sales.reversed = 0
                     ORDER BY sales.date DESC
                 """)
-            else:  # daily
-                print("📅 Using daily filter (today)")
+            else:
                 cursor.execute(f"""
                     {select_clause}
                     {from_clause}
@@ -862,8 +853,6 @@ def api_today_sales():
                 """)
         
         rows = cursor.fetchall()
-        print(f"✅ Query returned {len(rows)} rows")
-        
         sales_data = []
         for r in rows:
             sales_data.append({
@@ -886,13 +875,10 @@ def api_today_sales():
                 'cheque_number': r[16] if len(r) > 16 else None
             })
         
-        print(f"📦 Returning {len(sales_data)} sales records")
         return jsonify(sales_data)
         
     except Exception as e:
-        print(f"❌ Error in today_sales API: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error in today_sales API: {str(e)}")
         return jsonify([]), 500
     finally:
         conn.close()
@@ -1022,67 +1008,118 @@ def api_analytics_top_products():
     result = [{'name': r[0], 'brand': r[1] or '', 'category': r[2] or '', 'quantity': int(r[3])} for r in products]
     return jsonify(result)
 
-# ===================== ARCHIVE API =====================
+# ===================== ARCHIVE API (FIXED) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
     status_filter = request.args.get('status', 'ALL')
-    active_products = get_all_products_service()
-    active_items = [{
-        'id': None,
-        'name': p['name'],
-        'brand': p['brand'],
-        'category': p['category'],
-        'cost': p['cost_price'],
-        'price': p['selling_price'],
-        'stock': p['stock'],
-        'discount': p['discount'],
-        'action': 'ACTIVE',
-        'date': p.get('created_at') or '',
-        'source': 'active',
-        'is_permanent': False,
-        'batch_id': None,
-        'batch_quantity': None,
-        'batch_remaining': None,
-        'product_id': p['product_id']
-    } for p in active_products]
-    deleted_records = get_deleted_products()
-    deleted_items = []
-    for r in deleted_records:
-        action = r[8].upper() if len(r) > 8 else 'UNKNOWN'
-        is_permanent = action == 'PERMANENTLY DELETED'
-        deleted_items.append({
-            'id': r[0],
-            'name': r[1] or '-',
-            'brand': r[2] or '-',
-            'category': r[6] or '-',
-            'cost': r[3] or 0,
-            'price': r[4] or 0,
-            'stock': r[5] or 0,
-            'discount': r[7] or 0,
-            'action': action,
-            'date': r[9] if len(r) > 9 else '',
-            'source': r[14] if len(r) > 14 else 'product',
-            'is_permanent': is_permanent,
-            'batch_id': r[10] if len(r) > 10 else None,
-            'batch_quantity': r[11] if len(r) > 11 else None,
-            'batch_remaining': r[12] if len(r) > 12 else None,
-            'product_id': r[13] if len(r) > 13 else None
-        })
-    combined = active_items + deleted_items
-    if status_filter != 'ALL':
-        combined = [item for item in combined if item['action'] == status_filter]
-    def sort_key(item):
-        if item['action'] == 'ACTIVE':
-            return (datetime.max, item['name'])
-        else:
-            try:
-                date_obj = datetime.fromisoformat(str(item['date']))
-            except:
-                date_obj = datetime.min
-            return (date_obj, item['name'])
-    combined.sort(key=sort_key, reverse=True)
-    return jsonify(combined)
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get active products
+        cursor.execute("""
+            SELECT 
+                product_id,
+                name,
+                brand,
+                category,
+                cost_price,
+                selling_price,
+                stock,
+                discount,
+                created_at
+            FROM products
+            WHERE NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = products.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+        """)
+        active_rows = cursor.fetchall()
+        
+        active_items = []
+        for r in active_rows:
+            active_items.append({
+                'id': None,
+                'name': r[1],
+                'brand': r[2] or '',
+                'category': r[3] or '',
+                'cost': float(r[4] or 0),
+                'price': float(r[5] or 0),
+                'stock': int(r[6] or 0),
+                'discount': float(r[7] or 0),
+                'action': 'ACTIVE',
+                'date': r[8].isoformat() if hasattr(r[8], 'isoformat') else str(r[8]) if r[8] else '',
+                'source': 'active',
+                'is_permanent': False,
+                'batch_id': None,
+                'batch_quantity': None,
+                'batch_remaining': None,
+                'product_id': r[0]
+            })
+        
+        # Get deleted records
+        cursor.execute("""
+            SELECT 
+                id, name, brand, cost_price, selling_price, stock, 
+                category, discount, action, deleted_at, batch_id, 
+                batch_quantity, batch_remaining, product_id, source
+            FROM deleted_products
+            ORDER BY deleted_at DESC
+        """)
+        deleted_rows = cursor.fetchall()
+        
+        deleted_items = []
+        for r in deleted_rows:
+            action = r[8].upper() if len(r) > 8 else 'UNKNOWN'
+            is_permanent = action == 'PERMANENTLY DELETED'
+            deleted_items.append({
+                'id': r[0],
+                'name': r[1] or '-',
+                'brand': r[2] or '-',
+                'category': r[6] or '-',
+                'cost': float(r[3] or 0),
+                'price': float(r[4] or 0),
+                'stock': int(r[5] or 0),
+                'discount': float(r[7] or 0),
+                'action': action,
+                'date': r[9].isoformat() if hasattr(r[9], 'isoformat') else str(r[9]) if r[9] else '',
+                'source': r[14] if len(r) > 14 else 'product',
+                'is_permanent': is_permanent,
+                'batch_id': r[10] if len(r) > 10 else None,
+                'batch_quantity': r[11] if len(r) > 11 else None,
+                'batch_remaining': r[12] if len(r) > 12 else None,
+                'product_id': r[13] if len(r) > 13 else None
+            })
+        
+        combined = active_items + deleted_items
+        
+        if status_filter != 'ALL':
+            combined = [item for item in combined if item['action'] == status_filter]
+        
+        def sort_key(item):
+            if item['action'] == 'ACTIVE':
+                return (datetime.max, item['name'])
+            else:
+                try:
+                    date_obj = datetime.fromisoformat(str(item['date'])) if item['date'] else datetime.min
+                except:
+                    date_obj = datetime.min
+                return (date_obj, item['name'])
+        
+        combined.sort(key=sort_key, reverse=True)
+        
+        return jsonify(combined)
+        
+    except Exception as e:
+        print(f"Error in archive API: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @app.route('/api/archive/restore', methods=['POST'])
 @login_required
