@@ -373,7 +373,7 @@ def api_get_purchases():
     purchases = get_all_purchases()
     return jsonify([serialize_purchase(p) for p in purchases])
 
-@app.route('/api/purchases', methods(['POST'])
+@app.route('/api/purchases', methods=['POST'])
 @login_required
 def api_add_purchase():
     data = request.json
