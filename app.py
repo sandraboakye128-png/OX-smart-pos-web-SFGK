@@ -763,7 +763,7 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API =====================
+# ===================== TODAY'S SALES API (FIXED) =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
@@ -821,7 +821,7 @@ def api_today_sales():
                 {select_clause}
                 {from_clause}
                 {exclude_permanent}
-                AND sales.date >= CURRENT_DATE - INTERVAL '6 days'
+                AND sales.date >= DATE_TRUNC('week', CURRENT_DATE)
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
@@ -830,8 +830,8 @@ def api_today_sales():
                 {select_clause}
                 {from_clause}
                 {exclude_permanent}
-                AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)
                 AND EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
@@ -841,6 +841,14 @@ def api_today_sales():
                 {from_clause}
                 {exclude_permanent}
                 AND EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                AND sales.reversed = 0
+                ORDER BY sales.date DESC
+            """)
+        elif period == 'all':
+            cursor.execute(f"""
+                {select_clause}
+                {from_clause}
+                {exclude_permanent}
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
             """)
@@ -950,7 +958,7 @@ def api_today_sales_pdf():
                      download_name=f"SalesReport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== ANALYTICS API (UPDATED WITH DATE RANGES) =====================
+# ===================== ANALYTICS API (FIXED) =====================
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
@@ -960,7 +968,7 @@ def api_analytics_summary():
     
     if start_date and end_date:
         items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(
-            period, start_date, end_date
+            None, start_date, end_date
         )
     else:
         items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(period)
@@ -981,7 +989,7 @@ def api_analytics_trend():
     end_date = request.args.get('end_date')
     
     if start_date and end_date:
-        trend = get_sales_trend_multi(period, start_date, end_date)
+        trend = get_sales_trend_multi(None, start_date, end_date)
     else:
         trend = get_sales_trend_multi(period)
     
@@ -996,7 +1004,7 @@ def api_analytics_top_products():
     end_date = request.args.get('end_date')
     
     if start_date and end_date:
-        products = get_top_products_multi(period, limit, start_date, end_date)
+        products = get_top_products_multi(None, limit, start_date, end_date)
     else:
         products = get_top_products_multi(period, limit)
     

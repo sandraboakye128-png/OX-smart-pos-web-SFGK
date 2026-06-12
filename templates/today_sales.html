@@ -165,21 +165,37 @@
 
     // Fetch sales data from API
     async function loadSalesData() {
-        const range = getDateRange();
-        let url = '/api/today_sales?period=' + currentPeriod;
+        let url = '';
         
-        if (range.start_date && range.end_date && currentPeriod !== 'all') {
-            url = `/api/today_sales?start_date=${range.start_date}&end_date=${range.end_date}`;
+        if (currentStartDate && currentEndDate) {
+            // Custom date range
+            url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}`;
         } else if (currentPeriod === 'all') {
+            // All time - no date filter
             url = '/api/today_sales?period=all';
+        } else if (currentPeriod === 'daily') {
+            url = '/api/today_sales?period=daily';
+        } else if (currentPeriod === 'weekly') {
+            url = '/api/today_sales?period=weekly';
+        } else if (currentPeriod === 'monthly') {
+            url = '/api/today_sales?period=monthly';
+        } else if (currentPeriod === 'yearly') {
+            url = '/api/today_sales?period=yearly';
+        } else {
+            url = '/api/today_sales?period=daily';
         }
         
         console.log("Loading sales with URL:", url);
         
-        const res = await fetch(url);
-        const data = await res.json();
-        currentSalesData = data;
-        applySearchAndRender();
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            currentSalesData = data;
+            applySearchAndRender();
+        } catch (error) {
+            console.error("Error loading sales data:", error);
+            document.getElementById('salesList').innerHTML = '<div class="text-center text-red-400 py-8">Error loading sales data. Please refresh.</div>';
+        }
     }
 
     // Filter by search term and render
