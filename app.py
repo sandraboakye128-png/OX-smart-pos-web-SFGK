@@ -138,11 +138,14 @@ def inject_user():
         }
     return {'current_user': None}
 
-# ---------------------- LOGIN REQUIRED DECORATOR ----------------------
+# ---------------------- LOGIN REQUIRED DECORATOR (FIXED FOR API) ----------------------
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
+            # Check if the request is for an API endpoint
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Unauthorized', 'message': 'Please log in'}), 401
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
@@ -769,8 +772,6 @@ def api_today_sales():
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     
-    print(f"📊 TODAY SALES API - period: {period}, start_date: {start_date}, end_date: {end_date}")
-    
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -1013,6 +1014,8 @@ def api_analytics_top_products():
 @login_required
 def api_archive():
     status_filter = request.args.get('status', 'ALL')
+    print(f"📁 Archive API called with status filter: {status_filter}")
+    
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -1038,6 +1041,7 @@ def api_archive():
             )
         """)
         active_rows = cursor.fetchall()
+        print(f"✅ Found {len(active_rows)} active products")
         
         active_items = []
         for r in active_rows:
@@ -1070,23 +1074,24 @@ def api_archive():
             ORDER BY deleted_at DESC
         """)
         deleted_rows = cursor.fetchall()
+        print(f"✅ Found {len(deleted_rows)} deleted records")
         
         deleted_items = []
         for r in deleted_rows:
-            action = r[8].upper() if len(r) > 8 else 'UNKNOWN'
+            action = str(r[8]).upper() if len(r) > 8 and r[8] else 'UNKNOWN'
             is_permanent = action == 'PERMANENTLY DELETED'
             deleted_items.append({
                 'id': r[0],
-                'name': r[1] or '-',
-                'brand': r[2] or '-',
-                'category': r[6] or '-',
+                'name': r[1] if r[1] else '-',
+                'brand': r[2] if r[2] else '-',
+                'category': r[6] if r[6] else '-',
                 'cost': float(r[3] or 0),
                 'price': float(r[4] or 0),
                 'stock': int(r[5] or 0),
                 'discount': float(r[7] or 0),
                 'action': action,
                 'date': r[9].isoformat() if hasattr(r[9], 'isoformat') else str(r[9]) if r[9] else '',
-                'source': r[14] if len(r) > 14 else 'product',
+                'source': r[14] if len(r) > 14 and r[14] else 'product',
                 'is_permanent': is_permanent,
                 'batch_id': r[10] if len(r) > 10 else None,
                 'batch_quantity': r[11] if len(r) > 11 else None,
@@ -1098,6 +1103,7 @@ def api_archive():
         
         if status_filter != 'ALL':
             combined = [item for item in combined if item['action'] == status_filter]
+            print(f"📊 Filtered to {len(combined)} items with status '{status_filter}'")
         
         def sort_key(item):
             if item['action'] == 'ACTIVE':
@@ -1111,10 +1117,11 @@ def api_archive():
         
         combined.sort(key=sort_key, reverse=True)
         
+        print(f"📦 Returning {len(combined)} items")
         return jsonify(combined)
         
     except Exception as e:
-        print(f"Error in archive API: {str(e)}")
+        print(f"❌ Error in archive API: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
