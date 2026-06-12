@@ -18,6 +18,7 @@
                 <label class="block text-gray-700 text-sm font-bold mb-2">🔒 Password</label>
                 <input type="password" id="password" name="password" required
                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <p class="text-xs text-gray-500 mt-1">Password must be at least 4 characters</p>
             </div>
             <div class="mb-4">
                 <label class="flex items-center">
@@ -25,12 +26,13 @@
                     <span class="text-sm text-gray-600">👁 Show Password</span>
                 </label>
             </div>
-            <div id="roleContainer" class="mb-6" style="display: none;">
+            <div id="roleContainer" class="mb-6">
                 <label class="block text-gray-700 text-sm font-bold mb-2">🛡 Role</label>
                 <select id="role" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
                 </select>
+                <p id="roleNote" class="text-xs text-gray-500 mt-1"></p>
             </div>
             <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg transition">
                 ✅ Register
@@ -53,44 +55,86 @@
         passwordField.type = showPasswordCheckbox.checked ? 'text' : 'password';
     });
     
-    // Check if an admin already exists → show role dropdown if true
+    // Check if an admin already exists
     async function checkAdminExists() {
-        // We need a new endpoint to tell us if admin exists
-        // Alternatively, we can try to fetch current session, but better to ask backend
-        const res = await fetch('/api/auth/admin_exists');
-        const data = await res.json();
-        if (data.admin_exists) {
+        try {
+            const res = await fetch('/api/auth/admin_exists');
+            const data = await res.json();
+            const roleContainer = document.getElementById('roleContainer');
+            const roleNote = document.getElementById('roleNote');
+            
+            if (data.admin_exists) {
+                // Admin already exists - hide role selection, only user role allowed
+                roleContainer.style.display = 'none';
+                // Set role to user by default
+                document.getElementById('role').value = 'user';
+                console.log('Admin exists - role selection hidden');
+            } else {
+                // No admin exists - show role selection
+                roleContainer.style.display = 'block';
+                roleNote.textContent = 'First user can create Admin account';
+                console.log('No admin exists - role selection shown');
+            }
+        } catch (error) {
+            console.error('Error checking admin existence:', error);
+            // Default to showing role container if API fails
             document.getElementById('roleContainer').style.display = 'block';
         }
     }
-    
-    // We'll add an optional helper endpoint in app.py (see below)
-    // For simplicity, we can also just show role selection always – but desktop shows only if admin exists.
-    // Let's implement the helper endpoint.
-    checkAdminExists();
     
     // Handle signup form submission
     const signupForm = document.getElementById('signupForm');
     signupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
+        
+        // Validate username
+        if (!username) {
+            alert('Please enter a username');
+            return;
+        }
+        
+        // Validate password length
+        if (password.length < 4) {
+            alert('Password must be at least 4 characters long');
+            return;
+        }
+        
+        // Determine role
         let role = 'user';
-        if (document.getElementById('roleContainer').style.display === 'block') {
+        const roleContainer = document.getElementById('roleContainer');
+        if (roleContainer.style.display !== 'none') {
             role = document.getElementById('role').value;
         }
-        const response = await fetch('/api/auth/signup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, role })
-        });
-        const data = await response.json();
-        if (data.success) {
-            alert('Account created successfully! Please login.');
-            window.location.href = '/login';
-        } else {
-            alert('Signup failed: ' + data.error);
+        
+        try {
+            const response = await fetch('/api/auth/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, role })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                if (role === 'admin') {
+                    alert('Admin account created successfully! Please login with your credentials.');
+                } else {
+                    alert('Account created successfully! Please login.');
+                }
+                window.location.href = '/login';
+            } else {
+                alert('Signup failed: ' + (data.error || 'Username may already exist'));
+            }
+        } catch (error) {
+            console.error('Signup error:', error);
+            alert('Network error. Please try again.');
         }
     });
+    
+    // Check admin status when page loads
+    checkAdminExists();
 </script>
 {% endblock %}

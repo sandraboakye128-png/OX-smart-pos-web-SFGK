@@ -250,9 +250,17 @@ def api_auth_signup():
     data = request.json
     username = data.get('username')
     password = data.get('password')
-    role = data.get('role', 'user')
-    if not admin_exists():
-        role = 'admin'
+    requested_role = data.get('role', 'user')
+    
+    # Security: If an admin already exists, force new users to be 'user'
+    if admin_exists():
+        role = 'user'
+        print(f"⚠️ Admin exists - forcing role 'user' for new user: {username}")
+    else:
+        # First user ever - allow the requested role (can be admin or user)
+        role = requested_role
+        print(f"✅ First user - creating with role: {role} for {username}")
+    
     success = create_user(username, password, role)
     if success:
         return jsonify({'success': True})

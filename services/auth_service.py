@@ -1,185 +1,172 @@
-from database.db import get_connection, return_connection
+import sqlite3
 import hashlib
 import os
+from database.db import get_connection, return_connection
+
+# ---------- Ensure database folder exists ----------
+DB_DIR = "database"
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "auth.db")  # Separate auth DB
+
+# ---------------- INIT DATABASE ----------------
+def init_auth_db():
+    """Create users table if it doesn't exist."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    conn.commit()
+    conn.close()
+
 
 # ---------------- HASH PASSWORD ----------------
 def hash_password(password: str) -> str:
+    """Return a SHA-256 hash of the password."""
     return hashlib.sha256(password.encode()).hexdigest()
+
 
 # ---------------- CREATE USER ----------------
 def create_user(username: str, password: str, role: str = "user") -> bool:
-    conn = get_connection()
+    """Create a new user. Returns True if successful, False if username exists."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO users (username, password, role) VALUES (%s, %s, %s)",
+            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
             (username, hash_password(password), role)
         )
         conn.commit()
         return True
-    except Exception as e:
-        print(f"Create user error: {e}")
-        conn.rollback()
+    except sqlite3.IntegrityError:
         return False
     finally:
-        return_connection(conn)
+        conn.close()
 
-# ---------------- LOGIN USER (FIXED - uses tuple indexing) ----------------
+
+# ---------------- LOGIN USER ----------------
 def login_user(username: str, password: str):
-    conn = get_connection()
+    """Return user dict if credentials are correct, else None."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "SELECT id, username, role, password FROM users WHERE username = %s",
-            (username,)
-        )
-        row = cursor.fetchone()  # Returns a TUPLE, not dictionary
-        
-        if row:
-            # Access by index: (id, username, role, password)
-            user_id = row[0]
-            user_username = row[1]
-            user_role = row[2]
-            user_password = row[3]
-            
-            if user_password == hash_password(password):
-                return {
-                    "id": user_id,
-                    "username": user_username,
-                    "role": user_role
-                }
-        return None
-    except Exception as e:
-        print(f"Login error: {e}")
-        raise e
-    finally:
-        return_connection(conn)
+
+    cursor.execute(
+        "SELECT id, username, role, password FROM users WHERE username=?",
+        (username,)
+    )
+    user = cursor.fetchone()
+    conn.close()
+
+    if user and user[3] == hash_password(password):
+        return {"id": user[0], "username": user[1], "role": user[2]}
+    return None
+
 
 # ---------------- CHECK ADMIN EXISTS ----------------
 def admin_exists() -> bool:
-    conn = get_connection()
+    """Return True if an admin user exists."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1")
-        row = cursor.fetchone()
-        return row is not None
-    except Exception as e:
-        print(f"Admin exists check error: {e}")
-        return False
-    finally:
-        return_connection(conn)
 
-# ---------------- GET USER BY ID ----------------
-def get_user_by_id(user_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "SELECT id, username, role, created_at FROM users WHERE id = %s",
-            (user_id,)
-        )
-        row = cursor.fetchone()
-        if row:
-            return {
-                "id": row[0],
-                "username": row[1],
-                "role": row[2],
-                "created_at": row[3]
-            }
-        return None
-    finally:
-        return_connection(conn)
+    cursor.execute("SELECT 1 FROM users WHERE role='admin' LIMIT 1")
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
 
 # ---------------- GET ALL USERS ----------------
 def get_all_users():
-    conn = get_connection()
+    """Get all users (for admin management)."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        users = []
-        for row in rows:
-            users.append({
-                "id": row[0],
-                "username": row[1],
-                "role": row[2],
-                "created_at": row[3]
-            })
-        return users
-    finally:
-        return_connection(conn)
+    
+    cursor.execute("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [{"id": r[0], "username": r[1], "role": r[2], "created_at": r[3]} for r in rows]
+
 
 # ---------------- UPDATE USER ROLE ----------------
-def update_user_role(user_id: int, new_role: str):
-    conn = get_connection()
+def update_user_role(user_id: int, new_role: str) -> bool:
+    """Update a user's role."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
     try:
-        cursor.execute(
-            "UPDATE users SET role = %s WHERE id = %s RETURNING id, username, role",
-            (new_role, user_id)
-        )
-        row = cursor.fetchone()
-        conn.commit()
-        if row:
-            return {
-                "id": row[0],
-                "username": row[1],
-                "role": row[2]
-            }
-        return None
-    except Exception as e:
-        conn.rollback()
-        print(f"Update role error: {e}")
-        raise e
-    finally:
-        return_connection(conn)
-
-# ---------------- DELETE USER ----------------
-def delete_user(user_id: int) -> bool:
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,))
-        row = cursor.fetchone()
-        conn.commit()
-        return row is not None
-    except Exception as e:
-        conn.rollback()
-        print(f"Delete user error: {e}")
-        return False
-    finally:
-        return_connection(conn)
-
-# ---------------- CHANGE PASSWORD ----------------
-def change_password(user_id: int, old_password: str, new_password: str) -> bool:
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        # First verify old password
-        old_hashed = hash_password(old_password)
-        cursor.execute("SELECT password FROM users WHERE id = %s", (user_id,))
-        row = cursor.fetchone()
-        
-        if not row or row[0] != old_hashed:
-            return False
-        
-        # Update to new password
-        new_hashed = hash_password(new_password)
-        cursor.execute("UPDATE users SET password = %s WHERE id = %s", (new_hashed, user_id))
+        cursor.execute("UPDATE users SET role = ? WHERE id = ?", (new_role, user_id))
         conn.commit()
         return True
     except Exception as e:
-        conn.rollback()
-        print(f"Change password error: {e}")
+        print(f"Error updating user role: {e}")
         return False
     finally:
-        return_connection(conn)
+        conn.close()
 
-# ---------------- CREATE DEFAULT ADMIN ----------------
-def create_default_admin():
-    """Create default admin user if no users exist"""
-    conn = get_connection()
+
+# ---------------- DELETE USER ----------------
+def delete_user(user_id: int) -> bool:
+    """Delete a user."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    try:
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error deleting user: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ---------------- CHANGE PASSWORD ----------------
+def change_password(user_id: int, old_password: str, new_password: str) -> bool:
+    """Change user's password."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Verify old password
+        cursor.execute("SELECT password FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        
+        if not row or row[0] != hash_password(old_password):
+            return False
+        
+        # Update to new password
+        cursor.execute("UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), user_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error changing password: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ---------------- CREATE DEFAULT ADMIN IF NO USERS EXIST ----------------
+def create_default_admin_if_needed():
+    """Create default admin only if no users exist at all."""
+    init_auth_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
     try:
         # Check if any users exist
         cursor.execute("SELECT COUNT(*) FROM users")
@@ -187,21 +174,20 @@ def create_default_admin():
         
         if count == 0:
             print("No users found. Creating default admin user...")
-            admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
-            hashed = hash_password(admin_password)
+            default_password = "admin123"
+            hashed = hash_password(default_password)
             
-            cursor.execute("""
-                INSERT INTO users (username, password, role)
-                VALUES (%s, %s, %s)
-            """, ("admin", hashed, "admin"))
-            
+            cursor.execute(
+                "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                ("admin", hashed, "admin")
+            )
             conn.commit()
-            print(f"Default admin user created. Username: admin, Password: {admin_password}")
+            print(f"Default admin user created. Username: admin, Password: {default_password}")
+            print("IMPORTANT: Please change the default password after first login!")
             return True
         return False
     except Exception as e:
         print(f"Error creating default admin: {e}")
-        conn.rollback()
         return False
     finally:
-        return_connection(conn)
+        conn.close()
