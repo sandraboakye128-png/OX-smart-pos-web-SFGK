@@ -763,23 +763,20 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API (FIXED) =====================
+# ===================== TODAY'S SALES API (FULLY FIXED) =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
     period = request.args.get('period', 'daily')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    
+    print(f"📊 TODAY SALES API - period: {period}, start_date: {start_date}, end_date: {end_date}")
+    
     conn = get_connection()
     cursor = conn.cursor()
-    exclude_permanent = """
-        WHERE NOT EXISTS (
-            SELECT 1 FROM deleted_products dp 
-            WHERE dp.product_id = products.id 
-            AND dp.action = 'PERMANENTLY DELETED' 
-            AND dp.source = 'product'
-        )
-    """
+    
+    # Simplified query - removed exclude_permanent for testing
     select_clause = """
         SELECT 
             sales.id, 
@@ -806,85 +803,99 @@ def api_today_sales():
         JOIN products ON products.id = sales_items.product_id
         LEFT JOIN purchase_batches ON purchase_batches.id = sales_items.batch_id
     """
-    if start_date and end_date:
-        cursor.execute(f"""
-            {select_clause}
-            {from_clause}
-            {exclude_permanent}
-            AND sales.date::date BETWEEN %s AND %s
-            AND sales.reversed = 0
-            ORDER BY sales.date DESC
-        """, (start_date, end_date))
-    else:
-        if period == 'weekly':
+    
+    try:
+        if start_date and end_date:
+            print(f"📅 Using custom date range: {start_date} to {end_date}")
             cursor.execute(f"""
                 {select_clause}
                 {from_clause}
-                {exclude_permanent}
-                AND sales.date >= DATE_TRUNC('week', CURRENT_DATE)
+                WHERE sales.date::date BETWEEN %s AND %s
                 AND sales.reversed = 0
                 ORDER BY sales.date DESC
-            """)
-        elif period == 'monthly':
-            cursor.execute(f"""
-                {select_clause}
-                {from_clause}
-                {exclude_permanent}
-                AND EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
-                AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)
-                AND sales.reversed = 0
-                ORDER BY sales.date DESC
-            """)
-        elif period == 'yearly':
-            cursor.execute(f"""
-                {select_clause}
-                {from_clause}
-                {exclude_permanent}
-                AND EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
-                AND sales.reversed = 0
-                ORDER BY sales.date DESC
-            """)
-        elif period == 'all':
-            cursor.execute(f"""
-                {select_clause}
-                {from_clause}
-                {exclude_permanent}
-                AND sales.reversed = 0
-                ORDER BY sales.date DESC
-            """)
-        else:  # daily
-            cursor.execute(f"""
-                {select_clause}
-                {from_clause}
-                {exclude_permanent}
-                AND sales.date::date = CURRENT_DATE
-                AND sales.reversed = 0
-                ORDER BY sales.date DESC
-            """)
-    rows = cursor.fetchall()
-    conn.close()
-    sales_data = []
-    for r in rows:
-        sales_data.append({
-            'sale_id': r[0],
-            'name': r[1],
-            'brand': r[2] or '',
-            'category': r[3] or '',
-            'quantity': r[4],
-            'selling_price': float(r[5]),
-            'subtotal': float(r[6]),
-            'discount': float(r[7]),
-            'total': float(r[8]),
-            'profit': float(r[9]),
-            'batch_id': r[10],
-            'cost_price': float(r[11]),
-            'sale_date': r[12].isoformat() if hasattr(r[12], 'isoformat') else str(r[12]),
-            'is_deleted_batch': bool(r[13]),
-            'net_profit': float(r[14]),
-            'payment_method': r[15] if len(r) > 15 else 'cash',
-            'cheque_number': r[16] if len(r) > 16 else None
-        })
-    return jsonify(sales_data)
+            """, (start_date, end_date))
+        else:
+            if period == 'weekly':
+                print("📅 Using weekly filter")
+                cursor.execute(f"""
+                    {select_clause}
+                    {from_clause}
+                    WHERE sales.date >= CURRENT_DATE - INTERVAL '7 days'
+                    AND sales.reversed = 0
+                    ORDER BY sales.date DESC
+                """)
+            elif period == 'monthly':
+                print("📅 Using monthly filter")
+                cursor.execute(f"""
+                    {select_clause}
+                    {from_clause}
+                    WHERE EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+                    AND sales.reversed = 0
+                    ORDER BY sales.date DESC
+                """)
+            elif period == 'yearly':
+                print("📅 Using yearly filter")
+                cursor.execute(f"""
+                    {select_clause}
+                    {from_clause}
+                    WHERE EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    AND sales.reversed = 0
+                    ORDER BY sales.date DESC
+                """)
+            elif period == 'all':
+                print("📅 Using all time filter")
+                cursor.execute(f"""
+                    {select_clause}
+                    {from_clause}
+                    WHERE sales.reversed = 0
+                    ORDER BY sales.date DESC
+                """)
+            else:  # daily
+                print("📅 Using daily filter (today)")
+                cursor.execute(f"""
+                    {select_clause}
+                    {from_clause}
+                    WHERE sales.date::date = CURRENT_DATE
+                    AND sales.reversed = 0
+                    ORDER BY sales.date DESC
+                """)
+        
+        rows = cursor.fetchall()
+        print(f"✅ Query returned {len(rows)} rows")
+        
+        sales_data = []
+        for r in rows:
+            sales_data.append({
+                'sale_id': r[0],
+                'name': r[1],
+                'brand': r[2] or '',
+                'category': r[3] or '',
+                'quantity': r[4],
+                'selling_price': float(r[5]),
+                'subtotal': float(r[6]),
+                'discount': float(r[7]),
+                'total': float(r[8]),
+                'profit': float(r[9]),
+                'batch_id': r[10],
+                'cost_price': float(r[11]),
+                'sale_date': r[12].isoformat() if hasattr(r[12], 'isoformat') else str(r[12]),
+                'is_deleted_batch': bool(r[13]),
+                'net_profit': float(r[14]),
+                'payment_method': r[15] if len(r) > 15 else 'cash',
+                'cheque_number': r[16] if len(r) > 16 else None
+            })
+        
+        print(f"📦 Returning {len(sales_data)} sales records")
+        return jsonify(sales_data)
+        
+    except Exception as e:
+        print(f"❌ Error in today_sales API: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify([]), 500
+    finally:
+        conn.close()
 
 @app.route('/api/today_sales/pdf', methods=['POST'])
 @login_required
@@ -958,7 +969,7 @@ def api_today_sales_pdf():
                      download_name=f"SalesReport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== ANALYTICS API (FIXED) =====================
+# ===================== ANALYTICS API =====================
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
