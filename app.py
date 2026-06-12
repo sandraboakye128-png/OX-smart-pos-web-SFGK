@@ -143,7 +143,6 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            # Check if the request is for an API endpoint
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized', 'message': 'Please log in'}), 401
             return redirect(url_for('login'))
@@ -284,23 +283,27 @@ def api_auth_admin_exists():
     exists = admin_exists()
     return jsonify({'admin_exists': exists})
 
-# ===================== DASHBOARD API =====================
+# ===================== DASHBOARD API (UPDATED WITH DATETIME RANGE) =====================
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required
 def api_dashboard_summary():
     selected_date_str = request.args.get('date')
+    start_datetime = request.args.get('start_datetime')
+    end_datetime = request.args.get('end_datetime')
+    
+    selected_date = None
     if selected_date_str:
         try:
             selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
         except:
-            selected_date = date.today()
-    else:
-        selected_date = date.today()
-    sales = get_today_sales(selected_date)
-    profit = get_today_profit(selected_date)
+            selected_date = None
+    
+    sales = get_today_sales(selected_date, start_datetime, end_datetime)
+    profit = get_today_profit(selected_date, start_datetime, end_datetime)
     total_products = get_total_products()
     low_stock_products = get_low_stock_products(threshold=10)
     low_stock_count = len(low_stock_products)
+    
     return jsonify({
         'sales': sales,
         'profit': profit,
@@ -313,29 +316,36 @@ def api_dashboard_summary():
 @login_required
 def api_dashboard_top_products():
     selected_date_str = request.args.get('date')
+    start_datetime = request.args.get('start_datetime')
+    end_datetime = request.args.get('end_datetime')
+    limit = int(request.args.get('limit', 10))
+    
+    selected_date = None
     if selected_date_str:
         try:
             selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
         except:
             selected_date = None
-    else:
-        selected_date = None
-    top = get_top_products(selected_date, limit=5)
-    result = [{'name': row[0], 'brand': row[1], 'category': row[2], 'qty': row[3]} for row in top]
+    
+    top = get_top_products(selected_date, limit, start_datetime, end_datetime)
+    result = [{'name': row[0], 'brand': row[1] or '', 'category': row[2] or '', 'qty': int(row[3])} for row in top]
     return jsonify(result)
 
 @app.route('/api/dashboard/sales_history', methods=['GET'])
 @login_required
 def api_dashboard_sales_history():
     selected_date_str = request.args.get('date')
+    start_datetime = request.args.get('start_datetime')
+    end_datetime = request.args.get('end_datetime')
+    
+    selected_date = None
     if selected_date_str:
         try:
             selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
         except:
             selected_date = None
-    else:
-        selected_date = None
-    history = get_sales_history(selected_date)
+    
+    history = get_sales_history(selected_date, start_datetime, end_datetime)
     result = []
     for row in history:
         date_str = row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0])
@@ -363,7 +373,7 @@ def api_get_purchases():
     purchases = get_all_purchases()
     return jsonify([serialize_purchase(p) for p in purchases])
 
-@app.route('/api/purchases', methods=['POST'])
+@app.route('/api/purchases', methods(['POST'])
 @login_required
 def api_add_purchase():
     data = request.json
@@ -1009,7 +1019,7 @@ def api_analytics_top_products():
     result = [{'name': r[0], 'brand': r[1] or '', 'category': r[2] or '', 'quantity': int(r[3])} for r in products]
     return jsonify(result)
 
-# ===================== ARCHIVE API (FULLY FIXED - REMOVED created_at) =====================
+# ===================== ARCHIVE API (FIXED - REMOVED created_at) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():

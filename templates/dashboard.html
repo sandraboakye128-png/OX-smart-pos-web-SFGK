@@ -2,11 +2,24 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Header with date picker and real-time clock -->
-    <div class="flex justify-between items-center mb-6">
+    <!-- Header with date range, time range and real-time clock -->
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
         <h1 class="text-3xl font-bold text-gray-800">Dashboard</h1>
-        <div class="flex items-center gap-4">
-            <input type="date" id="datePicker" class="border border-gray-300 rounded-lg px-3 py-2">
+        <div class="flex flex-wrap items-center gap-4">
+            <!-- Date Range Picker -->
+            <div class="flex items-center gap-2">
+                <input type="date" id="startDate" class="border border-gray-300 rounded-lg px-3 py-2" placeholder="Start Date">
+                <span class="text-gray-500">to</span>
+                <input type="date" id="endDate" class="border border-gray-300 rounded-lg px-3 py-2" placeholder="End Date">
+            </div>
+            <!-- Time Range Picker -->
+            <div class="flex items-center gap-2">
+                <input type="time" id="startTime" class="border border-gray-300 rounded-lg px-3 py-2" step="60">
+                <span class="text-gray-500">to</span>
+                <input type="time" id="endTime" class="border border-gray-300 rounded-lg px-3 py-2" step="60">
+            </div>
+            <button id="applyFilterBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Apply Filter</button>
+            <button id="resetFilterBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg">Reset</button>
             <span id="clock" class="text-gray-500 font-mono"></span>
         </div>
     </div>
@@ -14,11 +27,11 @@
     <!-- KPI Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <div class="bg-white rounded-xl shadow-md p-4">
-            <p class="text-gray-500 text-sm">Today's Sales</p>
+            <p class="text-gray-500 text-sm">Total Sales</p>
             <p id="salesValue" class="text-2xl font-bold text-indigo-600">₵0</p>
         </div>
         <div class="bg-white rounded-xl shadow-md p-4">
-            <p class="text-gray-500 text-sm">Today's Profit</p>
+            <p class="text-gray-500 text-sm">Total Profit</p>
             <p id="profitValue" class="text-2xl font-bold text-green-600">₵0</p>
         </div>
         <div class="bg-white rounded-xl shadow-md p-4">
@@ -39,7 +52,7 @@
             <div id="topProductsList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2">
                 <!-- dynamic content -->
             </div>
-            <p class="text-xs text-gray-400 mt-2">* Based on total quantity sold</p>
+            <p class="text-xs text-gray-400 mt-2">* Based on total quantity sold for selected period</p>
         </div>
         <!-- Low Stock Items -->
         <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
@@ -50,26 +63,19 @@
         </div>
     </div>
 
-    <!-- Calendar & Pie Chart (side by side) -->
+    <!-- Pie Chart & Sales History -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <!-- Calendar (simple date picker + label) -->
-        <div class="bg-white rounded-xl shadow-md p-4">
-            <h2 class="text-xl font-semibold mb-3">📅 Select Date</h2>
-            <input type="date" id="calendarDate" class="border border-gray-300 rounded-lg px-3 py-2 w-full">
-            <p class="text-gray-500 text-sm mt-2">Choose a date to view dashboard data for that day.</p>
-        </div>
         <!-- Pie Chart: Product Distribution -->
         <div class="bg-white rounded-xl shadow-md p-4">
             <h2 class="text-xl font-semibold mb-3">🥧 Product Distribution</h2>
             <canvas id="pieChart" width="400" height="300" class="mx-auto"></canvas>
         </div>
-    </div>
-
-    <!-- Sales History (scrollable) -->
-    <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
-        <h2 class="text-xl font-semibold mb-3">📊 Sales History</h2>
-        <div id="salesHistoryList" class="max-h-80 overflow-y-auto space-y-2 pr-2">
-            <!-- dynamic content -->
+        <!-- Sales History (scrollable) -->
+        <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
+            <h2 class="text-xl font-semibold mb-3">📊 Sales History</h2>
+            <div id="salesHistoryList" class="max-h-80 overflow-y-auto space-y-2 pr-2">
+                <!-- dynamic content -->
+            </div>
         </div>
     </div>
 </div>
@@ -78,7 +84,10 @@
 <script>
     let pieChart = null;
     let lowStockShown = false;
-    let currentDate = null;
+    let startDate = null;
+    let endDate = null;
+    let startTime = null;
+    let endTime = null;
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -94,13 +103,42 @@
     }
     updateClock();
 
-    // Fetch all dashboard data based on selected date
+    // Get formatted datetime range for API
+    function getDateTimeRange() {
+        let startDateTime = null;
+        let endDateTime = null;
+        
+        if (startDate) {
+            startDateTime = startDate;
+            if (startTime) {
+                startDateTime = `${startDate} ${startTime}:00`;
+            }
+        }
+        
+        if (endDate) {
+            endDateTime = endDate;
+            if (endTime) {
+                endDateTime = `${endDate} ${endTime}:00`;
+            }
+        }
+        
+        return { start_datetime: startDateTime, end_datetime: endDateTime };
+    }
+
+    // Fetch all dashboard data based on date/time range
     async function loadDashboard() {
         try {
+            const range = getDateTimeRange();
             let url = '/api/dashboard/summary';
-            if (currentDate) {
-                url += `?date=${currentDate}`;
+            const params = [];
+            
+            if (range.start_datetime) params.push(`start_datetime=${encodeURIComponent(range.start_datetime)}`);
+            if (range.end_datetime) params.push(`end_datetime=${encodeURIComponent(range.end_datetime)}`);
+            
+            if (params.length > 0) {
+                url += '?' + params.join('&');
             }
+            
             const summaryRes = await fetch(url);
             const summary = await summaryRes.json();
 
@@ -125,7 +163,7 @@
                 lowStockContainer.innerHTML = '<div class="text-gray-400">No low stock items.</div>';
             }
 
-            // Low stock alert
+            // Low stock alert (only once per page load)
             if (!lowStockShown && summary.low_stock_count > 0) {
                 let productList = summary.low_stock_products.slice(0, 10).map(item => `• ${item[0]} (${item[1]}) - ${item[3]} left`).join('\n');
                 if (summary.low_stock_products.length > 10) {
@@ -137,8 +175,8 @@
 
             // Fetch top products
             let topUrl = '/api/dashboard/top_products';
-            if (currentDate) {
-                topUrl += `?date=${currentDate}`;
+            if (params.length > 0) {
+                topUrl += '?' + params.join('&');
             }
             const topRes = await fetch(topUrl);
             const topProducts = await topRes.json();
@@ -187,8 +225,8 @@
 
             // Fetch sales history
             let historyUrl = '/api/dashboard/sales_history';
-            if (currentDate) {
-                historyUrl += `?date=${currentDate}`;
+            if (params.length > 0) {
+                historyUrl += '?' + params.join('&');
             }
             const historyRes = await fetch(historyUrl);
             const history = await historyRes.json();
@@ -219,30 +257,50 @@
         return colors;
     }
 
-    // Date picker events
-    const datePicker = document.getElementById('datePicker');
-    const calendarDate = document.getElementById('calendarDate');
-    
-    function updateFromDatePicker() {
-        currentDate = datePicker.value;
+    // Apply filter
+    function applyFilter() {
+        startDate = document.getElementById('startDate').value;
+        endDate = document.getElementById('endDate').value;
+        startTime = document.getElementById('startTime').value;
+        endTime = document.getElementById('endTime').value;
+        
+        if (!startDate && !endDate) {
+            alert('Please select at least a start date or end date');
+            return;
+        }
+        
         loadDashboard();
-        if (calendarDate) calendarDate.value = currentDate;
     }
     
-    function updateFromCalendar() {
-        currentDate = calendarDate.value;
-        if (datePicker) datePicker.value = currentDate;
+    // Reset filter
+    function resetFilter() {
+        document.getElementById('startDate').value = '';
+        document.getElementById('endDate').value = '';
+        document.getElementById('startTime').value = '';
+        document.getElementById('endTime').value = '';
+        startDate = null;
+        endDate = null;
+        startTime = null;
+        endTime = null;
         loadDashboard();
     }
     
-    datePicker.addEventListener('change', updateFromDatePicker);
-    if (calendarDate) calendarDate.addEventListener('change', updateFromCalendar);
+    // Event listeners
+    document.getElementById('applyFilterBtn').addEventListener('click', applyFilter);
+    document.getElementById('resetFilterBtn').addEventListener('click', resetFilter);
     
-    // Set today's date as default
+    // Set default date range to today
     const today = new Date().toISOString().split('T')[0];
-    datePicker.value = today;
-    if (calendarDate) calendarDate.value = today;
-    currentDate = today;
+    document.getElementById('startDate').value = today;
+    document.getElementById('endDate').value = today;
+    startDate = today;
+    endDate = today;
+    
+    // Set default time range (00:00 to 23:59)
+    document.getElementById('startTime').value = '00:00';
+    document.getElementById('endTime').value = '23:59';
+    startTime = '00:00';
+    endTime = '23:59';
     
     // Initial load
     loadDashboard();
