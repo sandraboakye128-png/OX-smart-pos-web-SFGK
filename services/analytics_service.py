@@ -1,13 +1,13 @@
 from database.db import get_connection
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 def get_summary_multi(period="daily", start_date=None, end_date=None):
     """Get sales summary for period or custom date range"""
     conn = get_connection()
     cursor = conn.cursor()
     
+    # For custom date range (from date picker)
     if start_date and end_date:
-        # Use same logic as dashboard for date range
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -19,8 +19,23 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             WHERE s.date::date BETWEEN %s AND %s
             AND s.reversed = 0
         """, (start_date, end_date))
+    
+    # For Today button
+    elif period == "daily":
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE s.date::date = CURRENT_DATE
+            AND s.reversed = 0
+        """)
+    
+    # For This Week button (last 7 days including today)
     elif period == "weekly":
-        # Last 7 days (including today)
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -32,6 +47,8 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
             AND s.reversed = 0
         """)
+    
+    # For This Month button
     elif period == "monthly":
         cursor.execute("""
             SELECT 
@@ -45,6 +62,8 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             AND EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE)
             AND s.reversed = 0
         """)
+    
+    # For This Year button
     elif period == "yearly":
         cursor.execute("""
             SELECT 
@@ -57,6 +76,8 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
             AND s.reversed = 0
         """)
+    
+    # For All Time button
     elif period == "all":
         cursor.execute("""
             SELECT 
@@ -68,7 +89,9 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             LEFT JOIN sales_items si ON s.id = si.sale_id
             WHERE s.reversed = 0
         """)
-    else:  # daily
+    
+    else:
+        # Default to daily
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -243,13 +266,13 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
     if start_date and end_date:
         cursor.execute("""
             SELECT 
-                DATE(s.date) as label,
+                s.date::date as label,
                 COALESCE(SUM(s.total), 0) as sales_total,
                 COALESCE(SUM(s.profit), 0) as profit_total
             FROM sales s
             WHERE s.date::date BETWEEN %s AND %s
             AND s.reversed = 0
-            GROUP BY DATE(s.date)
+            GROUP BY s.date::date
             ORDER BY label ASC
         """, (start_date, end_date))
     elif period == "weekly":
@@ -320,12 +343,7 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
     result = []
     for row in rows:
         label = row[0]
-        if period == "yearly":
-            if hasattr(label, 'strftime'):
-                label = label.strftime('%b %Y')
-            else:
-                label = str(label)
-        elif period == "all":
+        if period in ['yearly', 'all']:
             if hasattr(label, 'strftime'):
                 label = label.strftime('%b %Y')
             else:
@@ -335,7 +353,7 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
                 label = label.strftime('%Y-%m-%d')
             else:
                 label = str(label)
-            
+        
         result.append({
             'label': str(label),
             'sales': float(row[1]),
