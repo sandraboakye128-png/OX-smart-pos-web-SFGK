@@ -41,7 +41,7 @@
 
     <!-- Sales List (cards) -->
     <div id="salesList" class="space-y-4">
-        <!-- dynamic content -->
+        <div class="text-center text-gray-400 py-8">Loading sales data...</div>
     </div>
 
     <!-- Summary Bar (fixed at bottom of scroll) -->
@@ -83,7 +83,7 @@
 
     // Helper: format currency
     function formatMoney(amount) {
-        return '₵' + amount.toFixed(2);
+        return '₵' + (parseFloat(amount) || 0).toFixed(2);
     }
 
     // Helper: escape HTML
@@ -110,71 +110,17 @@
         }
     }
 
-    // Get date range based on period
-    function getDateRange() {
-        const now = new Date();
-        let startDate = null;
-        let endDate = null;
-        
-        if (currentStartDate && currentEndDate) {
-            return { start_date: currentStartDate, end_date: currentEndDate };
-        }
-        
-        switch(currentPeriod) {
-            case 'daily':
-                // Today
-                startDate = new Date(now);
-                startDate.setHours(0, 0, 0, 0);
-                endDate = new Date(now);
-                endDate.setHours(23, 59, 59, 999);
-                break;
-            case 'weekly':
-                // Start of current week (Sunday)
-                startDate = new Date(now);
-                startDate.setDate(now.getDate() - now.getDay());
-                startDate.setHours(0, 0, 0, 0);
-                endDate = new Date(now);
-                endDate.setHours(23, 59, 59, 999);
-                break;
-            case 'monthly':
-                // Start of current month
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-                startDate.setHours(0, 0, 0, 0);
-                endDate = new Date(now);
-                endDate.setHours(23, 59, 59, 999);
-                break;
-            case 'yearly':
-                // Start of current year
-                startDate = new Date(now.getFullYear(), 0, 1);
-                startDate.setHours(0, 0, 0, 0);
-                endDate = new Date(now);
-                endDate.setHours(23, 59, 59, 999);
-                break;
-            case 'all':
-                // All time - no date filter
-                startDate = null;
-                endDate = null;
-                break;
-        }
-        
-        return { 
-            start_date: startDate ? startDate.toISOString().split('T')[0] : null,
-            end_date: endDate ? endDate.toISOString().split('T')[0] : null
-        };
-    }
-
     // Fetch sales data from API
     async function loadSalesData() {
+        console.log("Loading sales data...");
+        
         let url = '';
         
         if (currentStartDate && currentEndDate) {
             // Custom date range
             url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}`;
         } else if (currentPeriod === 'all') {
-            // All time - no date filter
             url = '/api/today_sales?period=all';
-        } else if (currentPeriod === 'daily') {
-            url = '/api/today_sales?period=daily';
         } else if (currentPeriod === 'weekly') {
             url = '/api/today_sales?period=weekly';
         } else if (currentPeriod === 'monthly') {
@@ -185,16 +131,20 @@
             url = '/api/today_sales?period=daily';
         }
         
-        console.log("Loading sales with URL:", url);
+        console.log("Fetching from URL:", url);
         
         try {
             const res = await fetch(url);
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
             const data = await res.json();
+            console.log("Received data:", data.length, "records");
             currentSalesData = data;
             applySearchAndRender();
         } catch (error) {
             console.error("Error loading sales data:", error);
-            document.getElementById('salesList').innerHTML = '<div class="text-center text-red-400 py-8">Error loading sales data. Please refresh.</div>';
+            document.getElementById('salesList').innerHTML = '<div class="text-center text-red-400 py-8">Error loading sales data. Please refresh the page.</div>';
         }
     }
 
@@ -204,8 +154,8 @@
         let filtered = currentSalesData;
         if (searchTerm) {
             filtered = currentSalesData.filter(sale => 
-                sale.name.toLowerCase().includes(searchTerm) || 
-                sale.brand.toLowerCase().includes(searchTerm)
+                (sale.name && sale.name.toLowerCase().includes(searchTerm)) || 
+                (sale.brand && sale.brand.toLowerCase().includes(searchTerm))
             );
         }
         renderSales(filtered);
@@ -293,8 +243,8 @@
     // Render sales as cards with payment information
     function renderSales(sales) {
         const container = document.getElementById('salesList');
-        if (!sales.length) {
-            container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded.</div>';
+        if (!sales || sales.length === 0) {
+            container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded for this period.</div>';
             updateSummary([]);
             return;
         }
@@ -304,10 +254,10 @@
         for (const sale of sales) {
             if (!saleMap.has(sale.sale_id)) {
                 saleMap.set(sale.sale_id, {
-                    discount: sale.discount,
-                    total: sale.total,
+                    discount: sale.discount || 0,
+                    total: sale.total || 0,
                     date: sale.sale_date,
-                    netProfit: sale.net_profit,
+                    netProfit: sale.net_profit || 0,
                     payment_method: sale.payment_method || 'unknown',
                     cheque_number: sale.cheque_number,
                     items: []
@@ -375,21 +325,21 @@
         
         for (const sale of sales) {
             if (!seenSales.has(sale.sale_id)) {
-                totalSales += sale.total;
-                totalDiscount += sale.discount;
-                totalProfit += sale.net_profit;
+                totalSales += sale.total || 0;
+                totalDiscount += sale.discount || 0;
+                totalProfit += sale.net_profit || 0;
                 seenSales.add(sale.sale_id);
                 
                 // Calculate payment method totals
                 if (sale.payment_method === 'cash') {
-                    cashTotal += sale.total;
+                    cashTotal += sale.total || 0;
                 } else if (sale.payment_method === 'momo') {
-                    momoTotal += sale.total;
+                    momoTotal += sale.total || 0;
                 } else if (sale.payment_method === 'cheque') {
-                    chequeTotal += sale.total;
+                    chequeTotal += sale.total || 0;
                 }
             }
-            totalItems += sale.quantity;
+            totalItems += sale.quantity || 0;
         }
         
         let periodText = '';
@@ -402,6 +352,7 @@
                 case 'monthly': periodText = '📅 This Month'; break;
                 case 'yearly': periodText = '📅 This Year'; break;
                 case 'all': periodText = '📅 All Time'; break;
+                default: periodText = '📅 Today';
             }
         }
         
@@ -428,7 +379,7 @@
                 case 'monthly': periodText = 'This Month'; break;
                 case 'yearly': periodText = 'This Year'; break;
                 case 'all': periodText = 'All Time'; break;
-                default: periodText = currentPeriod;
+                default: periodText = 'Today';
             }
         }
         const response = await fetch('/api/today_sales/pdf', {
@@ -457,6 +408,10 @@
     // Event listeners
     document.getElementById('refreshBtn').addEventListener('click', () => loadSalesData());
     document.getElementById('searchInput').addEventListener('input', () => applySearchAndRender());
+    document.getElementById('pdfBtn').addEventListener('click', exportPDF);
+    document.getElementById('confirmReverseBtn').addEventListener('click', confirmReverseSelected);
+    
+    // Apply date range button
     document.getElementById('applyDateBtn').addEventListener('click', () => {
         const start = document.getElementById('startDate').value;
         const end = document.getElementById('endDate').value;
@@ -469,8 +424,6 @@
             alert('Please select both start and end dates.');
         }
     });
-    document.getElementById('pdfBtn').addEventListener('click', exportPDF);
-    document.getElementById('confirmReverseBtn').addEventListener('click', confirmReverseSelected);
 
     // Period buttons
     document.querySelectorAll('.period-btn').forEach(btn => {
@@ -489,7 +442,19 @@
     document.getElementById('startDate').value = today;
     document.getElementById('endDate').value = today;
 
+    // Add PDF button if it doesn't exist in the DOM yet
+    if (!document.getElementById('pdfBtn')) {
+        const summaryBar = document.getElementById('summaryBar');
+        const pdfButton = document.createElement('button');
+        pdfButton.id = 'pdfBtn';
+        pdfButton.className = 'bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg ml-4';
+        pdfButton.innerHTML = '🖨️ Print / Save PDF';
+        pdfButton.onclick = exportPDF;
+        document.querySelector('.bg-white.rounded-xl.shadow-md.p-4.mb-6 .flex.flex-wrap.items-end.gap-4').appendChild(pdfButton);
+    }
+
     // Initial load
+    console.log("Initializing Today Sales page...");
     loadSalesData();
 </script>
 {% endblock %}
