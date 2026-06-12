@@ -1023,7 +1023,7 @@ def api_archive():
         # Get active products
         cursor.execute("""
             SELECT 
-                product_id,
+                id,
                 name,
                 brand,
                 category,
