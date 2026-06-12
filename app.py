@@ -49,9 +49,6 @@ from services.auth_service import login_user, create_user, admin_exists
 # ---------- IMPORT ARCHIVE SERVICES ----------
 from services.product_service import get_deleted_products, restore_archive
 
-# ---------- IMPORT ANALYTICS SERVICE ----------
-from services.analytics_service import get_summary_multi, get_top_products_multi, get_sales_trend_multi
-
 # ---------- DATABASE CONNECTION ----------
 from database.db import get_connection
 
@@ -138,7 +135,7 @@ def inject_user():
         }
     return {'current_user': None}
 
-# ---------------------- LOGIN REQUIRED DECORATOR (FIXED FOR API) ----------------------
+# ---------------------- LOGIN REQUIRED DECORATOR ----------------------
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -283,7 +280,7 @@ def api_auth_admin_exists():
     exists = admin_exists()
     return jsonify({'admin_exists': exists})
 
-# ===================== DASHBOARD API (UPDATED WITH DATETIME RANGE) =====================
+# ===================== DASHBOARD API =====================
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required
 def api_dashboard_summary():
@@ -826,7 +823,7 @@ def api_today_sales():
                 cursor.execute(f"""
                     {select_clause}
                     {from_clause}
-                    WHERE sales.date >= CURRENT_DATE - INTERVAL '7 days'
+                    WHERE sales.date >= CURRENT_DATE - INTERVAL '6 days'
                     AND sales.reversed = 0
                     ORDER BY sales.date DESC
                 """)
@@ -966,7 +963,7 @@ def api_today_sales_pdf():
                      download_name=f"SalesReport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== ANALYTICS API =====================
+# ===================== ANALYTICS API (NOW USES SAME LOGIC AS TODAY_SALES) =====================
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
@@ -974,19 +971,91 @@ def api_analytics_summary():
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     
+    conn = get_connection()
+    cursor = conn.cursor()
+    
     if start_date and end_date:
-        items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(
-            None, start_date, end_date
-        )
-    else:
-        items_sold, total_sales, total_discount, _, total_profit = get_summary_multi(period)
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE s.date::date BETWEEN %s AND %s
+            AND s.reversed = 0
+        """, (start_date, end_date))
+    elif period == 'weekly':
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
+            AND s.reversed = 0
+        """)
+    elif period == 'monthly':
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            AND EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND s.reversed = 0
+        """)
+    elif period == 'yearly':
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            AND s.reversed = 0
+        """)
+    elif period == 'all':
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE s.reversed = 0
+        """)
+    else:  # daily
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0),
+                COALESCE(SUM(s.discount), 0),
+                COALESCE(SUM(s.profit), 0),
+                COALESCE(SUM(si.quantity), 0)
+            FROM sales s
+            LEFT JOIN sales_items si ON s.id = si.sale_id
+            WHERE s.date::date = CURRENT_DATE
+            AND s.reversed = 0
+        """)
+    
+    result = cursor.fetchone()
+    conn.close()
     
     return jsonify({
-        'items_sold': items_sold,
-        'subtotal': total_sales,
-        'discount': total_discount,
-        'total': total_sales,
-        'profit': total_profit
+        'items_sold': int(result[3] or 0),
+        'subtotal': float(result[0] or 0),
+        'discount': float(result[1] or 0),
+        'total': float(result[0] or 0),
+        'profit': float(result[2] or 0)
     })
 
 @app.route('/api/analytics/trend', methods=['GET'])
@@ -996,12 +1065,107 @@ def api_analytics_trend():
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     
-    if start_date and end_date:
-        trend = get_sales_trend_multi(None, start_date, end_date)
-    else:
-        trend = get_sales_trend_multi(period)
+    conn = get_connection()
+    cursor = conn.cursor()
     
-    return jsonify(trend)
+    if start_date and end_date:
+        cursor.execute("""
+            SELECT 
+                s.date::date as label,
+                COALESCE(SUM(s.total), 0) as sales_total,
+                COALESCE(SUM(s.profit), 0) as profit_total
+            FROM sales s
+            WHERE s.date::date BETWEEN %s AND %s
+            AND s.reversed = 0
+            GROUP BY s.date::date
+            ORDER BY label ASC
+        """, (start_date, end_date))
+    elif period == 'weekly':
+        cursor.execute("""
+            SELECT 
+                s.date::date as label,
+                COALESCE(SUM(s.total), 0) as sales_total,
+                COALESCE(SUM(s.profit), 0) as profit_total
+            FROM sales s
+            WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
+            AND s.reversed = 0
+            GROUP BY s.date::date
+            ORDER BY label ASC
+        """)
+    elif period == 'monthly':
+        cursor.execute("""
+            SELECT 
+                s.date::date as label,
+                COALESCE(SUM(s.total), 0) as sales_total,
+                COALESCE(SUM(s.profit), 0) as profit_total
+            FROM sales s
+            WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            AND EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND s.reversed = 0
+            GROUP BY s.date::date
+            ORDER BY label ASC
+        """)
+    elif period == 'yearly':
+        cursor.execute("""
+            SELECT 
+                DATE_TRUNC('month', s.date) as label,
+                COALESCE(SUM(s.total), 0) as sales_total,
+                COALESCE(SUM(s.profit), 0) as profit_total
+            FROM sales s
+            WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            AND s.reversed = 0
+            GROUP BY DATE_TRUNC('month', s.date)
+            ORDER BY label ASC
+        """)
+    elif period == 'all':
+        cursor.execute("""
+            SELECT 
+                DATE_TRUNC('month', s.date) as label,
+                COALESCE(SUM(s.total), 0) as sales_total,
+                COALESCE(SUM(s.profit), 0) as profit_total
+            FROM sales s
+            WHERE s.reversed = 0
+            GROUP BY DATE_TRUNC('month', s.date)
+            ORDER BY label ASC
+            LIMIT 24
+        """)
+    else:  # daily
+        cursor.execute("""
+            SELECT 
+                s.date::date as label,
+                COALESCE(SUM(s.total), 0) as sales_total,
+                COALESCE(SUM(s.profit), 0) as profit_total
+            FROM sales s
+            WHERE s.date::date = CURRENT_DATE
+            AND s.reversed = 0
+            GROUP BY s.date::date
+            ORDER BY label ASC
+        """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    result = []
+    for row in rows:
+        label = row[0]
+        if period in ['yearly', 'all']:
+            if hasattr(label, 'strftime'):
+                label = label.strftime('%b %Y')
+            else:
+                label = str(label)
+        else:
+            if hasattr(label, 'strftime'):
+                label = label.strftime('%Y-%m-%d')
+            else:
+                label = str(label)
+        
+        result.append({
+            'label': str(label),
+            'sales': float(row[1]),
+            'profit': float(row[2])
+        })
+    
+    return jsonify(result)
 
 @app.route('/api/analytics/top_products', methods=['GET'])
 @login_required
@@ -1011,15 +1175,149 @@ def api_analytics_top_products():
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     
-    if start_date and end_date:
-        products = get_top_products_multi(None, limit, start_date, end_date)
-    else:
-        products = get_top_products_multi(period, limit)
+    conn = get_connection()
+    cursor = conn.cursor()
     
-    result = [{'name': r[0], 'brand': r[1] or '', 'category': r[2] or '', 'quantity': int(r[3])} for r in products]
+    if start_date and end_date:
+        cursor.execute("""
+            SELECT 
+                p.name, 
+                COALESCE(p.brand, '') as brand, 
+                COALESCE(p.category, '') as category, 
+                COALESCE(SUM(si.quantity), 0) as qty
+            FROM sales_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN products p ON p.id = si.product_id
+            WHERE s.date::date BETWEEN %s AND %s
+            AND s.reversed = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+            GROUP BY si.product_id, p.name, p.brand, p.category
+            ORDER BY qty DESC
+            LIMIT %s
+        """, (start_date, end_date, limit))
+    elif period == 'weekly':
+        cursor.execute("""
+            SELECT 
+                p.name, 
+                COALESCE(p.brand, '') as brand, 
+                COALESCE(p.category, '') as category, 
+                COALESCE(SUM(si.quantity), 0) as qty
+            FROM sales_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN products p ON p.id = si.product_id
+            WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
+            AND s.reversed = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+            GROUP BY si.product_id, p.name, p.brand, p.category
+            ORDER BY qty DESC
+            LIMIT %s
+        """, (limit,))
+    elif period == 'monthly':
+        cursor.execute("""
+            SELECT 
+                p.name, 
+                COALESCE(p.brand, '') as brand, 
+                COALESCE(p.category, '') as category, 
+                COALESCE(SUM(si.quantity), 0) as qty
+            FROM sales_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN products p ON p.id = si.product_id
+            WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            AND EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND s.reversed = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+            GROUP BY si.product_id, p.name, p.brand, p.category
+            ORDER BY qty DESC
+            LIMIT %s
+        """, (limit,))
+    elif period == 'yearly':
+        cursor.execute("""
+            SELECT 
+                p.name, 
+                COALESCE(p.brand, '') as brand, 
+                COALESCE(p.category, '') as category, 
+                COALESCE(SUM(si.quantity), 0) as qty
+            FROM sales_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN products p ON p.id = si.product_id
+            WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
+            AND s.reversed = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+            GROUP BY si.product_id, p.name, p.brand, p.category
+            ORDER BY qty DESC
+            LIMIT %s
+        """, (limit,))
+    elif period == 'all':
+        cursor.execute("""
+            SELECT 
+                p.name, 
+                COALESCE(p.brand, '') as brand, 
+                COALESCE(p.category, '') as category, 
+                COALESCE(SUM(si.quantity), 0) as qty
+            FROM sales_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN products p ON p.id = si.product_id
+            WHERE s.reversed = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+            GROUP BY si.product_id, p.name, p.brand, p.category
+            ORDER BY qty DESC
+            LIMIT %s
+        """, (limit,))
+    else:  # daily
+        cursor.execute("""
+            SELECT 
+                p.name, 
+                COALESCE(p.brand, '') as brand, 
+                COALESCE(p.category, '') as category, 
+                COALESCE(SUM(si.quantity), 0) as qty
+            FROM sales_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN products p ON p.id = si.product_id
+            WHERE s.date::date = CURRENT_DATE
+            AND s.reversed = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.source = 'product'
+            )
+            GROUP BY si.product_id, p.name, p.brand, p.category
+            ORDER BY qty DESC
+            LIMIT %s
+        """, (limit,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    result = [{'name': r[0], 'brand': r[1] or '', 'category': r[2] or '', 'quantity': int(r[3])} for r in rows]
     return jsonify(result)
 
-# ===================== ARCHIVE API (FIXED - REMOVED created_at) =====================
+# ===================== ARCHIVE API =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
@@ -1030,7 +1328,6 @@ def api_archive():
     cursor = conn.cursor()
     
     try:
-        # Get active products - removed created_at column
         cursor.execute("""
             SELECT 
                 id,
@@ -1073,7 +1370,6 @@ def api_archive():
                 'product_id': r[0]
             })
         
-        # Get deleted records
         cursor.execute("""
             SELECT 
                 id, name, brand, cost_price, selling_price, stock, 
