@@ -7,6 +7,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
     cursor = conn.cursor()
     
     if start_date and end_date:
+        # Use same logic as dashboard for date range
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -19,6 +20,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
             AND s.reversed = 0
         """, (start_date, end_date))
     elif period == "weekly":
+        # Last 7 days (including today)
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -27,7 +29,7 @@ def get_summary_multi(period="daily", start_date=None, end_date=None):
                 COALESCE(SUM(si.quantity), 0)
             FROM sales s
             LEFT JOIN sales_items si ON s.id = si.sale_id
-            WHERE s.date >= DATE_TRUNC('week', CURRENT_DATE)
+            WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
             AND s.reversed = 0
         """)
     elif period == "monthly":
@@ -127,7 +129,7 @@ def get_top_products_multi(period="daily", limit=10, start_date=None, end_date=N
             FROM sales_items si
             JOIN sales s ON si.sale_id = s.id
             JOIN products p ON p.id = si.product_id
-            WHERE s.date >= DATE_TRUNC('week', CURRENT_DATE)
+            WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
             AND s.reversed = 0
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
@@ -253,38 +255,38 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
     elif period == "weekly":
         cursor.execute("""
             SELECT 
-                EXTRACT(DOW FROM s.date) as label,
+                s.date::date as label,
                 COALESCE(SUM(s.total), 0) as sales_total,
                 COALESCE(SUM(s.profit), 0) as profit_total
             FROM sales s
-            WHERE s.date >= DATE_TRUNC('week', CURRENT_DATE)
+            WHERE s.date >= CURRENT_DATE - INTERVAL '6 days'
             AND s.reversed = 0
-            GROUP BY EXTRACT(DOW FROM s.date)
+            GROUP BY s.date::date
             ORDER BY label ASC
         """)
     elif period == "monthly":
         cursor.execute("""
             SELECT 
-                EXTRACT(DAY FROM s.date) as label,
+                s.date::date as label,
                 COALESCE(SUM(s.total), 0) as sales_total,
                 COALESCE(SUM(s.profit), 0) as profit_total
             FROM sales s
             WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
             AND EXTRACT(MONTH FROM s.date) = EXTRACT(MONTH FROM CURRENT_DATE)
             AND s.reversed = 0
-            GROUP BY EXTRACT(DAY FROM s.date)
+            GROUP BY s.date::date
             ORDER BY label ASC
         """)
     elif period == "yearly":
         cursor.execute("""
             SELECT 
-                EXTRACT(MONTH FROM s.date) as label,
+                DATE_TRUNC('month', s.date) as label,
                 COALESCE(SUM(s.total), 0) as sales_total,
                 COALESCE(SUM(s.profit), 0) as profit_total
             FROM sales s
             WHERE EXTRACT(YEAR FROM s.date) = EXTRACT(YEAR FROM CURRENT_DATE)
             AND s.reversed = 0
-            GROUP BY EXTRACT(MONTH FROM s.date)
+            GROUP BY DATE_TRUNC('month', s.date)
             ORDER BY label ASC
         """)
     elif period == "all":
@@ -302,13 +304,13 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
     else:  # daily
         cursor.execute("""
             SELECT 
-                EXTRACT(HOUR FROM s.date) as label,
+                s.date::date as label,
                 COALESCE(SUM(s.total), 0) as sales_total,
                 COALESCE(SUM(s.profit), 0) as profit_total
             FROM sales s
             WHERE s.date::date = CURRENT_DATE
             AND s.reversed = 0
-            GROUP BY EXTRACT(HOUR FROM s.date)
+            GROUP BY s.date::date
             ORDER BY label ASC
         """)
     
@@ -318,21 +320,21 @@ def get_sales_trend_multi(period="daily", start_date=None, end_date=None):
     result = []
     for row in rows:
         label = row[0]
-        if period == "weekly":
-            days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-            label = days[int(label)] if 0 <= int(label) <= 6 else str(label)
-        elif period == "monthly":
-            label = f"Day {int(label)}"
-        elif period == "yearly":
-            months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            label = months[int(label) - 1] if 1 <= int(label) <= 12 else str(label)
+        if period == "yearly":
+            if hasattr(label, 'strftime'):
+                label = label.strftime('%b %Y')
+            else:
+                label = str(label)
         elif period == "all":
             if hasattr(label, 'strftime'):
                 label = label.strftime('%b %Y')
             else:
                 label = str(label)
-        elif period == "daily":
-            label = f"{int(label)}:00"
+        else:
+            if hasattr(label, 'strftime'):
+                label = label.strftime('%Y-%m-%d')
+            else:
+                label = str(label)
             
         result.append({
             'label': str(label),
