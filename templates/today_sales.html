@@ -36,6 +36,7 @@
                 <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
             </div>
             <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
+            <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
         </div>
     </div>
 
@@ -72,389 +73,376 @@
 </div>
 
 <script>
-    let currentSalesData = [];
-    let currentPeriod = 'daily';
-    let currentStartDate = null;
-    let currentEndDate = null;
+    // Wait for DOM to be fully loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log("DOM fully loaded - initializing today sales page");
+        
+        let currentSalesData = [];
+        let currentPeriod = 'daily';
+        let currentStartDate = null;
+        let currentEndDate = null;
 
-    // For reversal modal
-    let currentReverseSaleId = null;
-    let currentReverseItems = [];
+        // For reversal modal
+        let currentReverseSaleId = null;
+        let currentReverseItems = [];
 
-    // Helper: format currency
-    function formatMoney(amount) {
-        return '₵' + (parseFloat(amount) || 0).toFixed(2);
-    }
-
-    // Helper: escape HTML
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
-    }
-
-    // Helper: get payment badge HTML
-    function getPaymentBadge(paymentMethod, chequeNumber) {
-        if (paymentMethod === 'cash') {
-            return '<span class="inline-flex items-center bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">💵 Cash</span>';
-        } else if (paymentMethod === 'momo') {
-            return '<span class="inline-flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">📱 Mobile Money</span>';
-        } else if (paymentMethod === 'cheque') {
-            return `<span class="inline-flex items-center bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">📝 Cheque ${chequeNumber ? '#' + escapeHtml(chequeNumber) : ''}</span>`;
-        } else {
-            return '<span class="inline-flex items-center bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">❓ Unknown</span>';
+        // Helper: format currency
+        function formatMoney(amount) {
+            return '₵' + (parseFloat(amount) || 0).toFixed(2);
         }
-    }
 
-    // Fetch sales data from API
-    async function loadSalesData() {
-        console.log("Loading sales data...");
-        
-        let url = '';
-        
-        if (currentStartDate && currentEndDate) {
-            // Custom date range
-            url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}`;
-        } else if (currentPeriod === 'all') {
-            url = '/api/today_sales?period=all';
-        } else if (currentPeriod === 'weekly') {
-            url = '/api/today_sales?period=weekly';
-        } else if (currentPeriod === 'monthly') {
-            url = '/api/today_sales?period=monthly';
-        } else if (currentPeriod === 'yearly') {
-            url = '/api/today_sales?period=yearly';
-        } else {
-            url = '/api/today_sales?period=daily';
-        }
-        
-        console.log("Fetching from URL:", url);
-        
-        try {
-            const res = await fetch(url);
-            if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            const data = await res.json();
-            console.log("Received data:", data.length, "records");
-            currentSalesData = data;
-            applySearchAndRender();
-        } catch (error) {
-            console.error("Error loading sales data:", error);
-            document.getElementById('salesList').innerHTML = '<div class="text-center text-red-400 py-8">Error loading sales data. Please refresh the page.</div>';
-        }
-    }
-
-    // Filter by search term and render
-    function applySearchAndRender() {
-        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-        let filtered = currentSalesData;
-        if (searchTerm) {
-            filtered = currentSalesData.filter(sale => 
-                (sale.name && sale.name.toLowerCase().includes(searchTerm)) || 
-                (sale.brand && sale.brand.toLowerCase().includes(searchTerm))
-            );
-        }
-        renderSales(filtered);
-    }
-
-    // Open modal to select items for reversal
-    async function openReverseModal(saleId, saleItems) {
-        currentReverseSaleId = saleId;
-        const container = document.getElementById('reverseItemList');
-        container.innerHTML = '';
-        currentReverseItems = [];
-        
-        saleItems.forEach((item, idx) => {
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'border rounded-lg p-3 flex items-start space-x-3';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.className = 'mt-1';
-            cb.dataset.item = JSON.stringify({
-                batch_id: item.batch_id,
-                quantity: item.quantity,
-                product_id: item.product_id
+        // Helper: escape HTML
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
             });
-            const info = document.createElement('div');
-            info.className = 'flex-1 text-sm';
-            info.innerHTML = `
-                <strong>${escapeHtml(item.name)} (${escapeHtml(item.brand)})</strong><br>
-                Batch #${item.batch_id === -1 ? 'DELETED' : item.batch_id}<br>
-                Quantity: ${item.quantity}<br>
-                Selling Price: ${formatMoney(item.selling_price)}<br>
-                Cost: ${formatMoney(item.cost_price)}<br>
-                Profit: ${formatMoney(item.profit)}
-            `;
-            itemDiv.appendChild(cb);
-            itemDiv.appendChild(info);
-            container.appendChild(itemDiv);
-            currentReverseItems.push({ checkbox: cb, itemData: item });
-        });
-        
-        document.getElementById('reverseModalTitle').innerHTML = `Reverse Items from Sale #${saleId}`;
-        document.getElementById('reverseModal').classList.remove('hidden');
-    }
-    
-    function closeReverseModal() {
-        document.getElementById('reverseModal').classList.add('hidden');
-        currentReverseSaleId = null;
-        currentReverseItems = [];
-    }
-    
-    function selectAllReverseItems() {
-        currentReverseItems.forEach(i => i.checkbox.checked = true);
-    }
-    
-    function deselectAllReverseItems() {
-        currentReverseItems.forEach(i => i.checkbox.checked = false);
-    }
-    
-    async function confirmReverseSelected() {
-        const selected = currentReverseItems.filter(i => i.checkbox.checked);
-        if (selected.length === 0) {
-            alert('Please select at least one item to reverse.');
-            return;
-        }
-        
-        const itemsToReverse = selected.map(i => JSON.parse(i.checkbox.dataset.item));
-        
-        const response = await fetch('/api/sales/reverse_items', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                sale_id: currentReverseSaleId,
-                items: itemsToReverse
-            })
-        });
-        const data = await response.json();
-        if (data.success) {
-            alert(`${selected.length} item(s) reversed successfully. Stock restored.`);
-            closeReverseModal();
-            loadSalesData(); // refresh the list
-        } else {
-            alert('Error: ' + data.error);
-        }
-    }
-
-    // Render sales as cards with payment information
-    function renderSales(sales) {
-        const container = document.getElementById('salesList');
-        if (!sales || sales.length === 0) {
-            container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded for this period.</div>';
-            updateSummary([]);
-            return;
         }
 
-        // Group items by sale_id and store all sale info
-        const saleMap = new Map();
-        for (const sale of sales) {
-            if (!saleMap.has(sale.sale_id)) {
-                saleMap.set(sale.sale_id, {
-                    discount: sale.discount || 0,
-                    total: sale.total || 0,
-                    date: sale.sale_date,
-                    netProfit: sale.net_profit || 0,
-                    payment_method: sale.payment_method || 'unknown',
-                    cheque_number: sale.cheque_number,
-                    items: []
-                });
+        // Helper: get payment badge HTML
+        function getPaymentBadge(paymentMethod, chequeNumber) {
+            if (paymentMethod === 'cash') {
+                return '<span class="inline-flex items-center bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">💵 Cash</span>';
+            } else if (paymentMethod === 'momo') {
+                return '<span class="inline-flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">📱 Mobile Money</span>';
+            } else if (paymentMethod === 'cheque') {
+                return `<span class="inline-flex items-center bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">📝 Cheque ${chequeNumber ? '#' + escapeHtml(chequeNumber) : ''}</span>`;
+            } else {
+                return '<span class="inline-flex items-center bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">❓ Unknown</span>';
             }
-            saleMap.get(sale.sale_id).items.push(sale);
         }
 
-        let html = '';
-        for (const [saleId, saleGroup] of saleMap) {
-            const paymentBadge = getPaymentBadge(saleGroup.payment_method, saleGroup.cheque_number);
+        // Fetch sales data from API
+        async function loadSalesData() {
+            console.log("Loading sales data...");
             
-            const itemsHtml = saleGroup.items.map(item => {
-                const statusText = item.is_deleted_batch ? '⚠️ (Batch Deleted - History Only)' : '';
-                return `
-                    <div class="border-b pb-2 mb-2 last:border-0">
-                        <div class="font-semibold text-indigo-700">${escapeHtml(item.name)} (${escapeHtml(item.brand)}) ${statusText}</div>
-                        <div class="text-sm grid grid-cols-2 gap-1">
-                            <div>Qty: ${item.quantity}</div>
-                            <div>Selling: ${formatMoney(item.selling_price)}</div>
-                            <div>Batch: ${item.batch_id === -1 ? 'DELETED' : '#' + item.batch_id}</div>
-                            <div>Cost: ${formatMoney(item.cost_price)}</div>
-                            <div>Subtotal: ${formatMoney(item.subtotal)}</div>
-                            <div>Profit: ${formatMoney(item.profit)}</div>
+            let url = '';
+            
+            if (currentStartDate && currentEndDate) {
+                url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}`;
+            } else if (currentPeriod === 'all') {
+                url = '/api/today_sales?period=all';
+            } else if (currentPeriod === 'weekly') {
+                url = '/api/today_sales?period=weekly';
+            } else if (currentPeriod === 'monthly') {
+                url = '/api/today_sales?period=monthly';
+            } else if (currentPeriod === 'yearly') {
+                url = '/api/today_sales?period=yearly';
+            } else {
+                url = '/api/today_sales?period=daily';
+            }
+            
+            console.log("Fetching from URL:", url);
+            
+            try {
+                const res = await fetch(url);
+                if (!res.ok) {
+                    if (res.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                const data = await res.json();
+                console.log("Received data:", data.length, "records");
+                currentSalesData = data;
+                applySearchAndRender();
+            } catch (error) {
+                console.error("Error loading sales data:", error);
+                document.getElementById('salesList').innerHTML = '<div class="text-center text-red-400 py-8">Error loading sales data. Please refresh the page.</div>';
+            }
+        }
+
+        // Filter by search term and render
+        function applySearchAndRender() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            let filtered = currentSalesData;
+            if (searchTerm) {
+                filtered = currentSalesData.filter(sale => 
+                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) || 
+                    (sale.brand && sale.brand.toLowerCase().includes(searchTerm))
+                );
+            }
+            renderSales(filtered);
+        }
+
+        // Open modal to select items for reversal
+        window.openReverseModal = function(saleId, saleItems) {
+            currentReverseSaleId = saleId;
+            const container = document.getElementById('reverseItemList');
+            container.innerHTML = '';
+            currentReverseItems = [];
+            
+            saleItems.forEach((item, idx) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'border rounded-lg p-3 flex items-start space-x-3';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'mt-1';
+                cb.dataset.item = JSON.stringify({
+                    batch_id: item.batch_id,
+                    quantity: item.quantity,
+                    product_id: item.product_id
+                });
+                const info = document.createElement('div');
+                info.className = 'flex-1 text-sm';
+                info.innerHTML = `
+                    <strong>${escapeHtml(item.name)} (${escapeHtml(item.brand)})</strong><br>
+                    Batch #${item.batch_id === -1 ? 'DELETED' : item.batch_id}<br>
+                    Quantity: ${item.quantity}<br>
+                    Selling Price: ${formatMoney(item.selling_price)}<br>
+                    Cost: ${formatMoney(item.cost_price)}<br>
+                    Profit: ${formatMoney(item.profit)}
+                `;
+                itemDiv.appendChild(cb);
+                itemDiv.appendChild(info);
+                container.appendChild(itemDiv);
+                currentReverseItems.push({ checkbox: cb, itemData: item });
+            });
+            
+            document.getElementById('reverseModalTitle').innerHTML = `Reverse Items from Sale #${saleId}`;
+            document.getElementById('reverseModal').classList.remove('hidden');
+        };
+        
+        window.closeReverseModal = function() {
+            document.getElementById('reverseModal').classList.add('hidden');
+            currentReverseSaleId = null;
+            currentReverseItems = [];
+        };
+        
+        window.selectAllReverseItems = function() {
+            currentReverseItems.forEach(i => i.checkbox.checked = true);
+        };
+        
+        window.deselectAllReverseItems = function() {
+            currentReverseItems.forEach(i => i.checkbox.checked = false);
+        };
+        
+        async function confirmReverseSelected() {
+            const selected = currentReverseItems.filter(i => i.checkbox.checked);
+            if (selected.length === 0) {
+                alert('Please select at least one item to reverse.');
+                return;
+            }
+            
+            const itemsToReverse = selected.map(i => JSON.parse(i.checkbox.dataset.item));
+            
+            const response = await fetch('/api/sales/reverse_items', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sale_id: currentReverseSaleId,
+                    items: itemsToReverse
+                })
+            });
+            const data = await response.json();
+            if (data.success) {
+                alert(`${selected.length} item(s) reversed successfully. Stock restored.`);
+                closeReverseModal();
+                loadSalesData();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        }
+
+        // Render sales as cards
+        function renderSales(sales) {
+            const container = document.getElementById('salesList');
+            if (!sales || sales.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded for this period.</div>';
+                updateSummary([]);
+                return;
+            }
+
+            const saleMap = new Map();
+            for (const sale of sales) {
+                if (!saleMap.has(sale.sale_id)) {
+                    saleMap.set(sale.sale_id, {
+                        discount: sale.discount || 0,
+                        total: sale.total || 0,
+                        date: sale.sale_date,
+                        netProfit: sale.net_profit || 0,
+                        payment_method: sale.payment_method || 'unknown',
+                        cheque_number: sale.cheque_number,
+                        items: []
+                    });
+                }
+                saleMap.get(sale.sale_id).items.push(sale);
+            }
+
+            let html = '';
+            for (const [saleId, saleGroup] of saleMap) {
+                const paymentBadge = getPaymentBadge(saleGroup.payment_method, saleGroup.cheque_number);
+                
+                const itemsHtml = saleGroup.items.map(item => {
+                    const statusText = item.is_deleted_batch ? '⚠️ (Batch Deleted - History Only)' : '';
+                    return `
+                        <div class="border-b pb-2 mb-2 last:border-0">
+                            <div class="font-semibold text-indigo-700">${escapeHtml(item.name)} (${escapeHtml(item.brand)}) ${statusText}</div>
+                            <div class="text-sm grid grid-cols-2 gap-1">
+                                <div>Qty: ${item.quantity}</div>
+                                <div>Selling: ${formatMoney(item.selling_price)}</div>
+                                <div>Batch: ${item.batch_id === -1 ? 'DELETED' : '#' + item.batch_id}</div>
+                                <div>Cost: ${formatMoney(item.cost_price)}</div>
+                                <div>Subtotal: ${formatMoney(item.subtotal)}</div>
+                                <div>Profit: ${formatMoney(item.profit)}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                html += `
+                    <div class="bg-white rounded-xl shadow-md p-4 border" data-sale-id="${saleId}">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="text-sm text-gray-500">Sale #${saleId} | ${saleGroup.date}</div>
+                            <div>${paymentBadge}</div>
+                        </div>
+                        ${itemsHtml}
+                        <div class="mt-2 pt-2 border-t flex justify-between items-center">
+                            <button class="reverse-sale-btn bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm" data-sale-id="${saleId}" data-sale-items='${JSON.stringify(saleGroup.items)}'>↺ Reverse Selected Items</button>
+                            <div>
+                                <span class="text-sm">Discount: ${formatMoney(saleGroup.discount)}</span>
+                                <span class="text-lg font-bold ml-4">Total: ${formatMoney(saleGroup.total)}</span>
+                            </div>
                         </div>
                     </div>
                 `;
-            }).join('');
+            }
+            container.innerHTML = html;
+            updateSummary(sales);
 
-            html += `
-                <div class="bg-white rounded-xl shadow-md p-4 border" data-sale-id="${saleId}">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="text-sm text-gray-500">Sale #${saleId} | ${saleGroup.date}</div>
-                        <div>${paymentBadge}</div>
-                    </div>
-                    ${itemsHtml}
-                    <div class="mt-2 pt-2 border-t flex justify-between items-center">
-                        <button class="reverse-sale-btn bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm" data-sale-id="${saleId}" data-sale-items='${JSON.stringify(saleGroup.items)}'>↺ Reverse Selected Items</button>
-                        <div>
-                            <span class="text-sm">Discount: ${formatMoney(saleGroup.discount)}</span>
-                            <span class="text-lg font-bold ml-4">Total: ${formatMoney(saleGroup.total)}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        container.innerHTML = html;
-        updateSummary(sales);
-
-        // Attach click handlers for reverse buttons
-        document.querySelectorAll('.reverse-sale-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const saleId = parseInt(btn.getAttribute('data-sale-id'));
-                const saleItems = JSON.parse(btn.getAttribute('data-sale-items'));
-                openReverseModal(saleId, saleItems);
+            document.querySelectorAll('.reverse-sale-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const saleId = parseInt(btn.getAttribute('data-sale-id'));
+                    const saleItems = JSON.parse(btn.getAttribute('data-sale-items'));
+                    openReverseModal(saleId, saleItems);
+                });
             });
-        });
-    }
+        }
 
-    // Update summary bar using net_profit
-    function updateSummary(sales) {
-        const seenSales = new Set();
-        let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
-        let cashTotal = 0, momoTotal = 0, chequeTotal = 0;
-        
-        for (const sale of sales) {
-            if (!seenSales.has(sale.sale_id)) {
-                totalSales += sale.total || 0;
-                totalDiscount += sale.discount || 0;
-                totalProfit += sale.net_profit || 0;
-                seenSales.add(sale.sale_id);
-                
-                // Calculate payment method totals
-                if (sale.payment_method === 'cash') {
-                    cashTotal += sale.total || 0;
-                } else if (sale.payment_method === 'momo') {
-                    momoTotal += sale.total || 0;
-                } else if (sale.payment_method === 'cheque') {
-                    chequeTotal += sale.total || 0;
+        function updateSummary(sales) {
+            const seenSales = new Set();
+            let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
+            let cashTotal = 0, momoTotal = 0, chequeTotal = 0;
+            
+            for (const sale of sales) {
+                if (!seenSales.has(sale.sale_id)) {
+                    totalSales += sale.total || 0;
+                    totalDiscount += sale.discount || 0;
+                    totalProfit += sale.net_profit || 0;
+                    seenSales.add(sale.sale_id);
+                    
+                    if (sale.payment_method === 'cash') {
+                        cashTotal += sale.total || 0;
+                    } else if (sale.payment_method === 'momo') {
+                        momoTotal += sale.total || 0;
+                    } else if (sale.payment_method === 'cheque') {
+                        chequeTotal += sale.total || 0;
+                    }
+                }
+                totalItems += sale.quantity || 0;
+            }
+            
+            let periodText = '';
+            if (currentStartDate && currentEndDate) {
+                periodText = `📅 ${currentStartDate} to ${currentEndDate}`;
+            } else {
+                switch(currentPeriod) {
+                    case 'daily': periodText = '📅 Today'; break;
+                    case 'weekly': periodText = '📅 This Week'; break;
+                    case 'monthly': periodText = '📅 This Month'; break;
+                    case 'yearly': periodText = '📅 This Year'; break;
+                    case 'all': periodText = '📅 All Time'; break;
+                    default: periodText = '📅 Today';
                 }
             }
-            totalItems += sale.quantity || 0;
+            
+            document.getElementById('summaryBar').innerHTML = 
+                `${periodText}  |  🧾 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
+                <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
+                <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
+                <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
         }
-        
-        let periodText = '';
-        if (currentStartDate && currentEndDate) {
-            periodText = `📅 ${currentStartDate} to ${currentEndDate}`;
-        } else {
-            switch(currentPeriod) {
-                case 'daily': periodText = '📅 Today'; break;
-                case 'weekly': periodText = '📅 This Week'; break;
-                case 'monthly': periodText = '📅 This Month'; break;
-                case 'yearly': periodText = '📅 This Year'; break;
-                case 'all': periodText = '📅 All Time'; break;
-                default: periodText = '📅 Today';
+
+        async function exportPDF() {
+            if (!currentSalesData.length) {
+                alert('No data to export.');
+                return;
+            }
+            let periodText = '';
+            if (currentStartDate && currentEndDate) {
+                periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
+            } else {
+                switch(currentPeriod) {
+                    case 'daily': periodText = 'Today'; break;
+                    case 'weekly': periodText = 'This Week'; break;
+                    case 'monthly': periodText = 'This Month'; break;
+                    case 'yearly': periodText = 'This Year'; break;
+                    case 'all': periodText = 'All Time'; break;
+                    default: periodText = 'Today';
+                }
+            }
+            const response = await fetch('/api/today_sales/pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sales_data: currentSalesData,
+                    period_text: periodText
+                })
+            });
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `SalesReport_${new Date().toISOString().slice(0,19)}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            } else {
+                alert('Failed to generate PDF');
             }
         }
+
+        // Event listeners
+        document.getElementById('refreshBtn').addEventListener('click', () => loadSalesData());
+        document.getElementById('searchInput').addEventListener('input', () => applySearchAndRender());
+        document.getElementById('pdfBtn').addEventListener('click', exportPDF);
+        document.getElementById('confirmReverseBtn').addEventListener('click', confirmReverseSelected);
         
-        document.getElementById('summaryBar').innerHTML = 
-            `${periodText}  |  🧾 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
-            <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
-            <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
-            <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
-    }
-
-    // PDF Export
-    async function exportPDF() {
-        if (!currentSalesData.length) {
-            alert('No data to export.');
-            return;
-        }
-        let periodText = '';
-        if (currentStartDate && currentEndDate) {
-            periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
-        } else {
-            switch(currentPeriod) {
-                case 'daily': periodText = 'Today'; break;
-                case 'weekly': periodText = 'This Week'; break;
-                case 'monthly': periodText = 'This Month'; break;
-                case 'yearly': periodText = 'This Year'; break;
-                case 'all': periodText = 'All Time'; break;
-                default: periodText = 'Today';
+        document.getElementById('applyDateBtn').addEventListener('click', () => {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            if (start && end) {
+                currentStartDate = start;
+                currentEndDate = end;
+                currentPeriod = 'custom';
+                loadSalesData();
+            } else {
+                alert('Please select both start and end dates.');
             }
-        }
-        const response = await fetch('/api/today_sales/pdf', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                sales_data: currentSalesData,
-                period_text: periodText
-            })
         });
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `SalesReport_${new Date().toISOString().slice(0,19)}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
-        } else {
-            alert('Failed to generate PDF');
-        }
-    }
 
-    // Event listeners
-    document.getElementById('refreshBtn').addEventListener('click', () => loadSalesData());
-    document.getElementById('searchInput').addEventListener('input', () => applySearchAndRender());
-    document.getElementById('pdfBtn').addEventListener('click', exportPDF);
-    document.getElementById('confirmReverseBtn').addEventListener('click', confirmReverseSelected);
-    
-    // Apply date range button
-    document.getElementById('applyDateBtn').addEventListener('click', () => {
-        const start = document.getElementById('startDate').value;
-        const end = document.getElementById('endDate').value;
-        if (start && end) {
-            currentStartDate = start;
-            currentEndDate = end;
-            currentPeriod = 'custom';
-            loadSalesData();
-        } else {
-            alert('Please select both start and end dates.');
-        }
-    });
-
-    // Period buttons
-    document.querySelectorAll('.period-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            currentPeriod = btn.getAttribute('data-period');
-            currentStartDate = null;
-            currentEndDate = null;
-            document.getElementById('startDate').value = '';
-            document.getElementById('endDate').value = '';
-            loadSalesData();
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentPeriod = btn.getAttribute('data-period');
+                currentStartDate = null;
+                currentEndDate = null;
+                document.getElementById('startDate').value = '';
+                document.getElementById('endDate').value = '';
+                loadSalesData();
+            });
         });
+
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('startDate').value = today;
+        document.getElementById('endDate').value = today;
+
+        loadSalesData();
     });
-
-    // Set default date range to today's date
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('startDate').value = today;
-    document.getElementById('endDate').value = today;
-
-    // Add PDF button if it doesn't exist in the DOM yet
-    if (!document.getElementById('pdfBtn')) {
-        const summaryBar = document.getElementById('summaryBar');
-        const pdfButton = document.createElement('button');
-        pdfButton.id = 'pdfBtn';
-        pdfButton.className = 'bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg ml-4';
-        pdfButton.innerHTML = '🖨️ Print / Save PDF';
-        pdfButton.onclick = exportPDF;
-        document.querySelector('.bg-white.rounded-xl.shadow-md.p-4.mb-6 .flex.flex-wrap.items-end.gap-4').appendChild(pdfButton);
-    }
-
-    // Initial load
-    console.log("Initializing Today Sales page...");
-    loadSalesData();
 </script>
 {% endblock %}
