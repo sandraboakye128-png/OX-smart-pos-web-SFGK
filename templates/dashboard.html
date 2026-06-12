@@ -19,7 +19,6 @@
                 <input type="time" id="endTime" class="border border-gray-300 rounded-lg px-3 py-2" step="60">
             </div>
             <button id="applyFilterBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Apply Filter</button>
-            <button id="resetFilterBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg">Reset</button>
             <span id="clock" class="text-gray-500 font-mono"></span>
         </div>
     </div>
@@ -72,8 +71,15 @@
         </div>
         <!-- Sales History (scrollable) -->
         <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
-            <h2 class="text-xl font-semibold mb-3">📊 Sales History</h2>
-            <div id="salesHistoryList" class="max-h-80 overflow-y-auto space-y-2 pr-2">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-xl font-semibold">📊 Sales History</h2>
+                <div class="flex items-center gap-2">
+                    <input type="date" id="historyDate" class="border border-gray-300 rounded-lg px-3 py-1 text-sm">
+                    <button id="applyHistoryDateBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">View</button>
+                    <button id="refreshHistoryBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-1 rounded-lg text-sm">Today</button>
+                </div>
+            </div>
+            <div id="salesHistoryList" class="max-h-96 overflow-y-auto space-y-2 pr-2">
                 <!-- dynamic content -->
             </div>
         </div>
@@ -88,6 +94,7 @@
     let endDate = null;
     let startTime = null;
     let endTime = null;
+    let historyDate = null;
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -185,12 +192,15 @@
             if (topProducts.length) {
                 topProducts.forEach((p, index) => {
                     const div = document.createElement('div');
-                    div.className = 'border-b pb-1';
+                    div.className = 'border-b pb-1 flex justify-between items-center';
                     let medal = '';
                     if (index === 0) medal = '🥇 ';
                     else if (index === 1) medal = '🥈 ';
                     else if (index === 2) medal = '🥉 ';
-                    div.innerText = `${medal}${p.name} (${p.brand} | ${p.category}) — ${p.qty} sold`;
+                    div.innerHTML = `
+                        <span>${medal}${p.name} (${p.brand} | ${p.category})</span>
+                        <span class="font-bold text-indigo-600">${p.qty} sold</span>
+                    `;
                     topContainer.appendChild(div);
                 });
             } else {
@@ -201,7 +211,7 @@
             if (pieChart) pieChart.destroy();
             const ctx = document.getElementById('pieChart').getContext('2d');
             if (topProducts.length) {
-                let labels = topProducts.map(p => `${p.name} (${p.brand})`);
+                let labels = topProducts.map(p => `${p.name.substring(0, 15)}${p.name.length > 15 ? '...' : ''}`);
                 let values = topProducts.map(p => p.qty);
                 if (values.length > 8) {
                     const top8Values = values.slice(0,8);
@@ -211,39 +221,61 @@
                     top8Labels.push('Others');
                     pieChart = new Chart(ctx, {
                         type: 'pie',
-                        data: { labels: top8Labels, datasets: [{ data: top8Values, backgroundColor: generateColors(top8Labels.length) }] }
+                        data: { labels: top8Labels, datasets: [{ data: top8Values, backgroundColor: generateColors(top8Labels.length) }] },
+                        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
                     });
                 } else {
                     pieChart = new Chart(ctx, {
                         type: 'pie',
-                        data: { labels: labels, datasets: [{ data: values, backgroundColor: generateColors(labels.length) }] }
+                        data: { labels: labels, datasets: [{ data: values, backgroundColor: generateColors(labels.length) }] },
+                        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
                     });
                 }
             } else {
                 pieChart = new Chart(ctx, { type: 'pie', data: { labels: ['No Data'], datasets: [{ data: [1], backgroundColor: ['#ccc'] }] } });
             }
 
-            // Fetch sales history
-            let historyUrl = '/api/dashboard/sales_history';
-            if (params.length > 0) {
-                historyUrl += '?' + params.join('&');
+            // Load sales history (if history date is set)
+            await loadSalesHistory();
+        } catch (err) {
+            console.error('Error loading dashboard:', err);
+        }
+    }
+
+    // Load sales history for selected date
+    async function loadSalesHistory() {
+        try {
+            let url = '/api/dashboard/sales_history';
+            if (historyDate) {
+                url += `?date=${historyDate}`;
             }
-            const historyRes = await fetch(historyUrl);
+            const historyRes = await fetch(url);
             const history = await historyRes.json();
             const historyContainer = document.getElementById('salesHistoryList');
             historyContainer.innerHTML = '';
-            if (history.length) {
+            
+            if (history && history.length > 0) {
                 history.forEach(item => {
                     const div = document.createElement('div');
-                    div.className = 'border-b pb-1';
-                    div.innerText = `${item.date} | Sales ${formatMoney(item.total_sales)} | Profit ${formatMoney(item.profit)} | Discount ${formatMoney(item.discount)}`;
+                    div.className = 'border-b pb-2 mb-1';
+                    div.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <span class="font-medium">${item.date}</span>
+                            <span class="font-bold text-green-600">${formatMoney(item.total_sales)}</span>
+                        </div>
+                        <div class="text-sm text-gray-500 flex justify-between">
+                            <span>Profit: ${formatMoney(item.profit)}</span>
+                            <span>Discount: ${formatMoney(item.discount)}</span>
+                        </div>
+                    `;
                     historyContainer.appendChild(div);
                 });
             } else {
-                historyContainer.innerHTML = '<div class="text-gray-400">No sales history found.</div>';
+                historyContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📅 No sales history found for this date.</div>';
             }
         } catch (err) {
-            console.error('Error loading dashboard:', err);
+            console.error('Error loading sales history:', err);
+            document.getElementById('salesHistoryList').innerHTML = '<div class="text-red-400 text-center py-4">Error loading sales history.</div>';
         }
     }
 
@@ -272,35 +304,51 @@
         loadDashboard();
     }
     
-    // Reset filter
-    function resetFilter() {
-        document.getElementById('startDate').value = '';
-        document.getElementById('endDate').value = '';
-        document.getElementById('startTime').value = '';
-        document.getElementById('endTime').value = '';
-        startDate = null;
-        endDate = null;
-        startTime = null;
-        endTime = null;
+    // Refresh to current date
+    function refreshToCurrent() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('startDate').value = today;
+        document.getElementById('endDate').value = today;
+        document.getElementById('startTime').value = '00:00';
+        document.getElementById('endTime').value = '23:59';
+        startDate = today;
+        endDate = today;
+        startTime = '00:00';
+        endTime = '23:59';
         loadDashboard();
+    }
+    
+    // Apply history date filter
+    function applyHistoryDate() {
+        historyDate = document.getElementById('historyDate').value;
+        loadSalesHistory();
+    }
+    
+    // Refresh history to today
+    function refreshHistoryToToday() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('historyDate').value = today;
+        historyDate = today;
+        loadSalesHistory();
     }
     
     // Event listeners
     document.getElementById('applyFilterBtn').addEventListener('click', applyFilter);
-    document.getElementById('resetFilterBtn').addEventListener('click', resetFilter);
+    document.getElementById('applyHistoryDateBtn').addEventListener('click', applyHistoryDate);
+    document.getElementById('refreshHistoryBtn').addEventListener('click', refreshHistoryToToday);
     
     // Set default date range to today
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('startDate').value = today;
     document.getElementById('endDate').value = today;
-    startDate = today;
-    endDate = today;
-    
-    // Set default time range (00:00 to 23:59)
     document.getElementById('startTime').value = '00:00';
     document.getElementById('endTime').value = '23:59';
+    document.getElementById('historyDate').value = today;
+    startDate = today;
+    endDate = today;
     startTime = '00:00';
     endTime = '23:59';
+    historyDate = today;
     
     // Initial load
     loadDashboard();
