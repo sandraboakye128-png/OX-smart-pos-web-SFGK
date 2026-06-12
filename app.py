@@ -1009,7 +1009,7 @@ def api_analytics_top_products():
     result = [{'name': r[0], 'brand': r[1] or '', 'category': r[2] or '', 'quantity': int(r[3])} for r in products]
     return jsonify(result)
 
-# ===================== ARCHIVE API (FIXED) =====================
+# ===================== ARCHIVE API (FULLY FIXED - REMOVED created_at) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
@@ -1020,7 +1020,7 @@ def api_archive():
     cursor = conn.cursor()
     
     try:
-        # Get active products
+        # Get active products - removed created_at column
         cursor.execute("""
             SELECT 
                 id,
@@ -1030,8 +1030,7 @@ def api_archive():
                 cost_price,
                 selling_price,
                 stock,
-                discount,
-                created_at
+                discount
             FROM products
             WHERE NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
@@ -1055,7 +1054,7 @@ def api_archive():
                 'stock': int(r[6] or 0),
                 'discount': float(r[7] or 0),
                 'action': 'ACTIVE',
-                'date': r[8].isoformat() if hasattr(r[8], 'isoformat') else str(r[8]) if r[8] else '',
+                'date': '',
                 'source': 'active',
                 'is_permanent': False,
                 'batch_id': None,
