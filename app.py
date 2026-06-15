@@ -289,6 +289,7 @@ def api_auth_admin_exists():
     return jsonify({'admin_exists': exists})
 
 # ===================== DASHBOARD API =====================
+# ===================== DASHBOARD API =====================
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required
 def api_dashboard_summary():
@@ -303,6 +304,7 @@ def api_dashboard_summary():
         except:
             selected_date = None
     
+    # Pass parameters in correct order
     sales = get_today_sales(selected_date, start_datetime, end_datetime)
     profit = get_today_profit(selected_date, start_datetime, end_datetime)
     total_products = get_total_products()
@@ -316,6 +318,7 @@ def api_dashboard_summary():
         'low_stock_count': low_stock_count,
         'low_stock_products': low_stock_products
     })
+
 
 @app.route('/api/dashboard/top_products', methods=['GET'])
 @login_required
@@ -332,9 +335,11 @@ def api_dashboard_top_products():
         except:
             selected_date = None
     
+    # Pass parameters in correct order: selected_date, limit, start_datetime, end_datetime
     top = get_top_products(selected_date, limit, start_datetime, end_datetime)
     result = [{'name': row[0], 'brand': row[1] or '', 'category': row[2] or '', 'qty': int(row[3])} for row in top]
     return jsonify(result)
+
 
 @app.route('/api/dashboard/sales_history', methods=['GET'])
 @login_required
@@ -350,6 +355,7 @@ def api_dashboard_sales_history():
         except:
             selected_date = None
     
+    # Pass parameters in correct order
     history = get_sales_history(selected_date, start_datetime, end_datetime)
     result = []
     for row in history:

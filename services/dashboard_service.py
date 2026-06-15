@@ -133,7 +133,7 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
     return profit
 
 
-# ----------------- TOTAL PRODUCTS -----------------
+# ----------------- TOTAL PRODUCTS (FIXED - counts only active products) -----------------
 def get_total_products():
     conn = get_connection()
     cursor = conn.cursor()
@@ -160,6 +160,7 @@ def get_low_stock_products(threshold=10):
         SELECT p.name, p.brand, p.category, p.stock
         FROM products p
         WHERE p.stock <= %s
+        AND p.stock > 0
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 

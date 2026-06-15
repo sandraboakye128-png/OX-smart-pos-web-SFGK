@@ -2,24 +2,10 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Header + Add Product Form -->
+    <!-- Header -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
         <h2 class="text-2xl font-bold text-indigo-600 mb-4">📦 Product Manager</h2>
-        
-        <!-- Add Product Form -->
-        <div class="border-t pt-4 mt-2">
-            <h3 class="text-lg font-semibold mb-3">Add New Product</h3>
-            <div class="grid grid-cols-1 md:grid-cols-7 gap-3">
-                <input type="text" id="newName" placeholder="Product Name" class="border rounded-lg px-3 py-2">
-                <input type="text" id="newBrand" placeholder="Brand" class="border rounded-lg px-3 py-2">
-                <input type="text" id="newCategory" placeholder="Category" class="border rounded-lg px-3 py-2">
-                <input type="number" id="newQty" placeholder="Quantity" class="border rounded-lg px-3 py-2">
-                <input type="number" step="0.01" id="newCost" placeholder="Cost Price" class="border rounded-lg px-3 py-2">
-                <input type="number" step="0.01" id="newDiscount" placeholder="Discount" class="border rounded-lg px-3 py-2">
-                <input type="number" step="0.01" id="newSelling" placeholder="Selling Price" class="border rounded-lg px-3 py-2">
-            </div>
-            <button id="addProductBtn" class="mt-3 bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg">➕ Add Product</button>
-        </div>
+        <p class="text-gray-600">Manage your products and batches</p>
     </div>
 
     <!-- Search Bar -->
@@ -74,7 +60,7 @@
 <script>
     let currentProducts = [];
     let currentProductIdForDelete = null;
-    let currentBatchSelections = []; // { var: checkbox element, batchId, data }
+    let currentBatchSelections = [];
     let currentBatchModalProductName = "";
 
     // Helper: escape HTML
@@ -198,7 +184,6 @@
             alert('Please select at least one batch.');
             return;
         }
-        // Ask user for deletion type (keep history or permanent)
         const choice = confirm(`Delete ${selected.length} batch(es)?\n\n- Click OK to KEEP history (recommended, can restore)\n- Click Cancel for PERMANENT deletion (cannot restore)`);
         const deleteType = choice ? 'keep' : 'clean';
         
@@ -214,7 +199,7 @@
         }
         alert(`${selected.length} batch(es) deleted.`);
         closeBatchModal();
-        loadProducts(); // refresh product list
+        loadProducts();
     }
 
     // ----- Product Deletion -----
@@ -246,46 +231,8 @@
         }
     }
 
-    // ----- Add Product -----
-    async function addProduct() {
-        const payload = {
-            name: document.getElementById('newName').value.trim(),
-            brand: document.getElementById('newBrand').value.trim(),
-            category: document.getElementById('newCategory').value.trim(),
-            quantity: parseInt(document.getElementById('newQty').value),
-            cost_price: parseFloat(document.getElementById('newCost').value),
-            discount: parseFloat(document.getElementById('newDiscount').value) || 0,
-            selling_price: parseFloat(document.getElementById('newSelling').value)
-        };
-        if (!payload.name || !payload.brand || !payload.quantity || !payload.cost_price || !payload.selling_price) {
-            alert('Please fill Product Name, Brand, Quantity, Cost Price and Selling Price.');
-            return;
-        }
-        const res = await fetch('/api/products', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (data.success) {
-            alert('Product added successfully!');
-            // Clear form
-            document.getElementById('newName').value = '';
-            document.getElementById('newBrand').value = '';
-            document.getElementById('newCategory').value = '';
-            document.getElementById('newQty').value = '';
-            document.getElementById('newCost').value = '';
-            document.getElementById('newDiscount').value = '';
-            document.getElementById('newSelling').value = '';
-            loadProducts();
-        } else {
-            alert('Error: ' + data.error);
-        }
-    }
-
     // Event listeners
     document.getElementById('searchInput').addEventListener('input', applySearch);
-    document.getElementById('addProductBtn').addEventListener('click', addProduct);
     document.getElementById('deleteKeepBtn').addEventListener('click', () => deleteProduct('keep'));
     document.getElementById('deleteCleanBtn').addEventListener('click', () => deleteProduct('clean'));
 
