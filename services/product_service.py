@@ -149,13 +149,19 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     finally:
         conn.close()
 
-# ---------------- GET ALL PRODUCTS ----------------
+# ---------------- GET ALL PRODUCTS (ONLY ACTIVE PRODUCTS - EXCLUDES DELETED) ----------------
 def get_all_products():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, name, brand, cost_price, selling_price, stock, category, discount
         FROM products
+        WHERE NOT EXISTS (
+            SELECT 1 FROM deleted_products dp 
+            WHERE dp.product_id = products.id 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+            AND dp.source = 'product'
+        )
         ORDER BY id ASC
     """)
     rows = cursor.fetchall()
@@ -197,7 +203,6 @@ def restore_archive(archive_id):
         row = cursor.fetchone()
         if not row:
             raise ValueError("Archive record not found")
-        # Get column names (PostgreSQL: use cursor.description)
         columns = [desc[0] for desc in cursor.description]
         record = dict(zip(columns, row))
         name = record['name']
@@ -216,7 +221,7 @@ def restore_archive(archive_id):
         deleted_action = record.get('action')
         if deleted_action == "PERMANENTLY DELETED":
             raise ValueError("This item was permanently deleted and cannot be restored!")
-        # Restore logic (same as before, but using PostgreSQL syntax)
+        # Restore logic
         if source == 'batch' and batch_id:
             cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
             prod = cursor.fetchone()

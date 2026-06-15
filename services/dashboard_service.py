@@ -19,7 +19,7 @@ def get_today_sales(selected_date=None, start_datetime=None, end_datetime=None):
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp 
                     WHERE dp.product_id = p.id 
-                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                     AND dp.source = 'product'
                 )
             )
@@ -38,7 +38,7 @@ def get_today_sales(selected_date=None, start_datetime=None, end_datetime=None):
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp 
                     WHERE dp.product_id = p.id 
-                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                     AND dp.source = 'product'
                 )
             )
@@ -56,7 +56,7 @@ def get_today_sales(selected_date=None, start_datetime=None, end_datetime=None):
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp 
                     WHERE dp.product_id = p.id 
-                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                     AND dp.source = 'product'
                 )
             )
@@ -85,7 +85,7 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp 
                     WHERE dp.product_id = p.id 
-                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                     AND dp.source = 'product'
                 )
             )
@@ -104,7 +104,7 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp 
                     WHERE dp.product_id = p.id 
-                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                     AND dp.source = 'product'
                 )
             )
@@ -122,7 +122,7 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp 
                     WHERE dp.product_id = p.id 
-                    AND dp.action = 'PERMANENTLY DELETED' 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                     AND dp.source = 'product'
                 )
             )
@@ -133,7 +133,7 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
     return profit
 
 
-# ----------------- TOTAL PRODUCTS (FIXED - counts only active products) -----------------
+# ----------------- TOTAL PRODUCTS (ONLY EXCLUDES PERMANENTLY DELETED AND SOFT DELETED) -----------------
 def get_total_products():
     conn = get_connection()
     cursor = conn.cursor()
@@ -143,7 +143,7 @@ def get_total_products():
         WHERE NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
-            AND dp.action = 'PERMANENTLY DELETED' 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
             AND dp.source = 'product'
         )
     """)
@@ -152,7 +152,7 @@ def get_total_products():
     return total
 
 
-# ----------------- LOW STOCK PRODUCTS -----------------
+# ----------------- LOW STOCK PRODUCTS (only active products, includes zero stock for low stock warning) -----------------
 def get_low_stock_products(threshold=10):
     conn = get_connection()
     cursor = conn.cursor()
@@ -160,11 +160,10 @@ def get_low_stock_products(threshold=10):
         SELECT p.name, p.brand, p.category, p.stock
         FROM products p
         WHERE p.stock <= %s
-        AND p.stock > 0
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
-            AND dp.action = 'PERMANENTLY DELETED' 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
             AND dp.source = 'product'
         )
         ORDER BY p.stock ASC
@@ -190,7 +189,7 @@ def get_weekly_sales():
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
                 WHERE dp.product_id = p.id 
-                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                 AND dp.source = 'product'
             )
         )
@@ -216,7 +215,7 @@ def get_top_products(selected_date=None, limit=5, start_datetime=None, end_datet
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
-            AND dp.action = 'PERMANENTLY DELETED' 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
             AND dp.source = 'product'
         )
     """
@@ -258,7 +257,7 @@ def get_sales_history(selected_date=None, start_datetime=None, end_datetime=None
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
                 WHERE dp.product_id = p.id 
-                AND dp.action = 'PERMANENTLY DELETED' 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                 AND dp.source = 'product'
             )
         )
