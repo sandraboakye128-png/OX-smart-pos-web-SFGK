@@ -149,7 +149,7 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     finally:
         conn.close()
 
-# ---------------- GET ALL PRODUCTS (ONLY ACTIVE PRODUCTS - EXCLUDES DELETED) ----------------
+# ---------------- GET ALL PRODUCTS (SHOWS ALL ACTIVE PRODUCTS INCLUDING ZERO STOCK) ----------------
 def get_all_products():
     conn = get_connection()
     cursor = conn.cursor()
