@@ -133,14 +133,18 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
     return profit
 
 
-# ----------------- TOTAL PRODUCTS (ONLY EXCLUDES PERMANENTLY DELETED AND SOFT DELETED) -----------------
+# ----------------- TOTAL PRODUCTS (ONLY products with active batches/stock > 0) -----------------
 def get_total_products():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT COUNT(*) 
+        SELECT COUNT(DISTINCT p.id)
         FROM products p
-        WHERE NOT EXISTS (
+        WHERE EXISTS (
+            SELECT 1 FROM purchase_batches pb 
+            WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+        )
+        AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
             AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
@@ -152,14 +156,18 @@ def get_total_products():
     return total
 
 
-# ----------------- LOW STOCK PRODUCTS (only active products, includes zero stock for low stock warning) -----------------
+# ----------------- LOW STOCK PRODUCTS (ONLY products with active batches, stock between 1-10) -----------------
 def get_low_stock_products(threshold=10):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT p.name, p.brand, p.category, p.stock
         FROM products p
-        WHERE p.stock <= %s
+        WHERE p.stock <= %s AND p.stock > 0
+        AND EXISTS (
+            SELECT 1 FROM purchase_batches pb 
+            WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+        )
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 

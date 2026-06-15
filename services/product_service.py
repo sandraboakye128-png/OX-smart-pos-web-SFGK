@@ -149,20 +149,24 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     finally:
         conn.close()
 
-# ---------------- GET ALL PRODUCTS (SHOWS ALL ACTIVE PRODUCTS INCLUDING ZERO STOCK) ----------------
+# ---------------- GET ALL PRODUCTS (ONLY products with active batches/stock > 0) ----------------
 def get_all_products():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, name, brand, cost_price, selling_price, stock, category, discount
-        FROM products
-        WHERE NOT EXISTS (
+        SELECT DISTINCT p.id, p.name, p.brand, p.cost_price, p.selling_price, p.stock, p.category, p.discount
+        FROM products p
+        WHERE EXISTS (
+            SELECT 1 FROM purchase_batches pb 
+            WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+        )
+        AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
-            WHERE dp.product_id = products.id 
+            WHERE dp.product_id = p.id 
             AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
             AND dp.source = 'product'
         )
-        ORDER BY id ASC
+        ORDER BY p.id ASC
     """)
     rows = cursor.fetchall()
     conn.close()
