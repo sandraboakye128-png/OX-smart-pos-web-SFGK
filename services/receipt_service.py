@@ -4,10 +4,10 @@ from reportlab.lib.units import mm
 from datetime import datetime
 
 # --------------------------- SHOP INFO ---------------------------
-SHOP_NAME = "SEEK FOR GOD'S KINGDOM ENTERPRISE"
-COMPLEMENT = "DEALERS IN HOME APPLIANCES, FRIDGES, TVs, BLENDERS AND OTHER MORE"
-PHONE = "0541442431"
-EMAIL = "HT-0000-3866 ,Zongo Road Near Town Park"
+SHOP_NAME = "TOMFRIMP MOBICOM SOLUTIONS"
+COMPLEMENT = "HOME OF COMPUTER, PHONES, AND ACCESSORIES"
+PHONE = "0246418380"
+EMAIL = "frimpongt97@gmail.com"
 
 # --------------------------- DEVELOPER INFO ---------------------------
 DEV_NAME = "HUMMINGBIRD DIGITAL SOLUTIONS"
