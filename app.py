@@ -44,7 +44,8 @@ from services.sales_service import (
 from services.receipt_service import generate_receipt_multi
 
 # ---------- IMPORT AUTH SERVICES ----------
-from services.auth_service import login_user, create_user, admin_exists
+# CHANGED: added count_admins to the import
+from services.auth_service import login_user, create_user, admin_exists, count_admins
 
 # ---------- IMPORT ARCHIVE SERVICES ----------
 from services.product_service import get_deleted_products, restore_archive
@@ -245,6 +246,7 @@ def api_auth_login():
     else:
         return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
+# ---------- MODIFIED SIGNUP ROUTE ----------
 @app.route('/api/auth/signup', methods=['POST'])
 def api_auth_signup():
     data = request.json
@@ -252,14 +254,21 @@ def api_auth_signup():
     password = data.get('password')
     requested_role = data.get('role', 'user')
     
-    # Security: If an admin already exists, force new users to be 'user'
-    if admin_exists():
+    # Count current admin users
+    current_admin_count = count_admins()
+    
+    # If there are already 2 or more admins, force the new user to be 'user'
+    if current_admin_count >= 2:
         role = 'user'
-        print(f"⚠️ Admin exists - forcing role 'user' for new user: {username}")
+        print(f"⚠️ Already {current_admin_count} admins (max 2) - forcing role 'user' for {username}")
     else:
-        # First user ever - allow the requested role (can be admin or user)
-        role = requested_role
-        print(f"✅ First user - creating with role: {role} for {username}")
+        # Allow admin only if requested and we have room
+        if requested_role == 'admin':
+            role = 'admin'
+            print(f"✅ Admin {username} created. ({current_admin_count + 1}/2)")
+        else:
+            role = 'user'
+            print(f"✅ Regular user {username} created.")
     
     success = create_user(username, password, role)
     if success:

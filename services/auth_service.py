@@ -1,6 +1,7 @@
+# services/auth_service.py
+
 from database.db import get_connection, return_connection
 import hashlib
-import os
 
 # ---------------- HASH PASSWORD ----------------
 def hash_password(password: str) -> str:
@@ -59,6 +60,20 @@ def admin_exists() -> bool:
         return cursor.fetchone() is not None
     finally:
         return_connection(conn)
+
+
+# ===================== NEW FUNCTION =====================
+def count_admins() -> int:
+    """Return the total number of admin users in the system."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        count = cursor.fetchone()[0]
+        return count
+    finally:
+        return_connection(conn)
+# ========================================================
 
 
 # ---------------- GET ALL USERS ----------------

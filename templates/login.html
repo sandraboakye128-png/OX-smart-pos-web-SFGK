@@ -39,31 +39,58 @@
 </div>
 
 <script>
-    // Toggle password visibility
+    // ----- CLEAR FORM FIELDS -----
+    function clearFormFields() {
+        document.querySelectorAll('#loginForm input[type="text"], #loginForm input[type="password"]').forEach(input => {
+            input.value = '';
+        });
+        // Reset checkbox
+        document.getElementById('showPassword').checked = false;
+        // Reset password visibility to hidden
+        document.getElementById('password').type = 'password';
+    }
+
+    // Clear on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        clearFormFields();
+    });
+
+    // Clear also when page is restored from bfcache (back/forward)
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted) {
+            clearFormFields();
+        }
+    });
+
+    // ----- TOGGLE PASSWORD VISIBILITY -----
     const showPasswordCheckbox = document.getElementById('showPassword');
     const passwordField = document.getElementById('password');
     showPasswordCheckbox.addEventListener('change', () => {
         passwordField.type = showPasswordCheckbox.checked ? 'text' : 'password';
     });
     
-    // Handle login form submission
+    // ----- HANDLE LOGIN SUBMISSION -----
     const loginForm = document.getElementById('loginForm');
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
         
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
-        });
-        const data = await response.json();
-        if (data.success) {
-            // Redirect to dashboard
-            window.location.href = '/';
-        } else {
-            alert('Login failed: ' + data.error);
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await response.json();
+            if (data.success) {
+                window.location.href = '/';
+            } else {
+                alert('Login failed: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            alert('Network error. Please try again.');
         }
     });
 </script>

@@ -48,14 +48,41 @@
 </div>
 
 <script>
-    // Toggle password visibility
+    // ----- CLEAR FORM FIELDS -----
+    function clearFormFields() {
+        document.querySelectorAll('#signupForm input[type="text"], #signupForm input[type="password"]').forEach(input => {
+            input.value = '';
+        });
+        // Reset checkbox too (optional)
+        document.getElementById('showPassword').checked = false;
+        // Reset password visibility to hidden
+        document.getElementById('password').type = 'password';
+        // Reset role select to default 'user' (will be overwritten by admin check)
+        document.getElementById('role').value = 'user';
+    }
+
+    // Clear on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        clearFormFields();
+        checkAdminExists();
+    });
+
+    // Clear also when page is restored from bfcache (back/forward)
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted) {
+            clearFormFields();
+            checkAdminExists();
+        }
+    });
+
+    // ----- TOGGLE PASSWORD VISIBILITY -----
     const showPasswordCheckbox = document.getElementById('showPassword');
     const passwordField = document.getElementById('password');
     showPasswordCheckbox.addEventListener('change', () => {
         passwordField.type = showPasswordCheckbox.checked ? 'text' : 'password';
     });
     
-    // Check if an admin already exists
+    // ----- CHECK ADMIN EXISTENCE -----
     async function checkAdminExists() {
         try {
             const res = await fetch('/api/auth/admin_exists');
@@ -64,25 +91,21 @@
             const roleNote = document.getElementById('roleNote');
             
             if (data.admin_exists) {
-                // Admin already exists - hide role selection, only user role allowed
                 roleContainer.style.display = 'none';
-                // Set role to user by default
                 document.getElementById('role').value = 'user';
                 console.log('Admin exists - role selection hidden');
             } else {
-                // No admin exists - show role selection
                 roleContainer.style.display = 'block';
                 roleNote.textContent = 'First user can create Admin account';
                 console.log('No admin exists - role selection shown');
             }
         } catch (error) {
             console.error('Error checking admin existence:', error);
-            // Default to showing role container if API fails
             document.getElementById('roleContainer').style.display = 'block';
         }
     }
     
-    // Handle signup form submission
+    // ----- HANDLE SIGNUP SUBMISSION -----
     const signupForm = document.getElementById('signupForm');
     signupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -90,19 +113,15 @@
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
         
-        // Validate username
         if (!username) {
             alert('Please enter a username');
             return;
         }
-        
-        // Validate password length
         if (password.length < 4) {
             alert('Password must be at least 4 characters long');
             return;
         }
         
-        // Determine role
         let role = 'user';
         const roleContainer = document.getElementById('roleContainer');
         if (roleContainer.style.display !== 'none') {
@@ -133,8 +152,5 @@
             alert('Network error. Please try again.');
         }
     });
-    
-    // Check admin status when page loads
-    checkAdminExists();
 </script>
 {% endblock %}
