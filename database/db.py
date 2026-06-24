@@ -1,7 +1,9 @@
 import os
 import sqlite3
-from psycopg2 import pool
 import psycopg2
+from psycopg2 import pool, sql, OperationalError
+import time
+from contextlib import contextmanager
 
 # ---------- Ensure folders exist ----------
 DB_DIR = "database"
@@ -22,28 +24,24 @@ USE_POSTGRES = DATABASE_URL is not None
 
 # ---------- Connection Pool (for PostgreSQL) ----------
 connection_pool = None
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
 
 if USE_POSTGRES:
     print("Using PostgreSQL (Supabase) with connection pooling")
     
-    # Create connection pool
-    try:
-        connection_pool = pool.SimpleConnectionPool(
-            1,                    # min connections
-            20,                   # max connections
-            DATABASE_URL,
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5,
-            connect_timeout=10,
-            sslmode='require',     # Add SSL mode for Supabase
-            options='-c statement_timeout=30000'  # 30 second statement timeout
-        )
-        print("PostgreSQL connection pool created successfully")
-    except Exception as e:
-        print(f"Failed to create connection pool: {e}")
-        connection_pool = None
+    # Ensure SSL is required
+    if "sslmode" not in DATABASE_URL:
+        if "?" in DATABASE_URL:
+            DATABASE_URL += "&sslmode=require"
+        else:
+            DATABASE_URL += "?sslmode=require"
+    
+    # Add timeout and keepalive parameters
+    if "connect_timeout" not in DATABASE_URL:
+        DATABASE_URL += "&connect_timeout=10"
+    
+    print(f"PostgreSQL URL configured (SSL required)")
 
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS products (
@@ -142,7 +140,7 @@ if USE_POSTGRES:
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- Add indexes for better performance
+    -- Indexes
     CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id);
     CREATE INDEX IF NOT EXISTS idx_purchase_batches_remaining ON purchase_batches(remaining_quantity);
     CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id);
@@ -183,70 +181,124 @@ if USE_POSTGRES:
         "CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)"
     ]
 
+    def init_pool():
+        """Initialize or reinitialize the connection pool"""
+        global connection_pool
+        if connection_pool is not None:
+            try:
+                connection_pool.closeall()
+            except:
+                pass
+            connection_pool = None
+        
+        try:
+            connection_pool = pool.SimpleConnectionPool(
+                1,                     # min connections
+                10,                    # max connections (reduce to avoid timeouts)
+                DATABASE_URL,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+                connect_timeout=10,
+                sslmode='require',
+                options='-c statement_timeout=30000'
+            )
+            # Test the pool
+            test_conn = connection_pool.getconn()
+            cursor = test_conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            connection_pool.putconn(test_conn)
+            print("PostgreSQL connection pool created successfully")
+            return True
+        except Exception as e:
+            print(f"Failed to create connection pool: {e}")
+            connection_pool = None
+            return False
+
     def get_connection():
-        """Get a connection from the pool or create a new one"""
+        """Get a connection from the pool with retries and fallback"""
         global connection_pool
         
-        if connection_pool:
+        # If pool doesn't exist, try to create it
+        if connection_pool is None:
+            if not init_pool():
+                # If pool init fails, fall back to direct connection
+                print("Pool init failed, using direct connection")
+                return get_direct_connection()
+        
+        # Try to get a connection from the pool with retries
+        for attempt in range(MAX_RETRIES):
             try:
                 conn = connection_pool.getconn()
-                # Test the connection is alive
+                # Validate connection is alive
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
                 return conn
             except Exception as e:
-                print(f"Error getting connection from pool: {e}")
-                # Try to create a new direct connection
-                try:
-                    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-                    return conn
-                except Exception as e2:
-                    print(f"Failed to create fallback connection: {e2}")
+                print(f"Error getting connection from pool (attempt {attempt+1}/{MAX_RETRIES}): {e}")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+                    # Try to reinitialize the pool
+                    init_pool()
+                else:
+                    # Pool exhausted or broken; fall back to direct connection
+                    print("Pool exhausted, falling back to direct connection")
+                    return get_direct_connection()
+        
+        # Should never reach here, but fallback
+        return get_direct_connection()
+
+    def get_direct_connection():
+        """Create a direct connection (no pooling) with retries"""
+        for attempt in range(MAX_RETRIES):
+            try:
+                conn = psycopg2.connect(
+                    DATABASE_URL,
+                    sslmode='require',
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=5
+                )
+                # Ensure schema exists
+                cursor = conn.cursor()
+                cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
+                tables_exist = cursor.fetchone()[0]
+                if not tables_exist:
+                    print("Creating database schema...")
+                    cursor.execute(SCHEMA)
+                    for migration in POSTGRES_MIGRATIONS:
+                        try:
+                            cursor.execute(migration)
+                        except Exception as e:
+                            print(f"Migration warning: {e}")
+                    conn.commit()
+                    print("Database schema created successfully")
+                return conn
+            except Exception as e:
+                print(f"Direct connection attempt {attempt+1} failed: {e}")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+                else:
                     raise
-        else:
-            # Direct connection fallback
-            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-            cursor = conn.cursor()
-            
-            # Check if tables exist
-            cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')")
-            tables_exist = cursor.fetchone()[0]
-            
-            if not tables_exist:
-                print("Creating database schema...")
-                cursor.execute(SCHEMA)
-                for migration in POSTGRES_MIGRATIONS:
-                    try:
-                        cursor.execute(migration)
-                    except Exception as e:
-                        print(f"Migration warning: {e}")
-                conn.commit()
-                print("Database schema created successfully")
-            
-            return conn
 
     def return_connection(conn):
-        """Return connection to the pool"""
+        """Return connection to the pool, or close it if not pooled"""
         global connection_pool
-        if connection_pool and conn:
-            try:
-                # Only return if it's a pooled connection (has _pool_key)
-                if hasattr(conn, '_pool_key'):
-                    connection_pool.putconn(conn)
-                else:
-                    # It's a direct connection, just close it
-                    try:
-                        conn.close()
-                    except:
-                        pass
-            except Exception as e:
-                print(f"Error returning connection to pool: {e}")
-                try:
-                    conn.close()
-                except:
-                    pass
-        elif conn:
+        if conn is None:
+            return
+        try:
+            # Check if it's a pooled connection
+            if connection_pool and hasattr(conn, '_pool_key'):
+                connection_pool.putconn(conn)
+            else:
+                conn.close()
+        except Exception as e:
+            print(f"Error returning connection: {e}")
             try:
                 conn.close()
             except:
@@ -368,19 +420,13 @@ else:
     def get_connection():
         """Get SQLite connection with proper settings"""
         conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row  # Enable named columns
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
-        # Enable foreign keys
         cursor.execute("PRAGMA foreign_keys = ON")
-        
-        # Set timeout for busy database
         conn.execute("PRAGMA busy_timeout = 30000")
-        
-        # Create tables
         cursor.executescript(SCHEMA)
 
-        # ---------- SAFE MIGRATIONS ----------
+        # Safe migrations
         try: cursor.execute("ALTER TABLE products ADD COLUMN category TEXT")
         except: pass
         try: cursor.execute("ALTER TABLE products ADD COLUMN discount REAL DEFAULT 0")
@@ -446,7 +492,7 @@ else:
             """)
         except: pass
 
-        # Create indexes
+        # Indexes
         try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id)")
         except: pass
         try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id)")
@@ -460,7 +506,7 @@ else:
 
         conn.commit()
 
-        # ---------- AUTH DB ----------
+        # Auth DB
         auth_conn = sqlite3.connect(AUTH_DB_PATH)
         auth_cursor = auth_conn.cursor()
         auth_cursor.executescript(AUTH_SCHEMA)
@@ -470,7 +516,6 @@ else:
         return conn
 
     def return_connection(conn):
-        """Close SQLite connection"""
         if conn:
             try:
                 conn.close()
@@ -479,18 +524,14 @@ else:
 
 # ---------- Helper function to get parameter style ----------
 def get_param_style(cursor):
-    """Return appropriate parameter placeholder based on database type"""
     if hasattr(cursor, 'connection'):
         if hasattr(cursor.connection, 'psycopg2_version'):
             return "%s"  # PostgreSQL
     return "?"  # SQLite
 
 # ---------- Context manager for automatic connection handling ----------
-from contextlib import contextmanager
-
 @contextmanager
 def get_db_connection():
-    """Context manager for database connections"""
     conn = get_connection()
     try:
         yield conn
@@ -503,7 +544,6 @@ def get_db_connection():
 
 # ---------- Health check function ----------
 def check_database_health():
-    """Check if database is accessible"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -517,7 +557,6 @@ def check_database_health():
 
 # ---------- Close all connections (for shutdown) ----------
 def close_all_connections():
-    """Close all connections in the pool"""
     global connection_pool
     if connection_pool:
         try:
@@ -525,3 +564,5 @@ def close_all_connections():
             print("All database connections closed")
         except Exception as e:
             print(f"Error closing connection pool: {e}")
+        finally:
+            connection_pool = None
