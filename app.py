@@ -43,9 +43,16 @@ from services.sales_service import (
 # ---------- IMPORT RECEIPT SERVICE ----------
 from services.receipt_service import generate_receipt_multi
 
-# ---------- IMPORT AUTH SERVICES ----------
-# CHANGED: added count_admins to the import
-from services.auth_service import login_user, create_user, admin_exists, count_admins
+# ---------- IMPORT AUTH SERVICES (UPDATED) ----------
+from services.auth_service import (
+    login_user,
+    create_user,
+    admin_exists,
+    count_admins,
+    get_all_users,
+    update_user_role,
+    delete_user
+)
 
 # ---------- IMPORT ARCHIVE SERVICES ----------
 from services.product_service import get_deleted_products, restore_archive
@@ -147,6 +154,17 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# ---------------------- ADMIN REQUIRED DECORATOR (NEW) ----------------------
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('role') != 'admin':
+            return render_template("error.html", message="Admin access required"), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
 # ---------------------- PUBLIC ROUTES ----------------------
 @app.route("/login")
 def login():
@@ -201,6 +219,12 @@ def today_sales():
 def archive():
     return render_template("archive.html")
 
+# ---------------------- ADMIN PAGE (NEW) ----------------------
+@app.route("/admin/users")
+@admin_required
+def admin_users():
+    return render_template("admin_users.html")
+
 # ===================== LICENSE API =====================
 @app.route('/api/license/status', methods=['GET'])
 def api_license_status():
@@ -246,7 +270,7 @@ def api_auth_login():
     else:
         return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
-# ---------- MODIFIED SIGNUP ROUTE ----------
+# ------------------- UPDATED SIGNUP (allows 2 admins) -------------------
 @app.route('/api/auth/signup', methods=['POST'])
 def api_auth_signup():
     data = request.json
@@ -254,15 +278,12 @@ def api_auth_signup():
     password = data.get('password')
     requested_role = data.get('role', 'user')
     
-    # Count current admin users
     current_admin_count = count_admins()
     
-    # If there are already 2 or more admins, force the new user to be 'user'
     if current_admin_count >= 2:
         role = 'user'
         print(f"⚠️ Already {current_admin_count} admins (max 2) - forcing role 'user' for {username}")
     else:
-        # Allow admin only if requested and we have room
         if requested_role == 'admin':
             role = 'admin'
             print(f"✅ Admin {username} created. ({current_admin_count + 1}/2)")
@@ -297,7 +318,60 @@ def api_auth_admin_exists():
     exists = admin_exists()
     return jsonify({'admin_exists': exists})
 
-# ===================== DASHBOARD API =====================
+# ------------------- NEW: Admin count endpoint -------------------
+@app.route('/api/auth/admin_count', methods=['GET'])
+def api_auth_admin_count():
+    count = count_admins()
+    return jsonify({'admin_count': count})
+
+# ===================== ADMIN USER MANAGEMENT API (NEW) =====================
+@app.route('/api/admin/users', methods=['GET'])
+@admin_required
+def api_admin_get_users():
+    users = get_all_users()
+    return jsonify(users)
+
+@app.route('/api/admin/users', methods=['POST'])
+@admin_required
+def api_admin_create_user():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    role = data.get('role', 'user')
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    success = create_user(username, password, role)
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'error': 'Username already exists'}), 400
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def api_admin_delete_user(user_id):
+    # Prevent deleting yourself
+    if user_id == session.get('user_id'):
+        return jsonify({'success': False, 'error': 'Cannot delete your own account'}), 400
+    success = delete_user(user_id)
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'error': 'Delete failed'}), 400
+
+@app.route('/api/admin/users/<int:user_id>/role', methods=['PUT'])
+@admin_required
+def api_admin_update_role(user_id):
+    data = request.json
+    new_role = data.get('role')
+    if new_role not in ['admin', 'user']:
+        return jsonify({'success': False, 'error': 'Invalid role'}), 400
+    success = update_user_role(user_id, new_role)
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'error': 'Update failed'}), 400
+
+
 # ===================== DASHBOARD API =====================
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required
@@ -313,7 +387,6 @@ def api_dashboard_summary():
         except:
             selected_date = None
     
-    # Pass parameters in correct order
     sales = get_today_sales(selected_date, start_datetime, end_datetime)
     profit = get_today_profit(selected_date, start_datetime, end_datetime)
     total_products = get_total_products()
@@ -327,7 +400,6 @@ def api_dashboard_summary():
         'low_stock_count': low_stock_count,
         'low_stock_products': low_stock_products
     })
-
 
 @app.route('/api/dashboard/top_products', methods=['GET'])
 @login_required
@@ -344,11 +416,9 @@ def api_dashboard_top_products():
         except:
             selected_date = None
     
-    # Pass parameters in correct order: selected_date, limit, start_datetime, end_datetime
     top = get_top_products(selected_date, limit, start_datetime, end_datetime)
     result = [{'name': row[0], 'brand': row[1] or '', 'category': row[2] or '', 'qty': int(row[3])} for row in top]
     return jsonify(result)
-
 
 @app.route('/api/dashboard/sales_history', methods=['GET'])
 @login_required
@@ -364,7 +434,6 @@ def api_dashboard_sales_history():
         except:
             selected_date = None
     
-    # Pass parameters in correct order
     history = get_sales_history(selected_date, start_datetime, end_datetime)
     result = []
     for row in history:

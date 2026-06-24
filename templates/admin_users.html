@@ -1,0 +1,206 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mx-auto p-6">
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">👥 User Management</h1>
+
+    <!-- Hidden input to store current user ID -->
+    <input type="hidden" id="currentUserId" value="{{ current_user.id|default(0) }}">
+
+    <!-- Create User Form -->
+    <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">➕ Create New User</h2>
+        <form id="createUserForm" class="flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Username</label>
+                <input type="text" id="newUsername" required autocomplete="off"
+                       class="mt-1 px-3 py-2 border border-gray-300 rounded-md focus:ring focus:ring-indigo-200">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Password</label>
+                <input type="password" id="newPassword" required autocomplete="new-password"
+                       class="mt-1 px-3 py-2 border border-gray-300 rounded-md focus:ring focus:ring-indigo-200">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Role</label>
+                <select id="newRole" class="mt-1 px-3 py-2 border border-gray-300 rounded-md">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-md">
+                Create User
+            </button>
+        </form>
+        <div id="createMessage" class="mt-2 text-sm"></div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="bg-white rounded-lg shadow overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="usersTableBody" class="bg-white divide-y divide-gray-200">
+                <!-- rows inserted by JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Get the logged-in user's ID from the hidden input
+    const currentUserId = parseInt(document.getElementById('currentUserId').value) || 0;
+
+    async function fetchUsers() {
+        const res = await fetch('/api/admin/users');
+        if (!res.ok) throw new Error('Failed to fetch users');
+        return res.json();
+    }
+
+    function renderUsers(users) {
+        const tbody = document.getElementById('usersTableBody');
+        tbody.innerHTML = '';
+        if (users.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500">No users found.</td></tr>`;
+            return;
+        }
+        users.forEach(user => {
+            const tr = document.createElement('tr');
+            const isCurrentUser = user.id === currentUserId;
+            const roleBadgeClass = user.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+            tr.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${user.id}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${escapeHtml(user.username)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${roleBadgeClass}">
+                        ${user.role}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.created_at ? new Date(user.created_at).toLocaleString() : '—'}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                    ${!isCurrentUser ? `
+                        <button class="role-toggle text-indigo-600 hover:text-indigo-900" 
+                                data-id="${user.id}" 
+                                data-role="${user.role === 'admin' ? 'user' : 'admin'}">
+                            ${user.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
+                        </button>
+                        <button class="delete-user text-red-600 hover:text-red-900" data-id="${user.id}">Delete</button>
+                    ` : `
+                        <span class="text-gray-400">(You)</span>
+                    `}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Attach event listeners for role toggle
+        document.querySelectorAll('.role-toggle').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const userId = this.dataset.id;
+                const newRole = this.dataset.role;
+                if (!confirm(`Change role to "${newRole}"?`)) return;
+                try {
+                    const res = await fetch(`/api/admin/users/${userId}/role`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ role: newRole })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        loadUsers();
+                    } else {
+                        alert('Failed: ' + (data.error || 'Unknown error'));
+                    }
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                }
+            });
+        });
+
+        // Attach event listeners for delete
+        document.querySelectorAll('.delete-user').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const userId = this.dataset.id;
+                if (!confirm('Delete this user? This cannot be undone.')) return;
+                try {
+                    const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (data.success) {
+                        loadUsers();
+                    } else {
+                        alert('Failed: ' + (data.error || 'Unknown error'));
+                    }
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                }
+            });
+        });
+    }
+
+    // Simple escape function to prevent XSS
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    async function loadUsers() {
+        try {
+            const users = await fetchUsers();
+            renderUsers(users);
+        } catch (err) {
+            console.error(err);
+            document.getElementById('usersTableBody').innerHTML =
+                `<tr><td colspan="5" class="text-center py-4 text-red-500">Failed to load users: ${err.message}</td></tr>`;
+        }
+    }
+
+    // Create user form submission
+    document.getElementById('createUserForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('newUsername').value.trim();
+        const password = document.getElementById('newPassword').value.trim();
+        const role = document.getElementById('newRole').value;
+        const msg = document.getElementById('createMessage');
+
+        if (!username || !password) {
+            msg.className = 'text-red-500';
+            msg.textContent = 'Username and password are required.';
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, role })
+            });
+            const data = await res.json();
+            if (data.success) {
+                msg.className = 'text-green-500';
+                msg.textContent = 'User created successfully!';
+                document.getElementById('newUsername').value = '';
+                document.getElementById('newPassword').value = '';
+                loadUsers();
+            } else {
+                msg.className = 'text-red-500';
+                msg.textContent = 'Error: ' + (data.error || 'Unknown error');
+            }
+        } catch (err) {
+            msg.className = 'text-red-500';
+            msg.textContent = 'Network error: ' + err.message;
+        }
+    });
+
+    // Initial load
+    loadUsers();
+</script>
+{% endblock %}

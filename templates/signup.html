@@ -53,25 +53,22 @@
         document.querySelectorAll('#signupForm input[type="text"], #signupForm input[type="password"]').forEach(input => {
             input.value = '';
         });
-        // Reset checkbox too (optional)
         document.getElementById('showPassword').checked = false;
-        // Reset password visibility to hidden
         document.getElementById('password').type = 'password';
-        // Reset role select to default 'user' (will be overwritten by admin check)
         document.getElementById('role').value = 'user';
     }
 
     // Clear on page load
     document.addEventListener('DOMContentLoaded', function() {
         clearFormFields();
-        checkAdminExists();
+        checkAdminCount();  // CHANGED: use count endpoint
     });
 
     // Clear also when page is restored from bfcache (back/forward)
     window.addEventListener('pageshow', function(event) {
         if (event.persisted) {
             clearFormFields();
-            checkAdminExists();
+            checkAdminCount();
         }
     });
 
@@ -81,30 +78,41 @@
     showPasswordCheckbox.addEventListener('change', () => {
         passwordField.type = showPasswordCheckbox.checked ? 'text' : 'password';
     });
-    
-    // ----- CHECK ADMIN EXISTENCE -----
-    async function checkAdminExists() {
+
+    // ----- CHECK ADMIN COUNT (UPDATED) -----
+    async function checkAdminCount() {
         try {
-            const res = await fetch('/api/auth/admin_exists');
+            const res = await fetch('/api/auth/admin_count');
             const data = await res.json();
+            const adminCount = data.admin_count || 0;
             const roleContainer = document.getElementById('roleContainer');
             const roleNote = document.getElementById('roleNote');
             
-            if (data.admin_exists) {
+            if (adminCount >= 2) {
+                // Already have 2 admins – hide role selector and force user
                 roleContainer.style.display = 'none';
                 document.getElementById('role').value = 'user';
-                console.log('Admin exists - role selection hidden');
+                roleNote.textContent = 'Maximum 2 admins reached. New accounts will be regular users.';
+                console.log('2 admins exist – role selector hidden');
             } else {
+                // Room for at least one more admin – show the selector
                 roleContainer.style.display = 'block';
-                roleNote.textContent = 'First user can create Admin account';
-                console.log('No admin exists - role selection shown');
+                if (adminCount === 0) {
+                    roleNote.textContent = 'First user can create an Admin account.';
+                } else if (adminCount === 1) {
+                    roleNote.textContent = 'You can create one more Admin account (2 admins max).';
+                } else {
+                    roleNote.textContent = '';
+                }
+                console.log(`Admin count = ${adminCount} – role selector shown`);
             }
         } catch (error) {
-            console.error('Error checking admin existence:', error);
+            console.error('Error checking admin count:', error);
+            // Fallback: show role selector
             document.getElementById('roleContainer').style.display = 'block';
         }
     }
-    
+
     // ----- HANDLE SIGNUP SUBMISSION -----
     const signupForm = document.getElementById('signupForm');
     signupForm.addEventListener('submit', async (e) => {

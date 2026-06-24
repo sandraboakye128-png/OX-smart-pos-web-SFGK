@@ -6,7 +6,7 @@
     <title>OX Smart POS</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Font Awesome Icons (optional, for better icons) -->
+    <!-- Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <!-- Your custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -64,6 +64,10 @@
             </a>
             <a href="/archive" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-archive w-5"></i> Archive
+            </a>
+            <!-- NEW: Users management (admin only) -->
+            <a href="/admin/users" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-users w-5"></i> Users
             </a>
             {% endif %}
 
