@@ -11,12 +11,12 @@
         <form id="loginForm">
             <div class="mb-4">
                 <label class="block text-gray-700 text-sm font-bold mb-2">👤 Username</label>
-                <input type="text" id="username" name="username" required
+                <input type="text" id="username" name="username" required autocomplete="off"
                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div class="mb-4">
                 <label class="block text-gray-700 text-sm font-bold mb-2">🔒 Password</label>
-                <input type="password" id="password" name="password" required
+                <input type="password" id="password" name="password" required autocomplete="new-password"
                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div class="mb-6">
@@ -44,21 +44,26 @@
         document.querySelectorAll('#loginForm input[type="text"], #loginForm input[type="password"]').forEach(input => {
             input.value = '';
         });
-        // Reset checkbox
         document.getElementById('showPassword').checked = false;
-        // Reset password visibility to hidden
         document.getElementById('password').type = 'password';
+    }
+
+    // Force clear multiple times to beat browser autofill
+    function forceClear() {
+        clearFormFields();
+        setTimeout(clearFormFields, 50);
+        setTimeout(clearFormFields, 200);
     }
 
     // Clear on page load
     document.addEventListener('DOMContentLoaded', function() {
-        clearFormFields();
+        forceClear();
     });
 
     // Clear also when page is restored from bfcache (back/forward)
     window.addEventListener('pageshow', function(event) {
         if (event.persisted) {
-            clearFormFields();
+            forceClear();
         }
     });
 
