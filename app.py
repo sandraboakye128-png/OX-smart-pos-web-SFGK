@@ -1549,6 +1549,120 @@ def api_archive_batches():
     batches = [b for b in purchases if b['name'] == name and b['brand'] == brand]
     return jsonify(batches)
 
+# ===================== INVENTORY IMPORT (EXCEL) =====================
+import openpyxl
+from openpyxl import load_workbook
+from werkzeug.utils import secure_filename
+
+ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/inventory/import', methods=['GET'])
+@admin_required
+def import_inventory_page():
+    return render_template('import_inventory.html')
+
+@app.route('/api/inventory/import', methods=['POST'])
+@admin_required
+def api_import_inventory():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
+
+    # Save or read directly from memory
+    try:
+        wb = load_workbook(file.stream, data_only=True)
+        ws = wb.active
+
+        # Expect header row: Name, Brand, Category, Quantity, Cost Price, Selling Price, Discount (optional)
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return jsonify({'success': False, 'error': 'Empty file'}), 400
+
+        headers = rows[0]
+        expected = ['Name', 'Brand', 'Category', 'Quantity', 'Cost Price', 'Selling Price', 'Discount']
+        # Normalize headers: strip and lower
+        header_map = {}
+        for idx, h in enumerate(headers):
+            if h:
+                cleaned = str(h).strip().lower()
+                for exp in expected:
+                    if cleaned == exp.lower():
+                        header_map[exp] = idx
+                        break
+
+        missing = [e for e in expected if e not in header_map]
+        if missing:
+            return jsonify({
+                'success': False,
+                'error': f'Missing columns: {", ".join(missing)}. Expected: {", ".join(expected)}'
+            }), 400
+
+        imported_count = 0
+        error_rows = []
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        for row_idx, row in enumerate(rows[1:], start=2):  # start at row 2 (1-indexed)
+            try:
+                name = str(row[header_map['Name']]).strip()
+                brand = str(row[header_map['Brand']]).strip() if row[header_map['Brand']] else ''
+                category = str(row[header_map['Category']]).strip() if row[header_map['Category']] else ''
+                quantity = int(row[header_map['Quantity']])
+                cost_price = float(row[header_map['Cost Price']])
+                selling_price = float(row[header_map['Selling Price']])
+                discount = float(row[header_map['Discount']]) if row[header_map['Discount']] else 0.0
+
+                # Validate
+                if not name:
+                    error_rows.append(f"Row {row_idx}: Product name is required")
+                    continue
+                if quantity <= 0:
+                    error_rows.append(f"Row {row_idx}: Quantity must be positive")
+                    continue
+                if cost_price < 0:
+                    error_rows.append(f"Row {row_idx}: Cost price cannot be negative")
+                    continue
+                if selling_price < 0:
+                    error_rows.append(f"Row {row_idx}: Selling price cannot be negative")
+                    continue
+
+                # Use the existing add_purchase function to create a batch
+                from services.purchase_service import add_purchase
+                add_purchase(
+                    name=name,
+                    brand=brand,
+                    category=category,
+                    quantity=quantity,
+                    cost_price=cost_price,
+                    discount=discount,
+                    selling_price=selling_price
+                )
+                imported_count += 1
+
+            except Exception as e:
+                error_rows.append(f"Row {row_idx}: {str(e)}")
+                continue
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'imported': imported_count,
+            'errors': error_rows
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
+
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
