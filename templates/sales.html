@@ -341,6 +341,7 @@
         return null;
     }
 
+    // ========== UPDATED: executeSaleWithPayment with offline support ==========
     async function executeSaleWithPayment(paymentMethod, chequeNum) {
         if (!pendingSaleCallback) return;
         
@@ -370,25 +371,60 @@
         
         console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
         
-        const res = await fetch('/api/sales/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        
-        const data = await res.json();
-        console.log("📥 Response data:", data);
-        
-        if (data.success) {
-            lastSale = data;
-            document.getElementById('receiptPreview').innerHTML = `<pre class="whitespace-pre-wrap">${data.receipt_text}</pre>`;
-            document.getElementById('printReceiptBtn').disabled = false;
+        try {
+            const res = await fetch('/api/sales/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            
+            const data = await res.json();
+            console.log("📥 Response data:", data);
+            
+            if (data.success) {
+                lastSale = data;
+                document.getElementById('receiptPreview').innerHTML = `<pre class="whitespace-pre-wrap">${data.receipt_text}</pre>`;
+                document.getElementById('printReceiptBtn').disabled = false;
+                cart = [];
+                updateCart();
+                loadProducts();
+                alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || paymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch (error) {
+            // ===== NETWORK ERROR – OFFLINE STORAGE =====
+            console.warn('Network error, saving sale offline:', error);
+            
+            // Save the sale locally
+            savePendingSale(payload);
+            
+            // Update badge
+            updatePendingBadge();
+            
+            // Clear cart
             cart = [];
             updateCart();
-            loadProducts();
-            alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || paymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
-        } else {
-            alert('Error: ' + data.error);
+            
+            // Show offline receipt placeholder
+            document.getElementById('receiptPreview').innerHTML = `
+                <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
+                    <strong>⚠️ Offline Sale Saved</strong><br>
+                    This sale has been saved locally and will be synced when you reconnect.
+                    <br><br>
+                    <strong>Total:</strong> ${formatMoney(payload.cart_items.reduce((sum, item) => sum + item.qty * item.product.selling_price, 0))}
+                    <br>
+                    <strong>Items:</strong> ${payload.cart_items.length}
+                    <br><br>
+                    <span class="text-xs">Sale ID: pending (${new Date().toLocaleString()})</span>
+                </div>
+            `;
+            
+            alert('You are offline. Sale saved locally and will be synced later.');
         }
         
         pendingSaleCallback = null;
@@ -670,7 +706,7 @@
         document.getElementById('paymentModal').classList.remove('hidden');
     });
 
-    // Confirm Payment Button - Fixed to preserve payment method
+    // Confirm Payment Button
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
         console.log("🔘 Confirm button clicked. Current payment method:", selectedPaymentMethod);
         
@@ -716,7 +752,7 @@
         }
 
         if (canProceed) {
-            // Use stored payment data, not the possibly reset variables
+            // Use stored payment data
             await executeSaleWithPayment(paymentMethodToUse, chequeNumberToUse);
         } else {
             pendingSaleCallback = null;
@@ -758,6 +794,14 @@
         document.getElementById('saleTime').value = `${hours}:${minutes.toString().padStart(2,'0')} ${ampm}`;
     }
     setDefaultDateTime();
+
+    // ---------- Update pending badge on page load ----------
+    document.addEventListener('DOMContentLoaded', function() {
+        // This will run after offline.js has initialized
+        if (typeof updatePendingBadge === 'function') {
+            updatePendingBadge();
+        }
+    });
 
     // Initial load
     loadProducts();

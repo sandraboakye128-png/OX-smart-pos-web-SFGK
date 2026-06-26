@@ -17,11 +17,15 @@ def update_product_stock(cursor, product_id):
 
 
 # --------------------------- ADD PURCHASE (BATCH-AWARE) ---------------------------
-def add_purchase(name, brand, category, quantity, cost_price, discount, selling_price):
+def add_purchase(name, brand, category, quantity, cost_price, discount, selling_price, purchase_date=None):
     quantity = int(quantity)
     cost_price = float(cost_price)
     discount = float(discount or 0)
     selling_price = float(selling_price)
+
+    # Use provided date or current time
+    if purchase_date is None:
+        purchase_date = datetime.now()
 
     conn = get_connection()
     try:
@@ -34,7 +38,7 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
             INSERT INTO purchases
             (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (name, brand, category, quantity, cost_price, discount, total, selling_price, datetime.now()))
+        """, (name, brand, category, quantity, cost_price, discount, total, selling_price, purchase_date))
 
         # Get or create product (check if not permanently deleted)
         cursor.execute("""
@@ -61,13 +65,13 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
             """, (name, brand, cost_price, selling_price, 0, category))
             product_id = cursor.fetchone()[0]
 
-        # Create batch
+        # Create batch with the provided date
         cursor.execute("""
             INSERT INTO purchase_batches
             (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (product_id, quantity, quantity, cost_price, selling_price, discount, datetime.now(), "added"))
+        """, (product_id, quantity, quantity, cost_price, selling_price, discount, purchase_date, "added"))
 
         batch_id = cursor.fetchone()[0]
 

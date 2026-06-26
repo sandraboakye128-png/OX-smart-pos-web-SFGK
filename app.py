@@ -37,13 +37,14 @@ from services.sales_service import (
     get_batches_for_product,
     get_batch_by_id,
     create_multi_sale,
-    update_product_stock
+    update_product_stock,
+    import_sale_bulk          # <-- NEW
 )
 
 # ---------- IMPORT RECEIPT SERVICE ----------
 from services.receipt_service import generate_receipt_multi
 
-# ---------- IMPORT AUTH SERVICES (UPDATED) ----------
+# ---------- IMPORT AUTH SERVICES ----------
 from services.auth_service import (
     login_user,
     create_user,
@@ -154,7 +155,7 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# ---------------------- ADMIN REQUIRED DECORATOR (NEW) ----------------------
+# ---------------------- ADMIN REQUIRED DECORATOR ----------------------
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -219,7 +220,7 @@ def today_sales():
 def archive():
     return render_template("archive.html")
 
-# ---------------------- ADMIN PAGE (NEW) ----------------------
+# ---------------------- ADMIN PAGE ----------------------
 @app.route("/admin/users")
 @admin_required
 def admin_users():
@@ -270,7 +271,6 @@ def api_auth_login():
     else:
         return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
-# ------------------- UPDATED SIGNUP (allows 2 admins) -------------------
 @app.route('/api/auth/signup', methods=['POST'])
 def api_auth_signup():
     data = request.json
@@ -318,13 +318,12 @@ def api_auth_admin_exists():
     exists = admin_exists()
     return jsonify({'admin_exists': exists})
 
-# ------------------- NEW: Admin count endpoint -------------------
 @app.route('/api/auth/admin_count', methods=['GET'])
 def api_auth_admin_count():
     count = count_admins()
     return jsonify({'admin_count': count})
 
-# ===================== ADMIN USER MANAGEMENT API (NEW) =====================
+# ===================== ADMIN USER MANAGEMENT API =====================
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
 def api_admin_get_users():
@@ -349,7 +348,6 @@ def api_admin_create_user():
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def api_admin_delete_user(user_id):
-    # Prevent deleting yourself
     if user_id == session.get('user_id'):
         return jsonify({'success': False, 'error': 'Cannot delete your own account'}), 400
     success = delete_user(user_id)
@@ -1055,7 +1053,7 @@ def api_today_sales_pdf():
                      download_name=f"SalesReport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== ANALYTICS API (NOW USES SAME LOGIC AS TODAY_SALES) =====================
+# ===================== ANALYTICS API =====================
 @app.route('/api/analytics/summary', methods=['GET'])
 @login_required
 def api_analytics_summary():
@@ -1577,74 +1575,108 @@ def api_import_inventory():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
 
-    # Save or read directly from memory
     try:
         wb = load_workbook(file.stream, data_only=True)
         ws = wb.active
 
-        # Expect header row: Name, Brand, Category, Quantity, Cost Price, Selling Price, Discount (optional)
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
-            return jsonify({'success': False, 'error': 'Empty file'}), 400
+        # --- FIND THE HEADER ROW ---
+        header_row_idx = None
+        header_row = None
+        # Scan first 20 rows to locate header
+        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
+            if row and any(cell and isinstance(cell, str) and ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
+                header_row_idx = i + 1  # 1-indexed for openpyxl
+                header_row = row
+                break
 
-        headers = rows[0]
-        expected = ['Name', 'Brand', 'Category', 'Quantity', 'Cost Price', 'Selling Price', 'Discount']
-        # Normalize headers: strip and lower
+        if header_row_idx is None:
+            return jsonify({'success': False, 'error': 'Could not find header row (looking for ITEM, QTY, RATE, etc.)'}), 400
+
+        # --- MAP COLUMN POSITIONS ---
         header_map = {}
-        for idx, h in enumerate(headers):
-            if h:
-                cleaned = str(h).strip().lower()
-                for exp in expected:
-                    if cleaned == exp.lower():
-                        header_map[exp] = idx
-                        break
+        for idx, cell in enumerate(header_row):
+            if cell:
+                cell_lower = str(cell).strip().lower()
+                if cell_lower in ['item', 'product', 'name', 'details']:
+                    header_map['name'] = idx
+                elif cell_lower in ['qty', 'quantity']:
+                    header_map['quantity'] = idx
+                elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
+                    header_map['cost_price'] = idx
+                elif cell_lower in ['category', 'cat']:
+                    header_map['category'] = idx
+                elif cell_lower in ['date', 'purchase date']:
+                    header_map['date'] = idx
+                elif cell_lower in ['discount']:
+                    header_map['discount'] = idx
 
-        missing = [e for e in expected if e not in header_map]
+        # Verify required fields
+        required = ['name', 'quantity', 'cost_price']
+        missing = [f for f in required if f not in header_map]
         if missing:
             return jsonify({
                 'success': False,
-                'error': f'Missing columns: {", ".join(missing)}. Expected: {", ".join(expected)}'
+                'error': f'Missing columns: {", ".join(missing)}. Found: {list(header_map.keys())}'
             }), 400
 
+        # --- PROCESS ROWS (skip header row) ---
         imported_count = 0
         error_rows = []
         conn = get_connection()
         cursor = conn.cursor()
 
-        for row_idx, row in enumerate(rows[1:], start=2):  # start at row 2 (1-indexed)
+        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
             try:
-                name = str(row[header_map['Name']]).strip()
-                brand = str(row[header_map['Brand']]).strip() if row[header_map['Brand']] else ''
-                category = str(row[header_map['Category']]).strip() if row[header_map['Category']] else ''
-                quantity = int(row[header_map['Quantity']])
-                cost_price = float(row[header_map['Cost Price']])
-                selling_price = float(row[header_map['Selling Price']])
-                discount = float(row[header_map['Discount']]) if row[header_map['Discount']] else 0.0
-
-                # Validate
+                # Skip rows with missing essential data
+                name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
                 if not name:
-                    error_rows.append(f"Row {row_idx}: Product name is required")
-                    continue
+                    continue  # skip empty product names
+
+                quantity_str = row[header_map['quantity']]
+                quantity = float(quantity_str) if quantity_str else 0
                 if quantity <= 0:
                     error_rows.append(f"Row {row_idx}: Quantity must be positive")
                     continue
+
+                cost_price_str = row[header_map['cost_price']]
+                cost_price = float(cost_price_str) if cost_price_str else 0.0
                 if cost_price < 0:
                     error_rows.append(f"Row {row_idx}: Cost price cannot be negative")
                     continue
-                if selling_price < 0:
-                    error_rows.append(f"Row {row_idx}: Selling price cannot be negative")
-                    continue
 
-                # Use the existing add_purchase function to create a batch
+                # Optional fields
+                category = str(row[header_map.get('category')]).strip() if header_map.get('category') is not None and row[header_map['category']] else ''
+                discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] else 0.0
+
+                # Selling price: default = cost price * 1.2 (20% markup)
+                selling_price = cost_price * 1.2  # you can adjust this
+
+                # If date column exists, try to parse it
+                purchase_date = None
+                if 'date' in header_map and row[header_map['date']]:
+                    try:
+                        # Try to parse as datetime; if it's a numeric Excel date, convert
+                        if isinstance(row[header_map['date']], (int, float)):
+                            from datetime import datetime, timedelta
+                            purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
+                        else:
+                            purchase_date = datetime.strptime(str(row[header_map['date']]), '%Y-%m-%d')
+                    except:
+                        purchase_date = datetime.now()  # fallback
+                else:
+                    purchase_date = datetime.now()
+
+                # Use the existing add_purchase function
                 from services.purchase_service import add_purchase
-                add_purchase(
+                batch_id = add_purchase(
                     name=name,
-                    brand=brand,
+                    brand='',   # no brand column, leave empty
                     category=category,
-                    quantity=quantity,
+                    quantity=int(quantity),
                     cost_price=cost_price,
                     discount=discount,
-                    selling_price=selling_price
+                    selling_price=selling_price,
+                    purchase_date=purchase_date  # this must be supported
                 )
                 imported_count += 1
 
@@ -1662,6 +1694,136 @@ def api_import_inventory():
 
     except Exception as e:
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
+
+# ===================== SALES IMPORT (EXCEL) – NEW =====================
+@app.route('/api/sales/import', methods=['POST'])
+@admin_required
+def api_import_sales():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
+
+    try:
+        wb = load_workbook(file.stream, data_only=True)
+        ws = wb.active
+
+        # -------- FIND HEADER ROW --------
+        header_row_idx = None
+        header_row = None
+        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
+            if row and any(cell and isinstance(cell, str) and 
+                           ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
+                header_row_idx = i + 1
+                header_row = row
+                break
+
+        if header_row_idx is None:
+            return jsonify({'success': False, 'error': 'Could not find header row (looking for ITEM, QTY, RATE)'}), 400
+
+        # -------- MAP COLUMNS --------
+        header_map = {}
+        for idx, cell in enumerate(header_row):
+            if cell:
+                cell_lower = str(cell).strip().lower()
+                if cell_lower in ['item', 'product', 'name', 'details']:
+                    header_map['item'] = idx
+                elif cell_lower in ['qty', 'quantity']:
+                    header_map['qty'] = idx
+                elif cell_lower in ['rate', 'selling price', 'unit price']:
+                    header_map['rate'] = idx
+                elif cell_lower in ['category', 'cat']:
+                    header_map['category'] = idx
+                elif cell_lower in ['date', 'sale date']:
+                    header_map['date'] = idx
+                elif cell_lower in ['discount']:
+                    header_map['discount'] = idx
+
+        required = ['item', 'qty', 'rate']
+        missing = [f for f in required if f not in header_map]
+        if missing:
+            return jsonify({
+                'success': False,
+                'error': f'Missing columns: {", ".join(missing)}. Found: {list(header_map.keys())}'
+            }), 400
+
+        # -------- PROCESS ROWS --------
+        imported_count = 0
+        error_rows = []
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
+            # Skip completely empty rows
+            if not any(row):
+                continue
+
+            try:
+                item = str(row[header_map['item']]).strip() if row[header_map['item']] else ''
+                if not item:
+                    error_rows.append(f"Row {row_idx}: Product name is empty")
+                    continue
+
+                qty = float(row[header_map['qty']]) if row[header_map['qty']] is not None else 0
+                if qty <= 0:
+                    error_rows.append(f"Row {row_idx}: Quantity must be positive (got {qty})")
+                    continue
+
+                rate = float(row[header_map['rate']]) if row[header_map['rate']] is not None else 0.0
+                if rate < 0:
+                    error_rows.append(f"Row {row_idx}: Selling price cannot be negative")
+                    continue
+
+                discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
+
+                # Parse date
+                sale_date = None
+                if 'date' in header_map and row[header_map['date']] is not None:
+                    try:
+                        if isinstance(row[header_map['date']], (int, float)):
+                            from datetime import datetime, timedelta
+                            sale_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
+                        else:
+                            date_str = str(row[header_map['date']]).strip()
+                            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+                                try:
+                                    sale_date = datetime.strptime(date_str, fmt)
+                                    break
+                                except:
+                                    continue
+                            if sale_date is None:
+                                sale_date = datetime.now()
+                    except:
+                        sale_date = datetime.now()
+                else:
+                    sale_date = datetime.now()
+
+                # Call import_sale_bulk
+                sale_id = import_sale_bulk(
+                    product_name=item,
+                    quantity=int(qty),
+                    selling_price=rate,
+                    discount=discount,
+                    sale_date=sale_date,
+                    payment_method='cash'
+                )
+                imported_count += 1
+
+            except Exception as e:
+                error_rows.append(f"Row {row_idx}: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'imported': imported_count,
+            'errors': error_rows
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
+
 
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":

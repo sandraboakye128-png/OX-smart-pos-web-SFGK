@@ -136,7 +136,60 @@
         });
     }
 
-    // Submit new purchase or update existing
+    // ---------- OFFLINE HELPER FUNCTIONS (should be in offline.js) ----------
+    // We'll define them here if they don't exist globally, but they should be in offline.js.
+    // We'll check and fallback to local functions.
+    function savePendingPurchase(payload, actionType, batchId = null) {
+        // This function is expected to be in offline.js, but we'll provide a fallback.
+        if (typeof window.savePendingPurchase === 'function') {
+            window.savePendingPurchase(payload, actionType, batchId);
+            return;
+        }
+        // Fallback: store in localStorage directly
+        const pending = JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
+        const entry = {
+            id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            type: actionType, // 'add' or 'update'
+            batchId: batchId,
+            data: payload,
+            timestamp: new Date().toISOString()
+        };
+        pending.push(entry);
+        localStorage.setItem('pendingPurchases', JSON.stringify(pending));
+        console.log('Purchase saved offline (fallback):', entry);
+    }
+
+    function syncPendingPurchases() {
+        // Expected in offline.js – if not, do nothing
+        if (typeof window.syncPendingPurchases === 'function') {
+            window.syncPendingPurchases();
+        } else {
+            console.warn('syncPendingPurchases not defined; pending purchases will not be synced.');
+        }
+    }
+
+    function updatePendingBadge() {
+        // Expected in offline.js – if not, just update a simple counter
+        if (typeof window.updatePendingBadge === 'function') {
+            window.updatePendingBadge();
+            return;
+        }
+        // Fallback: count total pending items (sales + purchases)
+        const sales = JSON.parse(localStorage.getItem('pendingSales') || '[]');
+        const purchases = JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
+        const total = sales.length + purchases.length;
+        const badge = document.getElementById('pendingBadge');
+        if (badge) {
+            if (total > 0) {
+                badge.textContent = total;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+    }
+
+    // ========== SUBMIT / UPDATE WITH OFFLINE SUPPORT ==========
     async function submitPurchase() {
         const payload = {
             name: document.getElementById('name').value.trim(),
@@ -154,23 +207,38 @@
 
         let url = '/api/purchases';
         let method = 'POST';
+        let actionType = 'add';
         if (editMode) {
             url = `/api/purchases/${editBatchId}`;
             method = 'PUT';
+            actionType = 'update';
         }
 
-        const res = await fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (data.success) {
-            alert(editMode ? 'Purchase updated!' : 'Purchase added!');
+        try {
+            const res = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            const data = await res.json();
+            if (data.success) {
+                alert(editMode ? 'Purchase updated!' : 'Purchase added!');
+                resetForm();
+                loadPurchases();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch (error) {
+            // ===== NETWORK ERROR – OFFLINE STORAGE =====
+            console.warn('Network error, saving purchase offline:', error);
+            savePendingPurchase(payload, actionType, editMode ? editBatchId : null);
+            updatePendingBadge();
+            alert('You are offline. Purchase saved locally and will be synced later.');
+            // Clear form and reload list (optional)
             resetForm();
+            // Optionally, we could add the purchase to the list with a pending flag, but for simplicity we just reload.
             loadPurchases();
-        } else {
-            alert('Error: ' + data.error);
         }
     }
 
@@ -317,6 +385,11 @@
     document.addEventListener('click', function(e) {
         if (!e.target.closest('#name')) document.getElementById('nameSuggestions').classList.add('hidden');
         if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
+    });
+
+    // ---------- On page load: show pending badge ----------
+    document.addEventListener('DOMContentLoaded', function() {
+        updatePendingBadge();
     });
 
     // Initial load

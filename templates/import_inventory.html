@@ -2,9 +2,11 @@
 
 {% block content %}
 <div class="container mx-auto p-6">
-    <h1 class="text-3xl font-bold text-gray-800 mb-6">📥 Import Inventory from Excel</h1>
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">📥 Import Data</h1>
 
-    <div class="bg-white rounded-lg shadow p-6">
+    <!-- ========== PURCHASE IMPORT CARD ========== -->
+    <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <h2 class="text-2xl font-semibold text-gray-700 mb-4">📦 Import Purchases (Inventory)</h2>
         <p class="text-gray-600 mb-4">
             Upload an Excel file (.xlsx or .xls) with the following columns:<br>
             <span class="font-mono text-sm bg-gray-100 px-2 py-1 inline-block mt-1">
@@ -14,79 +16,136 @@
             <span class="text-xs text-gray-500">Discount is optional (default 0).</span>
         </p>
 
-        <form id="importForm" enctype="multipart/form-data">
+        <form id="importPurchaseForm" enctype="multipart/form-data">
             <div class="flex items-center gap-4">
-                <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" required
+                <input type="file" id="purchaseFileInput" name="file" accept=".xlsx,.xls" required
                        class="border border-gray-300 rounded-md px-3 py-2 focus:ring focus:ring-indigo-200">
                 <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-md">
                     Upload & Import
                 </button>
             </div>
-            <div id="progress" class="mt-4 hidden">
+            <div id="purchaseProgress" class="mt-4 hidden">
                 <div class="text-sm text-gray-600">Processing...</div>
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
-                    <div id="progressBar" class="bg-teal-500 h-2.5 rounded-full" style="width: 0%"></div>
+                    <div id="purchaseProgressBar" class="bg-teal-500 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
             </div>
-            <div id="result" class="mt-4"></div>
+            <div id="purchaseResult" class="mt-4"></div>
+        </form>
+    </div>
+
+    <!-- ========== SALES IMPORT CARD ========== -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-2xl font-semibold text-gray-700 mb-4">💰 Import Sales (Historical)</h2>
+        <p class="text-gray-600 mb-4">
+            Upload an Excel file (.xlsx or .xls) with the following columns:<br>
+            <span class="font-mono text-sm bg-gray-100 px-2 py-1 inline-block mt-1">
+                DATE, DETAILS, CATEGORY, ITEM, QTY, RATE, DISCOUNT
+            </span>
+            <br>
+            <span class="text-xs text-gray-500">(Columns AMOUNT and TOTAL are ignored.)</span>
+            <br>
+            <span class="text-xs text-gray-500">Products must already exist in the system. Stock will be reduced.</span>
+        </p>
+
+        <form id="importSalesForm" enctype="multipart/form-data">
+            <div class="flex items-center gap-4">
+                <input type="file" id="salesFileInput" name="file" accept=".xlsx,.xls" required
+                       class="border border-gray-300 rounded-md px-3 py-2 focus:ring focus:ring-indigo-200">
+                <button type="submit" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-md">
+                    Upload & Import
+                </button>
+            </div>
+            <div id="salesProgress" class="mt-4 hidden">
+                <div class="text-sm text-gray-600">Processing...</div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
+                    <div id="salesProgressBar" class="bg-purple-500 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+            <div id="salesResult" class="mt-4"></div>
         </form>
     </div>
 </div>
 
 <script>
-    document.getElementById('importForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fileInput = document.getElementById('fileInput');
-        const file = fileInput.files[0];
-        if (!file) {
-            alert('Please select a file.');
-            return;
-        }
+    // ---- Helper function for progress and result ----
+    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint) {
+        const form = document.getElementById(formId);
+        const fileInput = document.getElementById(fileInputId);
+        const progress = document.getElementById(progressId);
+        const progressBar = document.getElementById(progressBarId);
+        const resultDiv = document.getElementById(resultId);
 
-        const formData = new FormData();
-        formData.append('file', file);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a file.');
+                return;
+            }
 
-        const progress = document.getElementById('progress');
-        const progressBar = document.getElementById('progressBar');
-        const resultDiv = document.getElementById('result');
+            const formData = new FormData();
+            formData.append('file', file);
 
-        progress.classList.remove('hidden');
-        progressBar.style.width = '0%';
+            progress.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            resultDiv.innerHTML = '';
 
-        try {
-            const response = await fetch('/api/inventory/import', {
-                method: 'POST',
-                body: formData
-            });
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
 
-            const data = await response.json();
+                const data = await response.json();
 
-            progressBar.style.width = '100%';
+                progressBar.style.width = '100%';
 
-            if (data.success) {
-                let html = `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-                    <strong>✅ Import successful!</strong><br>
-                    Imported: ${data.imported} products.
-                </div>`;
-                if (data.errors && data.errors.length > 0) {
-                    html += `<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mt-2">
-                        <strong>⚠️ Errors (${data.errors.length})</strong>
-                        <ul class="list-disc list-inside text-sm">${data.errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                if (data.success) {
+                    let html = `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                        <strong>✅ Import successful!</strong><br>
+                        Imported: ${data.imported} records.
+                    </div>`;
+                    if (data.errors && data.errors.length > 0) {
+                        html += `<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mt-2">
+                            <strong>⚠️ Errors (${data.errors.length})</strong>
+                            <ul class="list-disc list-inside text-sm">${data.errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                        </div>`;
+                    }
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                        <strong>❌ Import failed:</strong> ${data.error || 'Unknown error'}
                     </div>`;
                 }
-                resultDiv.innerHTML = html;
-            } else {
+            } catch (err) {
                 resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                    <strong>❌ Import failed:</strong> ${data.error || 'Unknown error'}
+                    <strong>❌ Network error:</strong> ${err.message}
                 </div>`;
+            } finally {
+                progress.classList.add('hidden');
             }
-        } catch (err) {
-            resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                <strong>❌ Network error:</strong> ${err.message}
-            </div>`;
-        } finally {
-            progress.classList.add('hidden');
-        }
-    });
+        });
+    }
+
+    // Setup purchase import
+    setupImportForm(
+        'importPurchaseForm',
+        'purchaseFileInput',
+        'purchaseProgress',
+        'purchaseProgressBar',
+        'purchaseResult',
+        '/api/inventory/import'
+    );
+
+    // Setup sales import
+    setupImportForm(
+        'importSalesForm',
+        'salesFileInput',
+        'salesProgress',
+        'salesProgressBar',
+        'salesResult',
+        '/api/sales/import'
+    );
 </script>
 {% endblock %}

@@ -524,3 +524,101 @@ def get_sales_by_date_range(start_date, end_date):
         return_connection(conn)
         print(f"Get sales by date range failed: {str(e)}")
         raise e
+
+# ============================================================================
+# NEW: IMPORT SALE (BULK, FIFO) WITH PRESERVED DATE
+# ============================================================================
+def import_sale_bulk(product_name, quantity, selling_price, discount, sale_date, payment_method='cash', cheque_number=None):
+    """
+    Create a sale for a single product without manual batch selection (FIFO).
+    Preserves the given sale_date. Used for bulk importing historical sales.
+    Returns sale_id.
+    """
+    from database.db import get_connection, return_connection
+    from services.purchase_service import update_product_stock  # reuse stock update
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        # 1. Get product
+        cursor.execute("SELECT id, stock FROM products WHERE name = %s", (product_name,))
+        product = cursor.fetchone()
+        if not product:
+            raise ValueError(f"Product '{product_name}' not found")
+        product_id, stock = product
+
+        if stock < quantity:
+            raise ValueError(f"Insufficient stock for '{product_name}'. Stock: {stock}, requested: {quantity}")
+
+        # 2. Get batches with remaining_quantity > 0, ordered by date (oldest first)
+        cursor.execute("""
+            SELECT id, remaining_quantity, cost_price
+            FROM purchase_batches
+            WHERE product_id = %s AND remaining_quantity > 0
+            ORDER BY date ASC
+        """, (product_id,))
+        batches = cursor.fetchall()
+
+        if not batches:
+            raise ValueError(f"No batches available for product '{product_name}'")
+
+        # 3. Allocate quantity from batches (FIFO)
+        remaining_to_allocate = quantity
+        allocations = []
+        for batch_id, batch_qty, cost_price in batches:
+            if remaining_to_allocate <= 0:
+                break
+            take = min(batch_qty, remaining_to_allocate)
+            allocations.append({
+                'batch_id': batch_id,
+                'qty': take,
+                'cost_price': cost_price
+            })
+            remaining_to_allocate -= take
+
+        if remaining_to_allocate > 0:
+            raise ValueError(f"Not enough stock across batches for '{product_name}'")
+
+        # 4. Create sale record with the provided date
+        subtotal = quantity * selling_price
+        total = subtotal - discount
+        cursor.execute("""
+            INSERT INTO sales (subtotal, discount, total, profit, date, payment_method, cheque_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (subtotal, discount, total, 0, sale_date, payment_method, cheque_number))
+        sale_id = cursor.fetchone()[0]
+
+        # 5. Insert sales_items and update batches
+        total_profit = 0
+        for alloc in allocations:
+            batch_id = alloc['batch_id']
+            qty = alloc['qty']
+            cost = alloc['cost_price']
+            item_profit = (selling_price - cost) * qty
+            total_profit += item_profit
+
+            cursor.execute("""
+                INSERT INTO sales_items (sale_id, product_id, batch_id, quantity, cost_price, selling_price, profit)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (sale_id, product_id, batch_id, qty, cost, selling_price, item_profit))
+
+            cursor.execute("""
+                UPDATE purchase_batches
+                SET remaining_quantity = remaining_quantity - %s
+                WHERE id = %s
+            """, (qty, batch_id))
+
+        # 6. Update product stock
+        update_product_stock(cursor, product_id)
+
+        # 7. Update sale profit
+        cursor.execute("UPDATE sales SET profit = %s WHERE id = %s", (total_profit, sale_id))
+
+        conn.commit()
+        return sale_id
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        return_connection(conn)
