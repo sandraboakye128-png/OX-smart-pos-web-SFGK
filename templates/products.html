@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="p-6">
+    <!-- Offline banner -->
+    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+        ⚠️ You are offline – showing cached data. Deletions will be saved and applied when you reconnect.
+    </div>
+
     <!-- Header -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
         <h2 class="text-2xl font-bold text-indigo-600 mb-4">📦 Product Manager</h2>
@@ -58,6 +63,26 @@
 </div>
 
 <script>
+    // -------------------- OFFLINE HELPERS (if not globally available) --------------------
+    // These assume functions are in offline.js; if not, we provide fallback stubs.
+    if (typeof savePendingBatchDeletion === 'undefined') {
+        window.savePendingBatchDeletion = function(batchId, deleteType) {
+            let pending = JSON.parse(localStorage.getItem('pendingBatchDeletions') || '[]');
+            pending.push({ id: Date.now() + '_' + Math.random().toString(36).substr(2,5), batchId, deleteType, timestamp: new Date().toISOString() });
+            localStorage.setItem('pendingBatchDeletions', JSON.stringify(pending));
+            if (typeof updatePendingBadge === 'function') updatePendingBadge();
+        };
+    }
+    if (typeof savePendingProductDeletion === 'undefined') {
+        window.savePendingProductDeletion = function(productId, deleteType) {
+            let pending = JSON.parse(localStorage.getItem('pendingProductDeletions') || '[]');
+            pending.push({ id: Date.now() + '_' + Math.random().toString(36).substr(2,5), productId, deleteType, timestamp: new Date().toISOString() });
+            localStorage.setItem('pendingProductDeletions', JSON.stringify(pending));
+            if (typeof updatePendingBadge === 'function') updatePendingBadge();
+        };
+    }
+
+    // -------------------- MAIN LOGIC --------------------
     let currentProducts = [];
     let currentProductIdForDelete = null;
     let currentBatchSelections = [];
@@ -74,17 +99,55 @@
         });
     }
 
-    // Load products from API
+    // Update offline banner
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+
+    // Cache key for products
+    const PRODUCTS_CACHE_KEY = 'cached_products';
+
+    // Load products from API or cache
     async function loadProducts() {
+        updateOfflineBanner();
+        let productsData = null;
+        let summaryData = null;
+        let fromCache = false;
+
         try {
             const res = await fetch('/api/products');
+            if (!res.ok) throw new Error('Network error');
             const data = await res.json();
-            currentProducts = data.products;
-            document.getElementById('summary').innerHTML = `Total Products: ${data.total_products} | Total Batches: ${data.total_batches}`;
-            applySearch();
+            productsData = data.products;
+            summaryData = { total_products: data.total_products, total_batches: data.total_batches };
+            // Cache the data
+            try {
+                localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ products: productsData, summary: summaryData, timestamp: Date.now() }));
+            } catch (e) {}
         } catch (err) {
-            console.error(err);
+            console.warn('Offline – using cached products');
+            fromCache = true;
+            const cached = localStorage.getItem(PRODUCTS_CACHE_KEY);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                productsData = parsed.products || [];
+                summaryData = parsed.summary || { total_products: 0, total_batches: 0 };
+            } else {
+                productsData = [];
+                summaryData = { total_products: 0, total_batches: 0 };
+            }
         }
+
+        currentProducts = productsData || [];
+        document.getElementById('summary').innerHTML = `Total Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}${fromCache ? ' (cached)' : ''}`;
+        applySearch();
     }
 
     // Filter products based on search input
@@ -187,17 +250,33 @@
         const choice = confirm(`Delete ${selected.length} batch(es)?\n\n- Click OK to KEEP history (recommended, can restore)\n- Click Cancel for PERMANENT deletion (cannot restore)`);
         const deleteType = choice ? 'keep' : 'clean';
         
+        // Process each selected batch
+        let successCount = 0;
         for (const item of selected) {
             try {
                 const res = await fetch(`/api/batches/${item.batchId}?type=${deleteType}`, { method: 'DELETE' });
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error);
+                if (res.ok) {
+                    successCount++;
+                } else {
+                    const data = await res.json();
+                    throw new Error(data.error || 'Unknown error');
+                }
             } catch (err) {
-                alert(`Error deleting batch ${item.batchId}: ${err.message}`);
-                return;
+                console.warn(`Batch deletion failed (offline): ${item.batchId}`, err);
+                // Save for offline sync
+                savePendingBatchDeletion(item.batchId, deleteType);
+                // We'll count it as "pending" – continue to next
             }
         }
-        alert(`${selected.length} batch(es) deleted.`);
+
+        if (successCount > 0) {
+            alert(`${successCount} batch(es) deleted online.`);
+        }
+        // Check if any pending deletions were saved
+        const pending = JSON.parse(localStorage.getItem('pendingBatchDeletions') || '[]');
+        if (pending.length > 0) {
+            alert(`⚠️ ${pending.length} batch deletion(s) saved offline. They will be applied when you reconnect.`);
+        }
         closeBatchModal();
         loadProducts();
     }
@@ -227,7 +306,11 @@
                 alert('Error: ' + data.error);
             }
         } catch (err) {
-            alert('Error: ' + err.message);
+            console.warn('Product deletion failed (offline), saving for later:', err);
+            savePendingProductDeletion(currentProductIdForDelete, deleteType);
+            alert(`Product deletion saved offline. It will be applied when you reconnect.`);
+            closeDeleteProductModal();
+            loadProducts(); // reload to reflect cached state (will show product still there)
         }
     }
 
@@ -237,6 +320,16 @@
     document.getElementById('deleteCleanBtn').addEventListener('click', () => deleteProduct('clean'));
 
     // Initial load
-    loadProducts();
+    document.addEventListener('DOMContentLoaded', function() {
+        loadProducts();
+        // Update badge for any pending items
+        if (typeof updatePendingBadge === 'function') updatePendingBadge();
+    });
+
+    // Also update badge when coming online (it will be triggered globally, but we reload data)
+    window.addEventListener('online', function() {
+        loadProducts();
+    });
+
 </script>
 {% endblock %}

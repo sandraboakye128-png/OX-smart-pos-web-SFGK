@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="p-6">
+    <!-- Offline banner -->
+    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+        ⚠️ You are offline – showing cached products. Sales will be saved and synced when you reconnect.
+    </div>
+
     <!-- Two-column layout -->
     <div class="flex flex-wrap -mx-4">
         <!-- LEFT PANEL: Products & Form -->
@@ -25,7 +30,7 @@
                     <input type="number" step="0.01" id="discount" placeholder="Discount (₵)" class="border rounded-lg px-3 py-2">
                 </div>
                 
-                <!-- Date & Time (custom sale datetime) -->
+                <!-- Date & Time -->
                 <div class="mb-3">
                     <label class="block text-sm font-medium text-gray-700">Sale Date</label>
                     <input type="date" id="saleDate" class="border rounded-lg px-3 py-2 w-full">
@@ -87,7 +92,7 @@
     </div>
 </div>
 
-<!-- ========== PAYMENT TYPE MODAL ========== -->
+<!-- Payment Modal -->
 <div id="paymentModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
     <div class="bg-white rounded-xl shadow-xl w-96 p-6">
         <h3 class="text-xl font-bold mb-4">Select Payment Method</h3>
@@ -116,7 +121,7 @@
     </div>
 </div>
 
-<!-- ========== LICENSE MODAL (Trial / Activation) ========== -->
+<!-- License Modal -->
 <div id="licenseModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
     <div class="bg-white rounded-xl shadow-xl w-96 p-6">
         <h3 class="text-xl font-bold mb-2" id="licenseModalTitle">Trial Version</h3>
@@ -141,39 +146,84 @@
     let neededQty = 0;
     let batchSelection = [];
 
-    // Payment handling variables
+    // Payment handling
     let selectedPaymentMethod = null;
     let selectedChequeNumber = null;
     let pendingSaleCallback = null;
+
+    // License state
+    let licenseRemainingSeconds = 0;
+    let licenseLicensed = false;
+    let licenseTrialActive = false;
+    let licenseTimerInterval = null;
 
     // Helper: format currency
     function formatMoney(amount) {
         return '₵' + amount.toFixed(2);
     }
 
-    // ---------- License state ----------
-    let licenseRemainingSeconds = 0;
-    let licenseLicensed = false;
-    let licenseTrialActive = false;
-    let licenseTimerInterval = null;
+    // ---------- Offline banner ----------
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
 
-    // ---------- Load License Status from Server ----------
+    // ---------- Caching helpers ----------
+    function cacheData(key, data) {
+        try {
+            localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+        } catch(e) {}
+    }
+    function getCachedData(key, maxAgeMinutes = 60) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const ageMinutes = (Date.now() - parsed.timestamp) / (1000 * 60);
+            if (ageMinutes > maxAgeMinutes) return null;
+            return parsed.data;
+        } catch(e) { return null; }
+    }
+
+    const PRODUCTS_CACHE_KEY = 'sales_products_cache';
+    const LICENSE_CACHE_KEY = 'sales_license_cache';
+
+    // ---------- Load License Status with cache fallback ----------
     async function loadLicenseStatus() {
         try {
             const res = await fetch('/api/license/status');
+            if (!res.ok) throw new Error();
             const data = await res.json();
             licenseLicensed = data.licensed;
             licenseTrialActive = data.trial_active;
             licenseRemainingSeconds = data.remaining_seconds;
+            cacheData(LICENSE_CACHE_KEY, data);
             console.log("License status:", data);
             return data;
         } catch (err) {
-            console.error("Failed to load license status:", err);
-            return { licensed: false, trial_active: false, remaining_seconds: 0 };
+            console.warn('Offline – using cached license');
+            const cached = getCachedData(LICENSE_CACHE_KEY);
+            if (cached) {
+                licenseLicensed = cached.licensed;
+                licenseTrialActive = cached.trial_active;
+                licenseRemainingSeconds = cached.remaining_seconds;
+                return cached;
+            }
+            // Fallback: assume 7‑day trial
+            licenseLicensed = false;
+            licenseTrialActive = true;
+            licenseRemainingSeconds = 7 * 24 * 3600;
+            return { licensed: false, trial_active: true, remaining_seconds: licenseRemainingSeconds };
         }
     }
 
-    // Show license modal
+    // ---------- License Modal (unchanged logic, now uses loadLicenseStatus) ----------
     function showLicenseModal(allowCancel = true) {
         return new Promise(async (resolve) => {
             const modal = document.getElementById('licenseModal');
@@ -287,156 +337,30 @@
         return `${minutes.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
     }
 
-    // ---------- Payment Modal Functions ----------
-    function selectPayment(method, event) {
-        console.log("✅ Payment method selected:", method);
-        selectedPaymentMethod = method;
-        selectedChequeNumber = null;
-        document.getElementById('chequeInputContainer').classList.add('hidden');
-        
-        document.querySelectorAll('.payment-option').forEach(btn => {
-            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
-        });
-        if (event && event.target) {
-            const clickedBtn = event.target.closest('.payment-option');
-            if (clickedBtn) clickedBtn.classList.add('bg-indigo-50', 'border-indigo-500');
-        }
-    }
-
-    function showChequeInput(event) {
-        console.log("✅ Cheque payment selected");
-        selectedPaymentMethod = 'cheque';
-        document.getElementById('chequeInputContainer').classList.remove('hidden');
-        
-        document.querySelectorAll('.payment-option').forEach(btn => {
-            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
-        });
-        if (event && event.target) {
-            const clickedBtn = event.target.closest('.payment-option');
-            if (clickedBtn) clickedBtn.classList.add('bg-indigo-50', 'border-indigo-500');
-        }
-    }
-
-    function closePaymentModal() {
-        document.getElementById('paymentModal').classList.add('hidden');
-        document.getElementById('chequeNumber').value = '';
-        document.querySelectorAll('.payment-option').forEach(btn => {
-            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
-        });
-    }
-
-    function getSaleDateTime() {
-        const dateVal = document.getElementById('saleDate').value;
-        const timeVal = document.getElementById('saleTime').value;
-        if (dateVal && timeVal) {
-            let time24 = timeVal;
-            try {
-                if (timeVal.toLowerCase().includes('am') || timeVal.toLowerCase().includes('pm')) {
-                    const parsed = new Date(`2000-01-01 ${timeVal}`);
-                    if (!isNaN(parsed)) time24 = parsed.toLocaleTimeString('en-GB', { hour12: false });
-                } else time24 = timeVal;
-                return `${dateVal} ${time24}`;
-            } catch(e) { console.error(e); }
-        }
-        return null;
-    }
-
-    // ========== UPDATED: executeSaleWithPayment with offline support ==========
-    async function executeSaleWithPayment(paymentMethod, chequeNum) {
-        if (!pendingSaleCallback) return;
-        
-        console.log("🚀 Executing sale with payment method:", paymentMethod);
-        console.log("🚀 Cheque number:", chequeNum);
-        
-        const cartItems = pendingSaleCallback.cart.map(item => ({ 
-            product: item.product, 
-            qty: item.qty, 
-            discount: item.discount 
-        }));
-        
-        const selectedBatches = [];
-        pendingSaleCallback.cart.forEach(item => {
-            item.selectedBatches.forEach(b => {
-                selectedBatches.push({ batch_id: b.batch_id, qty: b.qty, product_id: item.product.id });
-            });
-        });
-        
-        const payload = { 
-            cart_items: cartItems, 
-            sale_datetime: pendingSaleCallback.saleDatetime, 
-            selected_batches: selectedBatches,
-            payment_method: paymentMethod,
-            cheque_number: chequeNum
-        };
-        
-        console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
-        
-        try {
-            const res = await fetch('/api/sales/complete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            
-            const data = await res.json();
-            console.log("📥 Response data:", data);
-            
-            if (data.success) {
-                lastSale = data;
-                document.getElementById('receiptPreview').innerHTML = `<pre class="whitespace-pre-wrap">${data.receipt_text}</pre>`;
-                document.getElementById('printReceiptBtn').disabled = false;
-                cart = [];
-                updateCart();
-                loadProducts();
-                alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || paymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
-            } else {
-                alert('Error: ' + data.error);
-            }
-        } catch (error) {
-            // ===== NETWORK ERROR – OFFLINE STORAGE =====
-            console.warn('Network error, saving sale offline:', error);
-            
-            // Save the sale locally
-            savePendingSale(payload);
-            
-            // Update badge
-            updatePendingBadge();
-            
-            // Clear cart
-            cart = [];
-            updateCart();
-            
-            // Show offline receipt placeholder
-            document.getElementById('receiptPreview').innerHTML = `
-                <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
-                    <strong>⚠️ Offline Sale Saved</strong><br>
-                    This sale has been saved locally and will be synced when you reconnect.
-                    <br><br>
-                    <strong>Total:</strong> ${formatMoney(payload.cart_items.reduce((sum, item) => sum + item.qty * item.product.selling_price, 0))}
-                    <br>
-                    <strong>Items:</strong> ${payload.cart_items.length}
-                    <br><br>
-                    <span class="text-xs">Sale ID: pending (${new Date().toLocaleString()})</span>
-                </div>
-            `;
-            
-            alert('You are offline. Sale saved locally and will be synced later.');
-        }
-        
-        pendingSaleCallback = null;
-        selectedPaymentMethod = null;
-        selectedChequeNumber = null;
-    }
-
-    // ---------- Original Sales Page Functions ----------
+    // ---------- Load Products with cache ----------
     async function loadProducts() {
-        const res = await fetch('/api/sales/products');
-        products = await res.json();
+        updateOfflineBanner();
+        let prods = [];
+        let fromCache = false;
+
+        try {
+            const res = await fetch('/api/sales/products');
+            if (!res.ok) throw new Error();
+            prods = await res.json();
+            cacheData(PRODUCTS_CACHE_KEY, prods);
+        } catch (err) {
+            console.warn('Offline – using cached products');
+            fromCache = true;
+            const cached = getCachedData(PRODUCTS_CACHE_KEY);
+            if (cached) prods = cached;
+        }
+
+        products = prods;
         renderProductList(products);
+        if (fromCache && products.length === 0) {
+            document.getElementById('productList').innerHTML = 
+                '<div class="text-gray-500 p-2">No cached products – connect to refresh</div>';
+        }
     }
 
     function renderProductList(prods) {
@@ -468,16 +392,30 @@
         renderProductList(filtered);
     });
 
+    // ---------- Batch Selector with cache ----------
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
-        const res = await fetch(`/api/sales/batches/${product.id}`);
-        const batches = await res.json();
+        const batchCacheKey = `batches_${product.id}`;
+        let batches = [];
+
+        try {
+            const res = await fetch(`/api/sales/batches/${product.id}`);
+            if (!res.ok) throw new Error();
+            batches = await res.json();
+            cacheData(batchCacheKey, batches);
+        } catch (err) {
+            console.warn('Offline – using cached batches for product', product.id);
+            const cached = getCachedData(batchCacheKey);
+            if (cached) batches = cached;
+        }
+
         currentBatches = batches.filter(b => b.remaining_quantity > 0);
         if (currentBatches.length === 0) {
             alert('No available batches for this product.');
             return false;
         }
+
         const container = document.getElementById('batchList');
         container.innerHTML = '';
         batchSelection = [];
@@ -565,6 +503,8 @@
     }
     
     function updateBatchTotals() {
+        // already defined inside openBatchSelector, but also needed globally for buttons
+        // We'll redefine it here to be callable from buttons
         let assigned = 0;
         batchSelection.forEach(sel => {
             if (sel.checkbox.checked) {
@@ -633,6 +573,7 @@
     }
     window.confirmBatchSelection = confirmBatchSelection;
 
+    // ---------- Cart management ----------
     function updateCart() {
         const container = document.getElementById('cartItems');
         if (!cart.length) {
@@ -678,35 +619,182 @@
         await openBatchSelector(currentProduct, qty);
     });
 
-    // Complete Sale Button - Show Payment Modal First
+    // ---------- Payment Modal Functions ----------
+    function selectPayment(method, event) {
+        console.log("✅ Payment method selected:", method);
+        selectedPaymentMethod = method;
+        selectedChequeNumber = null;
+        document.getElementById('chequeInputContainer').classList.add('hidden');
+        
+        document.querySelectorAll('.payment-option').forEach(btn => {
+            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
+        });
+        if (event && event.target) {
+            const clickedBtn = event.target.closest('.payment-option');
+            if (clickedBtn) clickedBtn.classList.add('bg-indigo-50', 'border-indigo-500');
+        }
+    }
+
+    function showChequeInput(event) {
+        console.log("✅ Cheque payment selected");
+        selectedPaymentMethod = 'cheque';
+        document.getElementById('chequeInputContainer').classList.remove('hidden');
+        
+        document.querySelectorAll('.payment-option').forEach(btn => {
+            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
+        });
+        if (event && event.target) {
+            const clickedBtn = event.target.closest('.payment-option');
+            if (clickedBtn) clickedBtn.classList.add('bg-indigo-50', 'border-indigo-500');
+        }
+    }
+
+    function closePaymentModal() {
+        document.getElementById('paymentModal').classList.add('hidden');
+        document.getElementById('chequeNumber').value = '';
+        document.querySelectorAll('.payment-option').forEach(btn => {
+            btn.classList.remove('bg-indigo-50', 'border-indigo-500');
+        });
+    }
+
+    function getSaleDateTime() {
+        const dateVal = document.getElementById('saleDate').value;
+        const timeVal = document.getElementById('saleTime').value;
+        if (dateVal && timeVal) {
+            let time24 = timeVal;
+            try {
+                if (timeVal.toLowerCase().includes('am') || timeVal.toLowerCase().includes('pm')) {
+                    const parsed = new Date(`2000-01-01 ${timeVal}`);
+                    if (!isNaN(parsed)) time24 = parsed.toLocaleTimeString('en-GB', { hour12: false });
+                } else time24 = timeVal;
+                return `${dateVal} ${time24}`;
+            } catch(e) { console.error(e); }
+        }
+        return null;
+    }
+
+    // ---------- Execute Sale with Offline Support ----------
+    async function executeSaleWithPayment(paymentMethod, chequeNum) {
+        if (!pendingSaleCallback) return;
+        
+        console.log("🚀 Executing sale with payment method:", paymentMethod);
+        console.log("🚀 Cheque number:", chequeNum);
+        
+        const cartItems = pendingSaleCallback.cart.map(item => ({ 
+            product: item.product, 
+            qty: item.qty, 
+            discount: item.discount 
+        }));
+        
+        const selectedBatches = [];
+        pendingSaleCallback.cart.forEach(item => {
+            item.selectedBatches.forEach(b => {
+                selectedBatches.push({ batch_id: b.batch_id, qty: b.qty, product_id: item.product.id });
+            });
+        });
+        
+        const payload = { 
+            cart_items: cartItems, 
+            sale_datetime: pendingSaleCallback.saleDatetime, 
+            selected_batches: selectedBatches,
+            payment_method: paymentMethod,
+            cheque_number: chequeNum
+        };
+        
+        console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
+        
+        try {
+            const res = await fetch('/api/sales/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            
+            const data = await res.json();
+            console.log("📥 Response data:", data);
+            
+            if (data.success) {
+                lastSale = data;
+                document.getElementById('receiptPreview').innerHTML = `<pre class="whitespace-pre-wrap">${data.receipt_text}</pre>`;
+                document.getElementById('printReceiptBtn').disabled = false;
+                cart = [];
+                updateCart();
+                loadProducts();
+                alert(`Sale completed! Total: ${formatMoney(data.total)}\nPayment: ${data.payment_method || paymentMethod}${data.cheque_number ? ' #' + data.cheque_number : ''}`);
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch (error) {
+            // ---- Offline fallback ----
+            console.warn('Network error, saving sale offline:', error);
+            
+            // Save the sale locally (requires offline.js)
+            if (typeof savePendingSale === 'function') {
+                savePendingSale(payload);
+            } else {
+                console.warn('savePendingSale not available; sale not saved offline.');
+            }
+            
+            // Update badge
+            if (typeof updatePendingBadge === 'function') {
+                updatePendingBadge();
+            }
+            
+            // Clear cart
+            cart = [];
+            updateCart();
+            
+            // Show offline receipt placeholder
+            document.getElementById('receiptPreview').innerHTML = `
+                <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
+                    <strong>⚠️ Offline Sale Saved</strong><br>
+                    This sale has been saved locally and will be synced when you reconnect.
+                    <br><br>
+                    <strong>Total:</strong> ${formatMoney(payload.cart_items.reduce((sum, item) => sum + item.qty * item.product.selling_price, 0))}
+                    <br>
+                    <strong>Items:</strong> ${payload.cart_items.length}
+                    <br><br>
+                    <span class="text-xs">Sale ID: pending (${new Date().toLocaleString()})</span>
+                </div>
+            `;
+            
+            alert('You are offline. Sale saved locally and will be synced later.');
+        }
+        
+        pendingSaleCallback = null;
+        selectedPaymentMethod = null;
+        selectedChequeNumber = null;
+    }
+
+    // ---------- Complete Sale Button ----------
     document.getElementById('completeSaleBtn').addEventListener('click', async () => {
         if (cart.length === 0) {
             alert('Cart is empty.');
             return;
         }
         
-        // Store cart data for later
         pendingSaleCallback = {
             cart: [...cart],
             saleDatetime: getSaleDateTime()
         };
         
-        // Reset payment selection
         selectedPaymentMethod = null;
         selectedChequeNumber = null;
         document.getElementById('chequeNumber').value = '';
         document.getElementById('chequeInputContainer').classList.add('hidden');
         
-        // Remove highlighting from payment options
         document.querySelectorAll('.payment-option').forEach(btn => {
             btn.classList.remove('bg-indigo-50', 'border-indigo-500');
         });
         
-        // Show payment modal
         document.getElementById('paymentModal').classList.remove('hidden');
     });
 
-    // Confirm Payment Button
+    // ---------- Confirm Payment Button ----------
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
         console.log("🔘 Confirm button clicked. Current payment method:", selectedPaymentMethod);
         
@@ -725,34 +813,27 @@
             selectedChequeNumber = chequeNumber;
         }
         
-        // Store payment data before closing modal
         const paymentMethodToUse = selectedPaymentMethod;
         const chequeNumberToUse = selectedChequeNumber;
         
         console.log("✅ Final payment data - Method:", paymentMethodToUse, "Cheque:", chequeNumberToUse);
         
-        // Close payment modal
         closePaymentModal();
         
-        // Check license and proceed
         const licenseData = await loadLicenseStatus();
         let canProceed = false;
 
         if (licenseData.licensed) {
             canProceed = true;
         } else if (licenseData.trial_active && licenseData.remaining_seconds > 0) {
-            // Trial is active - show modal but allow sale even if user cancels
             const userChoice = await showLicenseModal(true);
-            // During trial, always allow sale regardless of user choice
-            canProceed = true;
+            canProceed = true; // allow sale during trial even if user cancels
         } else {
-            // Trial expired - must activate (no cancel option)
             const activated = await showLicenseModal(false);
             canProceed = activated;
         }
 
         if (canProceed) {
-            // Use stored payment data
             await executeSaleWithPayment(paymentMethodToUse, chequeNumberToUse);
         } else {
             pendingSaleCallback = null;
@@ -766,7 +847,7 @@
         pendingSaleCallback = null;
     });
 
-    // Print receipt
+    // ---------- Print Receipt ----------
     document.getElementById('printReceiptBtn').addEventListener('click', () => {
         if (!lastSale) return;
         const printWindow = window.open('', '_blank');
@@ -783,7 +864,7 @@
         printWindow.document.close();
     });
 
-    // Set default date/time
+    // ---------- Set default date/time ----------
     function setDefaultDateTime() {
         const now = new Date();
         document.getElementById('saleDate').value = now.toISOString().split('T')[0];
@@ -793,17 +874,19 @@
         hours = hours % 12 || 12;
         document.getElementById('saleTime').value = `${hours}:${minutes.toString().padStart(2,'0')} ${ampm}`;
     }
-    setDefaultDateTime();
 
-    // ---------- Update pending badge on page load ----------
-    document.addEventListener('DOMContentLoaded', function() {
-        // This will run after offline.js has initialized
-        if (typeof updatePendingBadge === 'function') {
-            updatePendingBadge();
-        }
+    // ---------- Online/Offline refresh ----------
+    window.addEventListener('online', function() {
+        loadProducts();
+        loadLicenseStatus();
     });
 
-    // Initial load
-    loadProducts();
+    // ---------- Initialization ----------
+    document.addEventListener('DOMContentLoaded', function() {
+        loadProducts();
+        loadLicenseStatus();
+        if (typeof updatePendingBadge === 'function') updatePendingBadge();
+        setDefaultDateTime();
+    });
 </script>
 {% endblock %}

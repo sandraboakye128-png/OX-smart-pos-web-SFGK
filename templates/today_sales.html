@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="p-6">
+    <!-- Offline banner -->
+    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+        ⚠️ You are offline – showing cached sales data. Data will refresh when you reconnect.
+    </div>
+
     <!-- Header -->
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
@@ -73,7 +78,6 @@
 </div>
 
 <script>
-    // Wait for DOM to be fully loaded
     document.addEventListener('DOMContentLoaded', function() {
         console.log("DOM fully loaded - initializing today sales page");
         
@@ -86,12 +90,48 @@
         let currentReverseSaleId = null;
         let currentReverseItems = [];
 
-        // Helper: format currency
+        // ---------- Offline banner ----------
+        function updateOfflineBanner() {
+            const banner = document.getElementById('offlineBanner');
+            if (!navigator.onLine) {
+                banner.classList.remove('hidden');
+            } else {
+                banner.classList.add('hidden');
+            }
+        }
+        window.addEventListener('online', updateOfflineBanner);
+        window.addEventListener('offline', updateOfflineBanner);
+
+        // ---------- Caching helpers ----------
+        function cacheData(key, data) {
+            try {
+                localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+            } catch(e) {}
+        }
+        function getCachedData(key, maxAgeMinutes = 60) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                const ageMinutes = (Date.now() - parsed.timestamp) / (1000 * 60);
+                if (ageMinutes > maxAgeMinutes) return null;
+                return parsed.data;
+            } catch(e) { return null; }
+        }
+
+        function getCacheKey() {
+            if (currentStartDate && currentEndDate) {
+                return `sales_data_custom_${currentStartDate}_${currentEndDate}`;
+            } else {
+                return `sales_data_period_${currentPeriod}`;
+            }
+        }
+
+        // ---------- Helper: format currency ----------
         function formatMoney(amount) {
             return '₵' + (parseFloat(amount) || 0).toFixed(2);
         }
 
-        // Helper: escape HTML
         function escapeHtml(str) {
             if (!str) return '';
             return str.replace(/[&<>]/g, function(m) {
@@ -102,7 +142,6 @@
             });
         }
 
-        // Helper: get payment badge HTML
         function getPaymentBadge(paymentMethod, chequeNumber) {
             if (paymentMethod === 'cash') {
                 return '<span class="inline-flex items-center bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">💵 Cash</span>';
@@ -115,12 +154,12 @@
             }
         }
 
-        // Fetch sales data from API
+        // ---------- Fetch sales data with offline fallback ----------
         async function loadSalesData() {
+            updateOfflineBanner();
             console.log("Loading sales data...");
             
             let url = '';
-            
             if (currentStartDate && currentEndDate) {
                 url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}`;
             } else if (currentPeriod === 'all') {
@@ -136,27 +175,38 @@
             }
             
             console.log("Fetching from URL:", url);
-            
+            let data = [];
+            let fromCache = false;
+
             try {
                 const res = await fetch(url);
                 if (!res.ok) {
-                    if (res.status === 401) {
-                        window.location.href = '/login';
-                        return;
-                    }
+                    if (res.status === 401) { window.location.href = '/login'; return; }
                     throw new Error(`HTTP error! status: ${res.status}`);
                 }
-                const data = await res.json();
+                data = await res.json();
+                cacheData(getCacheKey(), data);
                 console.log("Received data:", data.length, "records");
-                currentSalesData = data;
-                applySearchAndRender();
             } catch (error) {
-                console.error("Error loading sales data:", error);
-                document.getElementById('salesList').innerHTML = '<div class="text-center text-red-400 py-8">Error loading sales data. Please refresh the page.</div>';
+                console.warn("Offline – using cached sales data");
+                fromCache = true;
+                const cached = getCachedData(getCacheKey());
+                if (cached) {
+                    data = cached;
+                } else {
+                    data = [];
+                }
+            }
+
+            currentSalesData = data;
+            applySearchAndRender();
+            if (fromCache) {
+                document.getElementById('salesList').innerHTML += 
+                    '<div class="text-xs text-gray-500 text-center mt-2">⚠️ Data may be outdated (offline)</div>';
             }
         }
 
-        // Filter by search term and render
+        // ---------- Filter and render ----------
         function applySearchAndRender() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             let filtered = currentSalesData;
@@ -169,7 +219,7 @@
             renderSales(filtered);
         }
 
-        // Open modal to select items for reversal
+        // ---------- Reverse modal functions ----------
         window.openReverseModal = function(saleId, saleItems) {
             currentReverseSaleId = saleId;
             const container = document.getElementById('reverseItemList');
@@ -222,6 +272,10 @@
         };
         
         async function confirmReverseSelected() {
+            if (!navigator.onLine) {
+                alert('Reversing sales requires internet. Please connect and try again.');
+                return;
+            }
             const selected = currentReverseItems.filter(i => i.checkbox.checked);
             if (selected.length === 0) {
                 alert('Please select at least one item to reverse.');
@@ -230,25 +284,29 @@
             
             const itemsToReverse = selected.map(i => JSON.parse(i.checkbox.dataset.item));
             
-            const response = await fetch('/api/sales/reverse_items', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sale_id: currentReverseSaleId,
-                    items: itemsToReverse
-                })
-            });
-            const data = await response.json();
-            if (data.success) {
-                alert(`${selected.length} item(s) reversed successfully. Stock restored.`);
-                closeReverseModal();
-                loadSalesData();
-            } else {
-                alert('Error: ' + data.error);
+            try {
+                const response = await fetch('/api/sales/reverse_items', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sale_id: currentReverseSaleId,
+                        items: itemsToReverse
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert(`${selected.length} item(s) reversed successfully. Stock restored.`);
+                    closeReverseModal();
+                    loadSalesData();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Reverse failed. Please check your internet connection.');
             }
         }
 
-        // Render sales as cards
+        // ---------- Render sales cards ----------
         function renderSales(sales) {
             const container = document.getElementById('salesList');
             if (!sales || sales.length === 0) {
@@ -323,6 +381,7 @@
             });
         }
 
+        // ---------- Update summary ----------
         function updateSummary(sales) {
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
@@ -367,7 +426,12 @@
                 <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
         }
 
+        // ---------- PDF export (offline-aware) ----------
         async function exportPDF() {
+            if (!navigator.onLine) {
+                alert('PDF export requires internet. Please connect and try again.');
+                return;
+            }
             if (!currentSalesData.length) {
                 alert('No data to export.');
                 return;
@@ -385,30 +449,34 @@
                     default: periodText = 'Today';
                 }
             }
-            const response = await fetch('/api/today_sales/pdf', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sales_data: currentSalesData,
-                    period_text: periodText
-                })
-            });
-            if (response.ok) {
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `SalesReport_${new Date().toISOString().slice(0,19)}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-            } else {
-                alert('Failed to generate PDF');
+            try {
+                const response = await fetch('/api/today_sales/pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sales_data: currentSalesData,
+                        period_text: periodText
+                    })
+                });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `SalesReport_${new Date().toISOString().slice(0,19)}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    alert('Failed to generate PDF');
+                }
+            } catch (error) {
+                alert('PDF generation failed. Please check your internet connection.');
             }
         }
 
-        // Event listeners
+        // ---------- Event listeners ----------
         document.getElementById('refreshBtn').addEventListener('click', () => loadSalesData());
         document.getElementById('searchInput').addEventListener('input', () => applySearchAndRender());
         document.getElementById('pdfBtn').addEventListener('click', exportPDF);
@@ -438,10 +506,15 @@
             });
         });
 
+        // ---------- Auto-refresh on reconnect ----------
+        window.addEventListener('online', function() {
+            loadSalesData();
+        });
+
+        // ---------- Initial load ----------
         const today = new Date().toISOString().split('T')[0];
         document.getElementById('startDate').value = today;
         document.getElementById('endDate').value = today;
-
         loadSalesData();
     });
 </script>

@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="p-6">
+    <!-- Offline banner (hidden by default) -->
+    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+        ⚠️ You are offline – showing cached data. Data will update when you reconnect.
+    </div>
+
     <!-- Header with date range, time range and real-time clock -->
     <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
         <h1 class="text-3xl font-bold text-gray-800">Dashboard</h1>
@@ -67,7 +72,10 @@
         <!-- Pie Chart: Product Distribution -->
         <div class="bg-white rounded-xl shadow-md p-4">
             <h2 class="text-xl font-semibold mb-3">🥧 Product Distribution</h2>
-            <canvas id="pieChart" width="400" height="300" class="mx-auto"></canvas>
+            <div id="pieChartContainer">
+                <canvas id="pieChart" width="400" height="300" class="mx-auto"></canvas>
+            </div>
+            <div id="pieChartOfflineMsg" class="text-gray-500 text-center hidden">Offline – pie chart unavailable</div>
         </div>
         <!-- Sales History (scrollable) -->
         <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
@@ -132,30 +140,83 @@
         return { start_datetime: startDateTime, end_datetime: endDateTime };
     }
 
+    // Update offline banner visibility
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+
+    // Cache keys
+    const CACHE_KEY_SUMMARY = 'dashboard_summary';
+    const CACHE_KEY_TOP = 'dashboard_top_products';
+    const CACHE_KEY_HISTORY = 'dashboard_sales_history';
+    const CACHE_KEY_TIMESTAMP = 'dashboard_last_fetch';
+
+    // Save data to localStorage with timestamp
+    function cacheData(key, data) {
+        try {
+            localStorage.setItem(key, JSON.stringify(data));
+            localStorage.setItem(CACHE_KEY_TIMESTAMP, Date.now().toString());
+        } catch (e) {}
+    }
+
+    // Load cached data (returns null if not found or expired)
+    function loadCache(key, maxAgeMinutes = 60) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            const ts = parseInt(localStorage.getItem(CACHE_KEY_TIMESTAMP) || '0');
+            const ageMinutes = (Date.now() - ts) / (1000 * 60);
+            if (ageMinutes > maxAgeMinutes) return null; // cache too old
+            return JSON.parse(raw);
+        } catch (e) { return null; }
+    }
+
     // Fetch all dashboard data based on date/time range
     async function loadDashboard() {
         try {
+            updateOfflineBanner();
+
             const range = getDateTimeRange();
-            let url = '/api/dashboard/summary';
+            let summaryUrl = '/api/dashboard/summary';
             const params = [];
-            
             if (range.start_datetime) params.push(`start_datetime=${encodeURIComponent(range.start_datetime)}`);
             if (range.end_datetime) params.push(`end_datetime=${encodeURIComponent(range.end_datetime)}`);
-            
             if (params.length > 0) {
-                url += '?' + params.join('&');
+                summaryUrl += '?' + params.join('&');
             }
-            
-            const summaryRes = await fetch(url);
-            const summary = await summaryRes.json();
 
-            // Update cards
+            // Try to fetch summary
+            let summary = null;
+            let summaryError = false;
+            try {
+                const summaryRes = await fetch(summaryUrl);
+                if (!summaryRes.ok) throw new Error('Network error');
+                summary = await summaryRes.json();
+                cacheData(CACHE_KEY_SUMMARY, summary);
+            } catch (err) {
+                console.warn('Offline – using cached summary');
+                summaryError = true;
+                summary = loadCache(CACHE_KEY_SUMMARY);
+                if (!summary) {
+                    // No cache – show empty
+                    summary = { sales: 0, profit: 0, total_products: 0, low_stock_count: 0, low_stock_products: [] };
+                }
+            }
+
+            // Update KPI cards
             document.getElementById('salesValue').innerText = formatMoney(summary.sales);
             document.getElementById('profitValue').innerText = formatMoney(summary.profit);
-            document.getElementById('productsValue').innerText = summary.total_products;
-            document.getElementById('lowStockValue').innerText = summary.low_stock_count;
+            document.getElementById('productsValue').innerText = summary.total_products || 0;
+            document.getElementById('lowStockValue').innerText = summary.low_stock_count || 0;
 
-            // Update low stock list
+            // Low stock list
             const lowStockContainer = document.getElementById('lowStockList');
             lowStockContainer.innerHTML = '';
             if (summary.low_stock_products && summary.low_stock_products.length > 0) {
@@ -170,8 +231,8 @@
                 lowStockContainer.innerHTML = '<div class="text-gray-400">No low stock items.</div>';
             }
 
-            // Low stock alert (only once per page load)
-            if (!lowStockShown && summary.low_stock_count > 0) {
+            // Low stock alert (only once, only if online and newly fetched)
+            if (!summaryError && !lowStockShown && summary.low_stock_count > 0) {
                 let productList = summary.low_stock_products.slice(0, 10).map(item => `• ${item[0]} (${item[1]}) - ${item[3]} left`).join('\n');
                 if (summary.low_stock_products.length > 10) {
                     productList += `\n\n... and ${summary.low_stock_products.length - 10} more items`;
@@ -180,13 +241,25 @@
                 lowStockShown = true;
             }
 
-            // Fetch top products
+            // Top products
             let topUrl = '/api/dashboard/top_products';
             if (params.length > 0) {
                 topUrl += '?' + params.join('&');
             }
-            const topRes = await fetch(topUrl);
-            const topProducts = await topRes.json();
+            let topProducts = [];
+            let topError = false;
+            try {
+                const topRes = await fetch(topUrl);
+                if (!topRes.ok) throw new Error();
+                topProducts = await topRes.json();
+                cacheData(CACHE_KEY_TOP, topProducts);
+            } catch (err) {
+                console.warn('Offline – using cached top products');
+                topError = true;
+                const cached = loadCache(CACHE_KEY_TOP);
+                if (cached) topProducts = cached;
+            }
+
             const topContainer = document.getElementById('topProductsList');
             topContainer.innerHTML = '';
             if (topProducts.length) {
@@ -209,8 +282,13 @@
 
             // Update pie chart
             if (pieChart) pieChart.destroy();
-            const ctx = document.getElementById('pieChart').getContext('2d');
-            if (topProducts.length) {
+            const ctx = document.getElementById('pieChart');
+            const container = document.getElementById('pieChartContainer');
+            const offlineMsg = document.getElementById('pieChartOfflineMsg');
+            if (topProducts.length > 0 && !topError) {
+                // Online – show chart
+                container.classList.remove('hidden');
+                offlineMsg.classList.add('hidden');
                 let labels = topProducts.map(p => `${p.name.substring(0, 15)}${p.name.length > 15 ? '...' : ''}`);
                 let values = topProducts.map(p => p.qty);
                 if (values.length > 8) {
@@ -232,11 +310,15 @@
                     });
                 }
             } else {
-                pieChart = new Chart(ctx, { type: 'pie', data: { labels: ['No Data'], datasets: [{ data: [1], backgroundColor: ['#ccc'] }] } });
+                // Offline or no data – hide chart and show message
+                container.classList.add('hidden');
+                offlineMsg.classList.remove('hidden');
+                // If we have cached top products, we could still show chart, but we'll keep it simple
             }
 
             // Load sales history (if history date is set)
             await loadSalesHistory();
+
         } catch (err) {
             console.error('Error loading dashboard:', err);
         }
@@ -249,8 +331,20 @@
             if (historyDate) {
                 url += `?date=${historyDate}`;
             }
-            const historyRes = await fetch(url);
-            const history = await historyRes.json();
+            let history = [];
+            let historyError = false;
+            try {
+                const historyRes = await fetch(url);
+                if (!historyRes.ok) throw new Error();
+                history = await historyRes.json();
+                cacheData(CACHE_KEY_HISTORY, history);
+            } catch (err) {
+                console.warn('Offline – using cached sales history');
+                historyError = true;
+                const cached = loadCache(CACHE_KEY_HISTORY);
+                if (cached) history = cached;
+            }
+
             const historyContainer = document.getElementById('salesHistoryList');
             historyContainer.innerHTML = '';
             
@@ -270,6 +364,13 @@
                     `;
                     historyContainer.appendChild(div);
                 });
+                if (historyError) {
+                    // show small offline note
+                    const note = document.createElement('div');
+                    note.className = 'text-xs text-gray-400 mt-2';
+                    note.innerText = '⚠️ Data may be outdated (offline)';
+                    historyContainer.appendChild(note);
+                }
             } else {
                 historyContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📅 No sales history found for this date.</div>';
             }

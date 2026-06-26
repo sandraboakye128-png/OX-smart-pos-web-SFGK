@@ -114,19 +114,127 @@ async function syncPendingPurchases() {
     updatePendingBadge();
 }
 
-// ==================== BADGE (unified) ====================
+// ==================== PRODUCT DELETIONS ====================
+
+function savePendingProductDeletion(productId, deleteType) {
+    let pending = JSON.parse(localStorage.getItem('pendingProductDeletions') || '[]');
+    pending.push({
+        id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        productId: productId,
+        deleteType: deleteType, // 'keep' or 'clean'
+        timestamp: new Date().toISOString()
+    });
+    localStorage.setItem('pendingProductDeletions', JSON.stringify(pending));
+    updatePendingBadge();
+}
+
+function getPendingProductDeletions() {
+    return JSON.parse(localStorage.getItem('pendingProductDeletions') || '[]');
+}
+
+function removePendingProductDeletion(localId) {
+    let pending = getPendingProductDeletions();
+    pending = pending.filter(item => item.id !== localId);
+    localStorage.setItem('pendingProductDeletions', JSON.stringify(pending));
+    updatePendingBadge();
+}
+
+async function syncPendingProductDeletions() {
+    const pending = getPendingProductDeletions();
+    if (pending.length === 0) return;
+
+    let synced = 0;
+    for (const item of pending) {
+        try {
+            const response = await fetch(`/api/products/${item.productId}?type=${item.deleteType}`, {
+                method: 'DELETE'
+            });
+            if (response.ok) {
+                removePendingProductDeletion(item.id);
+                synced++;
+            } else {
+                console.warn(`Failed to sync product deletion ${item.id} – status: ${response.status}`);
+            }
+        } catch (err) {
+            console.warn(`Sync error for product deletion ${item.id}:`, err);
+            break;
+        }
+    }
+    if (synced > 0) {
+        console.log(`✅ ${synced} offline product deletion(s) synced.`);
+    }
+    updatePendingBadge();
+}
+
+// ==================== BATCH DELETIONS ====================
+
+function savePendingBatchDeletion(batchId, deleteType) {
+    let pending = JSON.parse(localStorage.getItem('pendingBatchDeletions') || '[]');
+    pending.push({
+        id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        batchId: batchId,
+        deleteType: deleteType, // 'keep' or 'clean'
+        timestamp: new Date().toISOString()
+    });
+    localStorage.setItem('pendingBatchDeletions', JSON.stringify(pending));
+    updatePendingBadge();
+}
+
+function getPendingBatchDeletions() {
+    return JSON.parse(localStorage.getItem('pendingBatchDeletions') || '[]');
+}
+
+function removePendingBatchDeletion(localId) {
+    let pending = getPendingBatchDeletions();
+    pending = pending.filter(item => item.id !== localId);
+    localStorage.setItem('pendingBatchDeletions', JSON.stringify(pending));
+    updatePendingBadge();
+}
+
+async function syncPendingBatchDeletions() {
+    const pending = getPendingBatchDeletions();
+    if (pending.length === 0) return;
+
+    let synced = 0;
+    for (const item of pending) {
+        try {
+            const response = await fetch(`/api/batches/${item.batchId}?type=${item.deleteType}`, {
+                method: 'DELETE'
+            });
+            if (response.ok) {
+                removePendingBatchDeletion(item.id);
+                synced++;
+            } else {
+                console.warn(`Failed to sync batch deletion ${item.id} – status: ${response.status}`);
+            }
+        } catch (err) {
+            console.warn(`Sync error for batch deletion ${item.id}:`, err);
+            break;
+        }
+    }
+    if (synced > 0) {
+        console.log(`✅ ${synced} offline batch deletion(s) synced.`);
+    }
+    updatePendingBadge();
+}
+
+// ==================== UNIFIED BADGE ====================
 
 function updatePendingBadge() {
     const salesCount = getPendingSales().length;
     const purchasesCount = getPendingPurchases().length;
-    const total = salesCount + purchasesCount;
+    const productDeletionsCount = getPendingProductDeletions().length;
+    const batchDeletionsCount = getPendingBatchDeletions().length;
+    const total = salesCount + purchasesCount + productDeletionsCount + batchDeletionsCount;
 
     const badge = document.getElementById('pending-badge');
     if (badge) {
         if (total > 0) {
             badge.textContent = `${total} pending`;
             badge.style.display = 'inline';
-            badge.title = `${salesCount} sale(s), ${purchasesCount} purchase(s) pending sync`;
+            badge.title = 
+                `${salesCount} sale(s), ${purchasesCount} purchase(s), ` +
+                `${productDeletionsCount} product deletion(s), ${batchDeletionsCount} batch deletion(s) pending sync`;
         } else {
             badge.textContent = '';
             badge.style.display = 'none';
@@ -137,9 +245,11 @@ function updatePendingBadge() {
 // ==================== AUTO-SYNC ON RECONNECT ====================
 
 window.addEventListener('online', function() {
-    console.log('🌐 Connection restored – syncing pending items...');
+    console.log('🌐 Connection restored – syncing all pending items...');
     syncPendingSales();
     syncPendingPurchases();
+    syncPendingProductDeletions();
+    syncPendingBatchDeletions();
 });
 
 // ==================== BADGE UPDATE ON PAGE LOAD ====================

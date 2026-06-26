@@ -2,11 +2,20 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Header & Filter -->
-    <div class="flex justify-between items-center mb-6">
+    <!-- Offline banner -->
+    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+        ⚠️ You are offline – showing cached archive data. Changes will be synced when you reconnect.
+    </div>
+
+    <!-- Header & Filter + Search -->
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
         <h1 class="text-3xl font-bold text-indigo-600">📁 Product Archive</h1>
-        <div class="flex items-center gap-3">
-            <label class="text-gray-700">Filter by status:</label>
+        <div class="flex flex-wrap items-center gap-3">
+            <div>
+                <input type="text" id="searchInput" placeholder="🔍 Search product/brand..." 
+                       class="border border-gray-300 rounded-lg px-3 py-2 w-48 md:w-64">
+            </div>
+            <label class="text-gray-700">Filter:</label>
             <select id="statusFilter" class="border border-gray-300 rounded-lg px-3 py-2 bg-white">
                 <option value="ALL">ALL</option>
                 <option value="ACTIVE">ACTIVE</option>
@@ -40,7 +49,39 @@
 </div>
 
 <script>
+    // ---------- Offline banner ----------
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+
+    // ---------- Caching helpers ----------
+    function cacheData(key, data) {
+        try {
+            localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+        } catch(e) {}
+    }
+    function getCachedData(key, maxAgeMinutes = 60) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const ageMinutes = (Date.now() - parsed.timestamp) / (1000 * 60);
+            if (ageMinutes > maxAgeMinutes) return null;
+            return parsed.data;
+        } catch(e) { return null; }
+    }
+
+    // ---------- Main ----------
     let currentArchiveData = [];
+    let currentStatus = 'ALL';
+    let searchTerm = '';
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -82,24 +123,55 @@
         }
     }
 
-    // Load archive data from API
+    // Load archive data from API or cache
     async function loadArchive() {
+        updateOfflineBanner();
         const status = document.getElementById('statusFilter').value;
+        currentStatus = status;
         const container = document.getElementById('archiveList');
         container.innerHTML = '<div class="text-center text-gray-400 py-8">Loading archive data...</div>';
-        
+        let data = [];
+        let fromCache = false;
+        const cacheKey = `archive_${status}`;
+
         try {
             const res = await fetch(`/api/archive?status=${status}`);
-            if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            const data = await res.json();
-            currentArchiveData = data;
-            renderArchive(data);
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            data = await res.json();
+            cacheData(cacheKey, data);
         } catch (error) {
-            console.error("Error loading archive:", error);
-            container.innerHTML = '<div class="text-center text-red-400 py-8">Error loading archive data. Please refresh the page.</div>';
+            console.warn('Offline – using cached archive data');
+            fromCache = true;
+            const cached = getCachedData(cacheKey);
+            if (cached) {
+                data = cached;
+            } else {
+                data = [];
+            }
         }
+
+        currentArchiveData = data;
+        applySearchAndRender();
+        if (fromCache) {
+            // Show a note at the bottom
+            const note = document.createElement('div');
+            note.className = 'text-xs text-gray-400 text-center mt-2';
+            note.innerText = '⚠️ Data may be outdated (offline)';
+            container.appendChild(note);
+        }
+    }
+
+    // Search + render
+    function applySearchAndRender() {
+        searchTerm = document.getElementById('searchInput').value.toLowerCase();
+        let filtered = currentArchiveData;
+        if (searchTerm) {
+            filtered = currentArchiveData.filter(item => 
+                (item.name && item.name.toLowerCase().includes(searchTerm)) ||
+                (item.brand && item.brand.toLowerCase().includes(searchTerm))
+            );
+        }
+        renderArchive(filtered);
     }
 
     // Render cards
@@ -182,38 +254,42 @@
         }
     }
 
-    // View batches modal
+    // View batches modal (uses fetch, with fallback to cache if needed)
     async function viewBatches(name, brand) {
         const modalTitle = document.getElementById('batchModalTitle');
         const container = document.getElementById('batchList');
         container.innerHTML = '<div class="text-center text-gray-400 py-4">Loading batches...</div>';
         modalTitle.innerText = `Batches – ${name} (${brand})`;
         document.getElementById('batchModal').classList.remove('hidden');
-        
+
+        const cacheKey = `batches_${name}_${brand}`;
+        let batches = [];
         try {
             const res = await fetch(`/api/archive/batches?name=${encodeURIComponent(name)}&brand=${encodeURIComponent(brand)}`);
             if (!res.ok) throw new Error('Failed to load batches');
-            const batches = await res.json();
-            
-            if (!batches.length) {
-                container.innerHTML = '<div class="text-gray-400 text-center py-4">No batches found.</div>';
-            } else {
-                container.innerHTML = '';
-                batches.forEach(b => {
-                    const div = document.createElement('div');
-                    div.className = 'border rounded p-2 mb-2';
-                    div.innerHTML = `
-                        <strong>Batch #${b.batch_id}</strong><br>
-                        Qty: ${b.quantity} | Remaining: ${b.remaining_quantity}<br>
-                        Cost: ${formatMoney(b.cost_price)} | Selling: ${formatMoney(b.selling_price)} | Disc: ${formatMoney(b.discount)}<br>
-                        Date: ${formatDate(b.date)}
-                    `;
-                    container.appendChild(div);
-                });
-            }
+            batches = await res.json();
+            cacheData(cacheKey, batches);
         } catch (error) {
-            console.error("Error loading batches:", error);
-            container.innerHTML = '<div class="text-center text-red-400 py-4">Error loading batches.</div>';
+            console.warn('Offline – using cached batches');
+            const cached = getCachedData(cacheKey);
+            if (cached) batches = cached;
+        }
+
+        if (!batches.length) {
+            container.innerHTML = '<div class="text-gray-400 text-center py-4">No batches found.</div>';
+        } else {
+            container.innerHTML = '';
+            batches.forEach(b => {
+                const div = document.createElement('div');
+                div.className = 'border rounded p-2 mb-2';
+                div.innerHTML = `
+                    <strong>Batch #${b.batch_id}</strong><br>
+                    Qty: ${b.quantity} | Remaining: ${b.remaining_quantity}<br>
+                    Cost: ${formatMoney(b.cost_price)} | Selling: ${formatMoney(b.selling_price)} | Disc: ${formatMoney(b.discount)}<br>
+                    Date: ${formatDate(b.date)}
+                `;
+                container.appendChild(div);
+            });
         }
     }
 
@@ -221,8 +297,12 @@
         document.getElementById('batchModal').classList.add('hidden');
     }
 
-    // Restore item
+    // Restore item (requires internet)
     async function restoreItem(archiveId) {
+        if (!navigator.onLine) {
+            alert('Restoring requires internet. Please connect and try again.');
+            return;
+        }
         if (!confirm('Are you sure you want to restore this item?\n\n• Product will be added back to inventory\n• Batches will be restored\n• Stock levels will be recalculated')) {
             return;
         }
@@ -244,8 +324,14 @@
         }
     }
 
-    // Event listeners
+    // ---------- Event listeners ----------
     document.getElementById('statusFilter').addEventListener('change', () => loadArchive());
+    document.getElementById('searchInput').addEventListener('input', applySearchAndRender);
+
+    // Auto-refresh on reconnect
+    window.addEventListener('online', function() {
+        loadArchive();
+    });
 
     // Initial load
     loadArchive();

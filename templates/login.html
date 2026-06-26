@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="min-h-screen flex items-center justify-center bg-gray-100">
+    <!-- Offline banner -->
+    <div id="offlineBanner" class="fixed top-0 left-0 w-full bg-red-500 text-white text-center py-2 z-50 hidden">
+        ⚠️ You are offline – cannot login. Please connect to the internet.
+    </div>
+
     <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-md">
         <div class="text-center mb-6">
             <h2 class="text-3xl font-bold text-indigo-600">🔐 Welcome Back</h2>
@@ -25,7 +30,7 @@
                     <span class="text-sm text-gray-600">👁 Show Password</span>
                 </label>
             </div>
-            <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg transition">
+            <button type="submit" id="loginBtn" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg transition">
                 🚀 Login
             </button>
         </form>
@@ -39,6 +44,25 @@
 </div>
 
 <script>
+    // ----- OFFLINE BANNER -----
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        const loginBtn = document.getElementById('loginBtn');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+            loginBtn.disabled = true;
+            loginBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            loginBtn.textContent = '🚫 Offline – Cannot Login';
+        } else {
+            banner.classList.add('hidden');
+            loginBtn.disabled = false;
+            loginBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            loginBtn.textContent = '🚀 Login';
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+
     // ----- CLEAR FORM FIELDS -----
     function clearFormFields() {
         document.querySelectorAll('#loginForm input[type="text"], #loginForm input[type="password"]').forEach(input => {
@@ -48,22 +72,21 @@
         document.getElementById('password').type = 'password';
     }
 
-    // Force clear multiple times to beat browser autofill
     function forceClear() {
         clearFormFields();
         setTimeout(clearFormFields, 50);
         setTimeout(clearFormFields, 200);
     }
 
-    // Clear on page load
     document.addEventListener('DOMContentLoaded', function() {
         forceClear();
+        updateOfflineBanner();
     });
 
-    // Clear also when page is restored from bfcache (back/forward)
     window.addEventListener('pageshow', function(event) {
         if (event.persisted) {
             forceClear();
+            updateOfflineBanner();
         }
     });
 
@@ -78,6 +101,11 @@
     const loginForm = document.getElementById('loginForm');
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        // Check offline
+        if (!navigator.onLine) {
+            alert('You are offline. Please connect to the internet and try again.');
+            return;
+        }
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
         
@@ -87,6 +115,10 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Login failed');
+            }
             const data = await response.json();
             if (data.success) {
                 window.location.href = '/';
@@ -95,7 +127,7 @@
             }
         } catch (error) {
             console.error('Login error:', error);
-            alert('Network error. Please try again.');
+            alert('Login failed. Please check your internet connection and try again.');
         }
     });
 </script>

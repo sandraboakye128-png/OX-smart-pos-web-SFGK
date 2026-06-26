@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="p-6">
+    <!-- Offline banner -->
+    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+        ⚠️ You are offline – showing cached data. New purchases will be saved and synced when you reconnect.
+    </div>
+
     <!-- ADD / EDIT FORM -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
         <h2 class="text-xl font-bold mb-4" id="formTitle">➕ Add Purchase</h2>
@@ -71,18 +76,98 @@
 </div>
 
 <script>
+    // ---------- Offline banner helpers ----------
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+
+    // ---------- Main variables ----------
     let currentPurchases = [];
     let editMode = false;
     let editBatchId = null;
+    const CACHE_KEY = 'cached_purchases';
 
-    // Load all purchases
-    async function loadPurchases() {
-        const res = await fetch('/api/purchases');
-        currentPurchases = await res.json();
-        renderList(currentPurchases);
+    // ---------- Helper functions ----------
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
     }
 
-    // Render list with update buttons
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        return d.toLocaleString();
+    }
+
+    function formatMoney(amount) {
+        return '₵' + (parseFloat(amount) || 0).toFixed(2);
+    }
+
+    // ---------- Caching ----------
+    function cachePurchases(purchases) {
+        try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ purchases, timestamp: Date.now() }));
+        } catch (e) {}
+    }
+
+    function loadCachedPurchases() {
+        try {
+            const raw = localStorage.getItem(CACHE_KEY);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            // Accept cache up to 1 hour old (adjust as needed)
+            const ageMinutes = (Date.now() - data.timestamp) / (1000 * 60);
+            if (ageMinutes > 60) return null;
+            return data.purchases;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // ---------- Load purchases (with offline fallback) ----------
+    async function loadPurchases() {
+        updateOfflineBanner();
+        let purchases = [];
+        let fromCache = false;
+
+        try {
+            const res = await fetch('/api/purchases');
+            if (!res.ok) throw new Error('Network error');
+            purchases = await res.json();
+            cachePurchases(purchases);
+        } catch (err) {
+            console.warn('Offline – using cached purchases');
+            fromCache = true;
+            const cached = loadCachedPurchases();
+            if (cached) {
+                purchases = cached;
+            } else {
+                purchases = [];
+            }
+        }
+
+        currentPurchases = purchases;
+        renderList(currentPurchases);
+        // Show cached note in summary
+        const summary = document.getElementById('summary');
+        if (fromCache && purchases.length > 0) {
+            // We'll update summary after rendering, but we can add a note.
+        }
+    }
+
+    // ---------- Render list ----------
     function renderList(purchases) {
         const container = document.getElementById('purchasesList');
         if (!purchases.length) {
@@ -115,81 +200,30 @@
             totalDiscount += p.discount;
             totalSelling += p.selling_price * p.quantity;
         });
+        const isOffline = !navigator.onLine;
         document.getElementById('summary').innerHTML = `
             Total Qty: ${totalQty} | Total Discount: ₵${totalDiscount.toFixed(2)} | Total Cost: ₵${totalCost.toFixed(2)} | Total Selling: ₵${totalSelling.toFixed(2)}
+            ${isOffline ? ' <span class="text-red-500 text-sm">(offline)</span>' : ''}
         `;
     }
 
-    function formatDate(dateStr) {
-        if (!dateStr) return '';
-        const d = new Date(dateStr);
-        return d.toLocaleString();
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
-    }
-
-    // ---------- OFFLINE HELPER FUNCTIONS (should be in offline.js) ----------
-    // We'll define them here if they don't exist globally, but they should be in offline.js.
-    // We'll check and fallback to local functions.
-    function savePendingPurchase(payload, actionType, batchId = null) {
-        // This function is expected to be in offline.js, but we'll provide a fallback.
-        if (typeof window.savePendingPurchase === 'function') {
-            window.savePendingPurchase(payload, actionType, batchId);
-            return;
-        }
-        // Fallback: store in localStorage directly
-        const pending = JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
-        const entry = {
-            id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-            type: actionType, // 'add' or 'update'
-            batchId: batchId,
-            data: payload,
-            timestamp: new Date().toISOString()
+    // ---------- Offline helpers (fallback) ----------
+    if (typeof window.savePendingPurchase === 'undefined') {
+        window.savePendingPurchase = function(payload, actionType, batchId) {
+            let pending = JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
+            pending.push({
+                id: Date.now() + '_' + Math.random().toString(36).substr(2,5),
+                type: actionType,
+                batchId: batchId,
+                data: payload,
+                timestamp: new Date().toISOString()
+            });
+            localStorage.setItem('pendingPurchases', JSON.stringify(pending));
+            if (typeof updatePendingBadge === 'function') updatePendingBadge();
         };
-        pending.push(entry);
-        localStorage.setItem('pendingPurchases', JSON.stringify(pending));
-        console.log('Purchase saved offline (fallback):', entry);
     }
 
-    function syncPendingPurchases() {
-        // Expected in offline.js – if not, do nothing
-        if (typeof window.syncPendingPurchases === 'function') {
-            window.syncPendingPurchases();
-        } else {
-            console.warn('syncPendingPurchases not defined; pending purchases will not be synced.');
-        }
-    }
-
-    function updatePendingBadge() {
-        // Expected in offline.js – if not, just update a simple counter
-        if (typeof window.updatePendingBadge === 'function') {
-            window.updatePendingBadge();
-            return;
-        }
-        // Fallback: count total pending items (sales + purchases)
-        const sales = JSON.parse(localStorage.getItem('pendingSales') || '[]');
-        const purchases = JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
-        const total = sales.length + purchases.length;
-        const badge = document.getElementById('pendingBadge');
-        if (badge) {
-            if (total > 0) {
-                badge.textContent = total;
-                badge.classList.remove('hidden');
-            } else {
-                badge.classList.add('hidden');
-            }
-        }
-    }
-
-    // ========== SUBMIT / UPDATE WITH OFFLINE SUPPORT ==========
+    // ---------- Submit / Update (already offline-ready) ----------
     async function submitPurchase() {
         const payload = {
             name: document.getElementById('name').value.trim(),
@@ -230,18 +264,16 @@
                 alert('Error: ' + data.error);
             }
         } catch (error) {
-            // ===== NETWORK ERROR – OFFLINE STORAGE =====
             console.warn('Network error, saving purchase offline:', error);
             savePendingPurchase(payload, actionType, editMode ? editBatchId : null);
-            updatePendingBadge();
+            if (typeof updatePendingBadge === 'function') updatePendingBadge();
             alert('You are offline. Purchase saved locally and will be synced later.');
-            // Clear form and reload list (optional)
             resetForm();
-            // Optionally, we could add the purchase to the list with a pending flag, but for simplicity we just reload.
-            loadPurchases();
+            loadPurchases(); // will show cached list
         }
     }
 
+    // ---------- Edit / Reset ----------
     function editPurchase(batchId) {
         const purchase = currentPurchases.find(p => p.batch_id === batchId);
         if (!purchase) return;
@@ -274,13 +306,22 @@
         document.getElementById('cancelBtn').classList.add('hidden');
     }
 
-    // Search & filter
+    // ---------- Search & Filter (with offline fallback) ----------
     async function filterPurchases() {
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
         if (fromDate && toDate) {
-            const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}`);
-            currentPurchases = await res.json();
+            try {
+                const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}`);
+                if (!res.ok) throw new Error();
+                currentPurchases = await res.json();
+                cachePurchases(currentPurchases);
+            } catch (err) {
+                alert('Filter is unavailable offline. Showing cached data.');
+                const cached = loadCachedPurchases();
+                if (cached) currentPurchases = cached;
+                // fall through
+            }
         } else {
             await loadPurchases();
         }
@@ -301,22 +342,27 @@
         renderList(filtered);
     }
 
-    // PDF generation
+    // ---------- PDF (skip if offline) ----------
     async function generatePDF() {
+        if (!navigator.onLine) {
+            alert('PDF generation requires internet. Please connect and try again.');
+            return;
+        }
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
         const purchasesToExport = currentPurchases;
 
-        const res = await fetch('/api/purchases/pdf', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                purchases: purchasesToExport,
-                from_date: fromDate,
-                to_date: toDate
-            })
-        });
-        if (res.ok) {
+        try {
+            const res = await fetch('/api/purchases/pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    purchases: purchasesToExport,
+                    from_date: fromDate,
+                    to_date: toDate
+                })
+            });
+            if (!res.ok) throw new Error();
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -326,27 +372,62 @@
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
-        } else {
-            alert('Failed to generate PDF');
+        } catch (err) {
+            alert('Failed to generate PDF. Please try again.');
         }
     }
 
-    // Autocomplete for product name
+    // ---------- Autocomplete (hide offline) ----------
     let nameTimeout, catTimeout;
+
     async function fetchNameSuggestions() {
+        if (!navigator.onLine) {
+            document.getElementById('nameSuggestions').classList.add('hidden');
+            return;
+        }
         const q = document.getElementById('name').value.trim();
         if (!q) { document.getElementById('nameSuggestions').classList.add('hidden'); return; }
-        const res = await fetch(`/api/purchases/suggestions/name?q=${encodeURIComponent(q)}`);
-        const suggestions = await res.json();
-        const box = document.getElementById('nameSuggestions');
-        if (!suggestions.length) { box.classList.add('hidden'); return; }
-        box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectNameSuggestion('${escapeHtml(s.name)}', '${escapeHtml(s.brand)}', '${escapeHtml(s.category)}')">${escapeHtml(s.name)} (${escapeHtml(s.brand)})</div>`).join('');
-        box.classList.remove('hidden');
-        const rect = document.getElementById('name').getBoundingClientRect();
-        box.style.top = rect.bottom + window.scrollY + 'px';
-        box.style.left = rect.left + 'px';
-        box.style.width = rect.width + 'px';
+        try {
+            const res = await fetch(`/api/purchases/suggestions/name?q=${encodeURIComponent(q)}`);
+            if (!res.ok) throw new Error();
+            const suggestions = await res.json();
+            const box = document.getElementById('nameSuggestions');
+            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectNameSuggestion('${escapeHtml(s.name)}', '${escapeHtml(s.brand)}', '${escapeHtml(s.category)}')">${escapeHtml(s.name)} (${escapeHtml(s.brand)})</div>`).join('');
+            box.classList.remove('hidden');
+            const rect = document.getElementById('name').getBoundingClientRect();
+            box.style.top = rect.bottom + window.scrollY + 'px';
+            box.style.left = rect.left + 'px';
+            box.style.width = rect.width + 'px';
+        } catch (err) {
+            document.getElementById('nameSuggestions').classList.add('hidden');
+        }
     }
+
+    async function fetchCategorySuggestions() {
+        if (!navigator.onLine) {
+            document.getElementById('categorySuggestions').classList.add('hidden');
+            return;
+        }
+        const q = document.getElementById('category').value.trim();
+        if (!q) { document.getElementById('categorySuggestions').classList.add('hidden'); return; }
+        try {
+            const res = await fetch(`/api/purchases/suggestions/category?q=${encodeURIComponent(q)}`);
+            if (!res.ok) throw new Error();
+            const suggestions = await res.json();
+            const box = document.getElementById('categorySuggestions');
+            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectCategorySuggestion('${escapeHtml(s.category)}')">${escapeHtml(s.category)}</div>`).join('');
+            box.classList.remove('hidden');
+            const rect = document.getElementById('category').getBoundingClientRect();
+            box.style.top = rect.bottom + window.scrollY + 'px';
+            box.style.left = rect.left + 'px';
+            box.style.width = rect.width + 'px';
+        } catch (err) {
+            document.getElementById('categorySuggestions').classList.add('hidden');
+        }
+    }
+
     window.selectNameSuggestion = function(name, brand, category) {
         document.getElementById('name').value = name;
         document.getElementById('brand').value = brand;
@@ -354,27 +435,12 @@
         document.getElementById('nameSuggestions').classList.add('hidden');
     };
 
-    // Autocomplete for category
-    async function fetchCategorySuggestions() {
-        const q = document.getElementById('category').value.trim();
-        if (!q) { document.getElementById('categorySuggestions').classList.add('hidden'); return; }
-        const res = await fetch(`/api/purchases/suggestions/category?q=${encodeURIComponent(q)}`);
-        const suggestions = await res.json();
-        const box = document.getElementById('categorySuggestions');
-        if (!suggestions.length) { box.classList.add('hidden'); return; }
-        box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectCategorySuggestion('${escapeHtml(s.category)}')">${escapeHtml(s.category)}</div>`).join('');
-        box.classList.remove('hidden');
-        const rect = document.getElementById('category').getBoundingClientRect();
-        box.style.top = rect.bottom + window.scrollY + 'px';
-        box.style.left = rect.left + 'px';
-        box.style.width = rect.width + 'px';
-    }
     window.selectCategorySuggestion = function(cat) {
         document.getElementById('category').value = cat;
         document.getElementById('categorySuggestions').classList.add('hidden');
     };
 
-    // Event listeners
+    // ---------- Event listeners ----------
     document.getElementById('submitBtn').addEventListener('click', submitPurchase);
     document.getElementById('cancelBtn').addEventListener('click', resetForm);
     document.getElementById('filterBtn').addEventListener('click', filterPurchases);
@@ -387,12 +453,16 @@
         if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
     });
 
-    // ---------- On page load: show pending badge ----------
+    // ---------- On load ----------
     document.addEventListener('DOMContentLoaded', function() {
-        updatePendingBadge();
+        loadPurchases();
+        if (typeof updatePendingBadge === 'function') updatePendingBadge();
     });
 
-    // Initial load
-    loadPurchases();
+    // Also reload data when coming online
+    window.addEventListener('online', function() {
+        loadPurchases();
+    });
+
 </script>
 {% endblock %}
