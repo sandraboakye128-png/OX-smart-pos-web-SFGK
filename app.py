@@ -1698,8 +1698,8 @@ def run_inventory_import(job_id, file_stream, target_category):
         return
 
     rows_to_process = []
-    skipped_rows = []   # will hold objects with row, data, reason
-    error_rows = []     # general errors (like connection issues)
+    skipped_rows = []
+    error_rows = []
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
         if not any(row):
@@ -1819,13 +1819,20 @@ def run_inventory_import(job_id, file_stream, target_category):
             cursor = conn.cursor()
 
             for item in batch:
+                # ----- FIXED PRODUCT LOOKUP (ignores category, updates if needed) -----
                 cursor.execute(
-                    "SELECT id FROM products WHERE name = %s AND brand = '' AND category = %s",
-                    (item['name'], item['category'])
+                    "SELECT id, category FROM products WHERE name = %s AND brand = ''",
+                    (item['name'],)
                 )
                 result = cursor.fetchone()
                 if result:
                     product_id = result[0]
+                    existing_category = result[1]
+                    if existing_category != item['category']:
+                        cursor.execute(
+                            "UPDATE products SET category = %s WHERE id = %s",
+                            (item['category'], product_id)
+                        )
                 else:
                     cursor.execute(
                         "INSERT INTO products (name, brand, category, cost_price, selling_price, discount, stock) VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING id",
@@ -1871,7 +1878,6 @@ def run_inventory_import(job_id, file_stream, target_category):
                                 'skipped': skipped_rows,
                                 'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped'
                             })
-
 @app.route('/api/inventory/import', methods=['POST'])
 @admin_required
 def api_import_inventory():

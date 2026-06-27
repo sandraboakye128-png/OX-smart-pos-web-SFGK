@@ -10,6 +10,16 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <!-- Your custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- ===== SERVICE WORKER REGISTRATION ===== -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js')
+                .then(() => console.log('✅ Service Worker registered'))
+                .catch(err => console.log('❌ SW registration failed:', err));
+        }
+    </script>
+
     <style>
         /* Custom scrollbar */
         ::-webkit-scrollbar { width: 6px; }
@@ -51,15 +61,6 @@
             padding-left: 2.5rem;
         }
     </style>
-
-    <!-- ===== SERVICE WORKER REGISTRATION ===== -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js')
-                .then(() => console.log('✅ Service Worker registered'))
-                .catch(err => console.log('❌ SW registration failed:', err));
-        }
-    </script>
 </head>
 <body class="bg-gray-100 font-sans">
 
@@ -187,10 +188,13 @@
             {% block content %}{% endblock %}
         </div>
 
-        <!-- Footer -->
+        <!-- Footer with offline link -->
         <footer class="bg-[#1E293B] text-gray-300 text-center py-3 text-xs">
             TOMFRIMP MOBICOM SOLUTIONS  | HOME OF COMPUTER, PHONES, AND ACCESSORIES<br>
             Developed by HUMMNINGBIRD DIGITAL SOLUTIONS © 2026 - All Rights Reserved
+            <span class="block mt-1">
+                <a href="/offline" class="text-gray-400 hover:text-white underline">📶 Offline</a>
+            </span>
         </footer>
     </div>
 </div>

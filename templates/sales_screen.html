@@ -7,34 +7,41 @@
         ⚠️ You are offline – showing cached screen products. Sales will be saved and synced when you reconnect.
     </div>
 
+    <!-- No screen products banner -->
+    <div id="noProductsBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
+        <strong>⚠️ No screen products found.</strong><br>
+        Please ensure your inventory imports are correctly categorised as <strong>Screens</strong>.
+        <br><br>
+        <a href="/inventory/import" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded inline-block">
+            📥 Go to Import Page
+        </a>
+        <button onclick="refreshProducts()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded ml-2">
+            🔄 Refresh
+        </button>
+    </div>
+
     <!-- Two-column layout -->
     <div class="flex flex-wrap -mx-4">
         <!-- LEFT PANEL: Products & Form -->
         <div class="w-full lg:w-1/2 px-4 mb-6">
             <div class="bg-white rounded-xl shadow-md p-4">
-                <!-- Screen indicator -->
                 <div class="flex items-center gap-2 mb-2">
                     <h2 class="text-xl font-bold text-indigo-600">🛒 Sales Terminal</h2>
                     <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
                 </div>
                 
-                <!-- Product Search -->
                 <input type="text" id="searchProduct" placeholder="🔍 Search screen product..." 
                        class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3">
                 
-                <!-- Product List -->
                 <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4"></div>
                 
-                <!-- Selected Product Info -->
                 <div id="selectedProductInfo" class="text-gray-600 text-sm mb-2">No screen selected</div>
                 
-                <!-- Quantity & Discount -->
                 <div class="grid grid-cols-2 gap-3 mb-3">
                     <input type="number" id="quantity" placeholder="Quantity" class="border rounded-lg px-3 py-2">
                     <input type="number" step="0.01" id="discount" placeholder="Discount (₵)" class="border rounded-lg px-3 py-2">
                 </div>
                 
-                <!-- Date & Time -->
                 <div class="mb-3">
                     <label class="block text-sm font-medium text-gray-700">Sale Date</label>
                     <input type="date" id="saleDate" class="border rounded-lg px-3 py-2 w-full">
@@ -45,7 +52,6 @@
                            class="border rounded-lg px-3 py-2 w-full">
                 </div>
                 
-                <!-- Add to Cart Button -->
                 <button id="addToCartBtn" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 rounded-lg">
                     ➕ Add to Cart
                 </button>
@@ -150,23 +156,19 @@
     let neededQty = 0;
     let batchSelection = [];
 
-    // Payment handling
     let selectedPaymentMethod = null;
     let selectedChequeNumber = null;
     let pendingSaleCallback = null;
 
-    // License state
     let licenseRemainingSeconds = 0;
     let licenseLicensed = false;
     let licenseTrialActive = false;
     let licenseTimerInterval = null;
 
-    // Helper: format currency
     function formatMoney(amount) {
         return '₵' + amount.toFixed(2);
     }
 
-    // ---------- Offline banner ----------
     function updateOfflineBanner() {
         const banner = document.getElementById('offlineBanner');
         if (!navigator.onLine) {
@@ -178,7 +180,6 @@
     window.addEventListener('online', updateOfflineBanner);
     window.addEventListener('offline', updateOfflineBanner);
 
-    // ---------- Caching helpers ----------
     function cacheData(key, data) {
         try {
             localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
@@ -195,11 +196,9 @@
         } catch(e) { return null; }
     }
 
-    // Distinct cache keys for screen version
     const PRODUCTS_CACHE_KEY = 'sales_products_cache_screen';
     const LICENSE_CACHE_KEY = 'sales_license_cache';
 
-    // ---------- Load License Status ----------
     async function loadLicenseStatus() {
         try {
             const res = await fetch('/api/license/status');
@@ -220,7 +219,6 @@
                 licenseRemainingSeconds = cached.remaining_seconds;
                 return cached;
             }
-            // Fallback: assume 7‑day trial
             licenseLicensed = false;
             licenseTrialActive = true;
             licenseRemainingSeconds = 7 * 24 * 3600;
@@ -345,6 +343,9 @@
     // ---------- Load Products (only Screen category) ----------
     async function loadProducts() {
         updateOfflineBanner();
+        const noProductsBanner = document.getElementById('noProductsBanner');
+        noProductsBanner.classList.add('hidden');
+
         let prods = [];
         let fromCache = false;
 
@@ -361,10 +362,15 @@
         }
 
         products = prods;
-        renderProductList(products);
-        if (fromCache && products.length === 0) {
-            document.getElementById('productList').innerHTML = 
-                '<div class="text-gray-500 p-2">No cached screen products – connect to refresh</div>';
+        if (products.length === 0) {
+            document.getElementById('productList').innerHTML = '';
+            noProductsBanner.classList.remove('hidden');
+            if (fromCache) {
+                document.getElementById('productList').innerHTML = 
+                    '<div class="text-gray-500 p-2">No cached screen products – connect to refresh</div>';
+            }
+        } else {
+            renderProductList(products);
         }
     }
 
@@ -384,6 +390,11 @@
         });
     }
 
+    function refreshProducts() {
+        loadProducts();
+    }
+    window.refreshProducts = refreshProducts;
+
     function selectProduct(product) {
         currentProduct = product;
         document.getElementById('selectedProductInfo').innerHTML = `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)}`;
@@ -397,7 +408,7 @@
         renderProductList(filtered);
     });
 
-    // ---------- Batch Selector ----------
+    // ---------- Batch Selector (unchanged) ----------
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
@@ -673,7 +684,7 @@
         return null;
     }
 
-    // ---------- Execute Sale with Offline Support ----------
+    // ---------- Execute Sale ----------
     async function executeSaleWithPayment(paymentMethod, chequeNum) {
         if (!pendingSaleCallback) return;
         
@@ -729,26 +740,21 @@
                 alert('Error: ' + data.error);
             }
         } catch (error) {
-            // ---- Offline fallback ----
             console.warn('Network error, saving sale offline:', error);
             
-            // Save the sale locally (requires offline.js)
             if (typeof savePendingSale === 'function') {
                 savePendingSale(payload);
             } else {
                 console.warn('savePendingSale not available; sale not saved offline.');
             }
             
-            // Update badge
             if (typeof updatePendingBadge === 'function') {
                 updatePendingBadge();
             }
             
-            // Clear cart
             cart = [];
             updateCart();
             
-            // Show offline receipt placeholder
             document.getElementById('receiptPreview').innerHTML = `
                 <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
                     <strong>⚠️ Offline Sale Saved</strong><br>
@@ -827,7 +833,7 @@
             canProceed = true;
         } else if (licenseData.trial_active && licenseData.remaining_seconds > 0) {
             const userChoice = await showLicenseModal(true);
-            canProceed = true; // allow sale during trial even if user cancels
+            canProceed = true;
         } else {
             const activated = await showLicenseModal(false);
             canProceed = activated;
