@@ -1607,156 +1607,157 @@ def import_inventory_page():
     return render_template('import_inventory.html')
 
 # ----- INVENTORY IMPORT (background thread) -----
-def run_inventory_import(job_id, file, target_category):
+def run_inventory_import(job_id, file_stream, target_category):
     try:
-        wb = load_workbook(file.stream, data_only=True)
+        # Load workbook from the in-memory stream
+        wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
-
-        # Find header row
-        header_row_idx = None
-        header_row = None
-        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
-            if row and any(cell and isinstance(cell, str) and ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
-                header_row_idx = i + 1
-                header_row = row
-                break
-
-        if header_row_idx is None:
-            update_job_progress(job_id, status='error', errors=['Could not find header row'])
-            return
-
-        header_map = {}
-        for idx, cell in enumerate(header_row):
-            if cell:
-                cell_lower = str(cell).strip().lower()
-                if cell_lower in ['item', 'product', 'name', 'details']:
-                    header_map['name'] = idx
-                elif cell_lower in ['qty', 'quantity']:
-                    header_map['quantity'] = idx
-                elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
-                    header_map['cost_price'] = idx
-                elif cell_lower in ['date', 'purchase date']:
-                    header_map['date'] = idx
-                elif cell_lower in ['discount']:
-                    header_map['discount'] = idx
-
-        required = ['name', 'quantity', 'cost_price']
-        missing = [f for f in required if f not in header_map]
-        if missing:
-            update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
-            return
-
-        rows_to_process = []
-        error_rows = []
-        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
-            if not any(row):
-                continue
-            try:
-                name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
-                if not name:
-                    continue
-                quantity = float(row[header_map['quantity']]) if row[header_map['quantity']] else 0
-                if quantity <= 0:
-                    error_rows.append(f"Row {row_idx}: Quantity must be positive")
-                    continue
-                cost_price = float(row[header_map['cost_price']]) if row[header_map['cost_price']] else 0.0
-                if cost_price < 0:
-                    error_rows.append(f"Row {row_idx}: Cost price cannot be negative")
-                    continue
-                discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] else 0.0
-                selling_price = cost_price * 1.2
-
-                purchase_date = None
-                if 'date' in header_map and row[header_map['date']] is not None:
-                    try:
-                        if isinstance(row[header_map['date']], (int, float)):
-                            from datetime import datetime, timedelta
-                            purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
-                        else:
-                            date_str = str(row[header_map['date']]).strip()
-                            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
-                                try:
-                                    purchase_date = datetime.strptime(date_str, fmt)
-                                    break
-                                except:
-                                    continue
-                            if purchase_date is None:
-                                purchase_date = datetime.now()
-                    except:
-                        purchase_date = datetime.now()
-                else:
-                    purchase_date = datetime.now()
-
-                rows_to_process.append({
-                    'row_idx': row_idx,
-                    'name': name,
-                    'quantity': int(quantity),
-                    'cost_price': cost_price,
-                    'discount': discount,
-                    'selling_price': selling_price,
-                    'category': target_category,
-                    'purchase_date': purchase_date
-                })
-            except Exception as e:
-                error_rows.append(f"Row {row_idx}: {str(e)}")
-
-        total_rows = len(rows_to_process)
-        update_job_progress(job_id, total=total_rows, processed=0, status='processing', errors=error_rows)
-
-        if total_rows == 0:
-            update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
-            return
-
-        conn = get_connection()
-        cursor = conn.cursor()
-        BATCH_SIZE = 2000
-        imported_count = 0
-
-        for i in range(0, total_rows, BATCH_SIZE):
-            batch = rows_to_process[i:i+BATCH_SIZE]
-            try:
-                for item in batch:
-                    cursor.execute(
-                        "SELECT id FROM products WHERE name = %s AND brand = '' AND category = %s",
-                        (item['name'], item['category'])
-                    )
-                    result = cursor.fetchone()
-                    if result:
-                        product_id = result[0]
-                    else:
-                        cursor.execute(
-                            "INSERT INTO products (name, brand, category, cost_price, selling_price, discount, stock) VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING id",
-                            (item['name'], '', item['category'], item['cost_price'], item['selling_price'], item['discount'])
-                        )
-                        product_id = cursor.fetchone()[0]
-
-                    cursor.execute("""
-                        INSERT INTO purchase_batches
-                        (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, (product_id, item['quantity'], item['quantity'], item['cost_price'], item['selling_price'], item['discount'], item['purchase_date']))
-
-                    cursor.execute("""
-                        UPDATE products
-                        SET stock = stock + %s
-                        WHERE id = %s
-                    """, (item['quantity'], product_id))
-
-                    imported_count += 1
-                    update_job_progress(job_id, processed=imported_count)
-
-                conn.commit()
-                update_job_progress(job_id, processed=imported_count)
-            except Exception as e:
-                conn.rollback()
-                error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-                update_job_progress(job_id, errors=error_rows)
-
-        conn.close()
-        update_job_progress(job_id, status='done', result=f'Imported {imported_count} records', errors=error_rows)
-
     except Exception as e:
-        update_job_progress(job_id, status='error', errors=[str(e)])
+        update_job_progress(job_id, status='error', errors=[f"Unable to read workbook: {str(e)}"])
+        return
+
+    # Find header row
+    header_row_idx = None
+    header_row = None
+    for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
+        if row and any(cell and isinstance(cell, str) and ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
+            header_row_idx = i + 1
+            header_row = row
+            break
+
+    if header_row_idx is None:
+        update_job_progress(job_id, status='error', errors=['Could not find header row'])
+        return
+
+    header_map = {}
+    for idx, cell in enumerate(header_row):
+        if cell:
+            cell_lower = str(cell).strip().lower()
+            if cell_lower in ['item', 'product', 'name', 'details']:
+                header_map['name'] = idx
+            elif cell_lower in ['qty', 'quantity']:
+                header_map['quantity'] = idx
+            elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
+                header_map['cost_price'] = idx
+            elif cell_lower in ['date', 'purchase date']:
+                header_map['date'] = idx
+            elif cell_lower in ['discount']:
+                header_map['discount'] = idx
+
+    required = ['name', 'quantity', 'cost_price']
+    missing = [f for f in required if f not in header_map]
+    if missing:
+        update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
+        return
+
+    rows_to_process = []
+    error_rows = []
+    for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
+        if not any(row):
+            continue
+        try:
+            name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
+            if not name:
+                continue
+            quantity = float(row[header_map['quantity']]) if row[header_map['quantity']] else 0
+            if quantity <= 0:
+                error_rows.append(f"Row {row_idx}: Quantity must be positive")
+                continue
+            cost_price = float(row[header_map['cost_price']]) if row[header_map['cost_price']] else 0.0
+            if cost_price < 0:
+                error_rows.append(f"Row {row_idx}: Cost price cannot be negative")
+                continue
+            discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] else 0.0
+            selling_price = cost_price * 1.2
+
+            purchase_date = None
+            if 'date' in header_map and row[header_map['date']] is not None:
+                try:
+                    if isinstance(row[header_map['date']], (int, float)):
+                        from datetime import datetime, timedelta
+                        purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
+                    else:
+                        date_str = str(row[header_map['date']]).strip()
+                        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+                            try:
+                                purchase_date = datetime.strptime(date_str, fmt)
+                                break
+                            except:
+                                continue
+                        if purchase_date is None:
+                            purchase_date = datetime.now()
+                except:
+                    purchase_date = datetime.now()
+            else:
+                purchase_date = datetime.now()
+
+            rows_to_process.append({
+                'row_idx': row_idx,
+                'name': name,
+                'quantity': int(quantity),
+                'cost_price': cost_price,
+                'discount': discount,
+                'selling_price': selling_price,
+                'category': target_category,
+                'purchase_date': purchase_date
+            })
+        except Exception as e:
+            error_rows.append(f"Row {row_idx}: {str(e)}")
+
+    total_rows = len(rows_to_process)
+    update_job_progress(job_id, total=total_rows, processed=0, status='processing', errors=error_rows)
+
+    if total_rows == 0:
+        update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    BATCH_SIZE = 2000
+    imported_count = 0
+
+    for i in range(0, total_rows, BATCH_SIZE):
+        batch = rows_to_process[i:i+BATCH_SIZE]
+        try:
+            for item in batch:
+                cursor.execute(
+                    "SELECT id FROM products WHERE name = %s AND brand = '' AND category = %s",
+                    (item['name'], item['category'])
+                )
+                result = cursor.fetchone()
+                if result:
+                    product_id = result[0]
+                else:
+                    cursor.execute(
+                        "INSERT INTO products (name, brand, category, cost_price, selling_price, discount, stock) VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING id",
+                        (item['name'], '', item['category'], item['cost_price'], item['selling_price'], item['discount'])
+                    )
+                    product_id = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    INSERT INTO purchase_batches
+                    (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (product_id, item['quantity'], item['quantity'], item['cost_price'], item['selling_price'], item['discount'], item['purchase_date']))
+
+                cursor.execute("""
+                    UPDATE products
+                    SET stock = stock + %s
+                    WHERE id = %s
+                """, (item['quantity'], product_id))
+
+                imported_count += 1
+                update_job_progress(job_id, processed=imported_count)
+
+            conn.commit()
+            update_job_progress(job_id, processed=imported_count)
+        except Exception as e:
+            conn.rollback()
+            error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
+            update_job_progress(job_id, errors=error_rows)
+
+    conn.close()
+    update_job_progress(job_id, status='done', result=f'Imported {imported_count} records', errors=error_rows)
 
 @app.route('/api/inventory/import', methods=['POST'])
 @admin_required
@@ -1775,6 +1776,10 @@ def api_import_inventory():
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
+    # Read file content into memory to avoid stream closure
+    file_content = file.read()
+    file_stream = io.BytesIO(file_content)
+
     job_id = str(uuid.uuid4())
     import_jobs[job_id] = {
         'status': 'pending',
@@ -1787,7 +1792,7 @@ def api_import_inventory():
 
     thread = threading.Thread(
         target=run_inventory_import,
-        args=(job_id, file, target_category)
+        args=(job_id, file_stream, target_category)
     )
     thread.daemon = True
     thread.start()
@@ -1795,190 +1800,190 @@ def api_import_inventory():
     return jsonify({'success': True, 'job_id': job_id})
 
 # ----- SALES IMPORT (background thread) -----
-def run_sales_import(job_id, file, target_category):
+def run_sales_import(job_id, file_stream, target_category):
     try:
-        wb = load_workbook(file.stream, data_only=True)
+        wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
-
-        # Find header
-        header_row_idx = None
-        header_row = None
-        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
-            if row and any(cell and isinstance(cell, str) and 
-                           ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
-                header_row_idx = i + 1
-                header_row = row
-                break
-
-        if header_row_idx is None:
-            update_job_progress(job_id, status='error', errors=['Could not find header row'])
-            return
-
-        header_map = {}
-        for idx, cell in enumerate(header_row):
-            if cell:
-                cell_lower = str(cell).strip().lower()
-                if cell_lower in ['item', 'product', 'name', 'details']:
-                    header_map['item'] = idx
-                elif cell_lower in ['qty', 'quantity']:
-                    header_map['qty'] = idx
-                elif cell_lower in ['rate', 'selling price', 'unit price']:
-                    header_map['rate'] = idx
-                elif cell_lower in ['date', 'sale date']:
-                    header_map['date'] = idx
-                elif cell_lower in ['discount']:
-                    header_map['discount'] = idx
-
-        required = ['item', 'qty', 'rate']
-        missing = [f for f in required if f not in header_map]
-        if missing:
-            update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
-            return
-
-        rows_to_process = []
-        error_rows = []
-        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
-            if not any(row):
-                continue
-            try:
-                item = str(row[header_map['item']]).strip() if row[header_map['item']] else ''
-                if not item:
-                    error_rows.append(f"Row {row_idx}: Product name is empty")
-                    continue
-
-                qty = float(row[header_map['qty']]) if row[header_map['qty']] is not None else 0
-                if qty <= 0:
-                    error_rows.append(f"Row {row_idx}: Quantity must be positive (got {qty})")
-                    continue
-
-                rate = float(row[header_map['rate']]) if row[header_map['rate']] is not None else 0.0
-                if rate < 0:
-                    error_rows.append(f"Row {row_idx}: Selling price cannot be negative")
-                    continue
-
-                discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
-
-                sale_date = None
-                if 'date' in header_map and row[header_map['date']] is not None:
-                    try:
-                        if isinstance(row[header_map['date']], (int, float)):
-                            from datetime import datetime, timedelta
-                            sale_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
-                        else:
-                            date_str = str(row[header_map['date']]).strip()
-                            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
-                                try:
-                                    sale_date = datetime.strptime(date_str, fmt)
-                                    break
-                                except:
-                                    continue
-                            if sale_date is None:
-                                sale_date = datetime.now()
-                    except:
-                        sale_date = datetime.now()
-                else:
-                    sale_date = datetime.now()
-
-                rows_to_process.append({
-                    'row_idx': row_idx,
-                    'item': item,
-                    'qty': int(qty),
-                    'rate': rate,
-                    'discount': discount,
-                    'sale_date': sale_date
-                })
-            except Exception as e:
-                error_rows.append(f"Row {row_idx}: {str(e)}")
-
-        total_rows = len(rows_to_process)
-        update_job_progress(job_id, total=total_rows, processed=0, status='processing', errors=error_rows)
-
-        if total_rows == 0:
-            update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
-            return
-
-        conn = get_connection()
-        cursor = conn.cursor()
-        BATCH_SIZE = 2000
-        imported_count = 0
-
-        for i in range(0, total_rows, BATCH_SIZE):
-            batch = rows_to_process[i:i+BATCH_SIZE]
-            try:
-                for entry in batch:
-                    # Find product
-                    cursor.execute(
-                        "SELECT id, category FROM products WHERE name = %s",
-                        (entry['item'],)
-                    )
-                    product = cursor.fetchone()
-                    if not product:
-                        error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
-                        continue
-                    product_id, product_category = product
-                    if product_category != target_category:
-                        error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
-                        continue
-
-                    subtotal = entry['qty'] * entry['rate']
-                    total = subtotal - entry['discount']
-                    cursor.execute("""
-                        INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
-                    """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash'))
-                    sale_id = cursor.fetchone()[0]
-
-                    cursor.execute("""
-                        SELECT id, cost_price, selling_price
-                        FROM purchase_batches
-                        WHERE product_id = %s AND remaining_quantity >= %s
-                        ORDER BY date ASC
-                        LIMIT 1
-                    """, (product_id, entry['qty']))
-                    batch_info = cursor.fetchone()
-                    if not batch_info:
-                        error_rows.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
-                        cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
-                        continue
-
-                    batch_id, cost_price, selling_price = batch_info
-                    selling_price = entry['rate']
-                    item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
-
-                    cursor.execute("""
-                        INSERT INTO sales_items
-                        (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit, subtotal)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit, subtotal))
-
-                    cursor.execute("""
-                        UPDATE purchase_batches
-                        SET remaining_quantity = remaining_quantity - %s
-                        WHERE id = %s
-                    """, (entry['qty'], batch_id))
-
-                    cursor.execute("""
-                        UPDATE products
-                        SET stock = stock - %s
-                        WHERE id = %s
-                    """, (entry['qty'], product_id))
-
-                    imported_count += 1
-                    update_job_progress(job_id, processed=imported_count)
-
-                conn.commit()
-                update_job_progress(job_id, processed=imported_count)
-            except Exception as e:
-                conn.rollback()
-                error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-                update_job_progress(job_id, errors=error_rows)
-
-        conn.close()
-        update_job_progress(job_id, status='done', result=f'Imported {imported_count} sales records', errors=error_rows)
-
     except Exception as e:
-        update_job_progress(job_id, status='error', errors=[str(e)])
+        update_job_progress(job_id, status='error', errors=[f"Unable to read workbook: {str(e)}"])
+        return
+
+    # Find header
+    header_row_idx = None
+    header_row = None
+    for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
+        if row and any(cell and isinstance(cell, str) and 
+                       ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
+            header_row_idx = i + 1
+            header_row = row
+            break
+
+    if header_row_idx is None:
+        update_job_progress(job_id, status='error', errors=['Could not find header row'])
+        return
+
+    header_map = {}
+    for idx, cell in enumerate(header_row):
+        if cell:
+            cell_lower = str(cell).strip().lower()
+            if cell_lower in ['item', 'product', 'name', 'details']:
+                header_map['item'] = idx
+            elif cell_lower in ['qty', 'quantity']:
+                header_map['qty'] = idx
+            elif cell_lower in ['rate', 'selling price', 'unit price']:
+                header_map['rate'] = idx
+            elif cell_lower in ['date', 'sale date']:
+                header_map['date'] = idx
+            elif cell_lower in ['discount']:
+                header_map['discount'] = idx
+
+    required = ['item', 'qty', 'rate']
+    missing = [f for f in required if f not in header_map]
+    if missing:
+        update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
+        return
+
+    rows_to_process = []
+    error_rows = []
+    for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
+        if not any(row):
+            continue
+        try:
+            item = str(row[header_map['item']]).strip() if row[header_map['item']] else ''
+            if not item:
+                error_rows.append(f"Row {row_idx}: Product name is empty")
+                continue
+
+            qty = float(row[header_map['qty']]) if row[header_map['qty']] is not None else 0
+            if qty <= 0:
+                error_rows.append(f"Row {row_idx}: Quantity must be positive (got {qty})")
+                continue
+
+            rate = float(row[header_map['rate']]) if row[header_map['rate']] is not None else 0.0
+            if rate < 0:
+                error_rows.append(f"Row {row_idx}: Selling price cannot be negative")
+                continue
+
+            discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
+
+            sale_date = None
+            if 'date' in header_map and row[header_map['date']] is not None:
+                try:
+                    if isinstance(row[header_map['date']], (int, float)):
+                        from datetime import datetime, timedelta
+                        sale_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
+                    else:
+                        date_str = str(row[header_map['date']]).strip()
+                        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+                            try:
+                                sale_date = datetime.strptime(date_str, fmt)
+                                break
+                            except:
+                                continue
+                        if sale_date is None:
+                            sale_date = datetime.now()
+                except:
+                    sale_date = datetime.now()
+            else:
+                sale_date = datetime.now()
+
+            rows_to_process.append({
+                'row_idx': row_idx,
+                'item': item,
+                'qty': int(qty),
+                'rate': rate,
+                'discount': discount,
+                'sale_date': sale_date
+            })
+        except Exception as e:
+            error_rows.append(f"Row {row_idx}: {str(e)}")
+
+    total_rows = len(rows_to_process)
+    update_job_progress(job_id, total=total_rows, processed=0, status='processing', errors=error_rows)
+
+    if total_rows == 0:
+        update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    BATCH_SIZE = 2000
+    imported_count = 0
+
+    for i in range(0, total_rows, BATCH_SIZE):
+        batch = rows_to_process[i:i+BATCH_SIZE]
+        try:
+            for entry in batch:
+                # Find product
+                cursor.execute(
+                    "SELECT id, category FROM products WHERE name = %s",
+                    (entry['item'],)
+                )
+                product = cursor.fetchone()
+                if not product:
+                    error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
+                    continue
+                product_id, product_category = product
+                if product_category != target_category:
+                    error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
+                    continue
+
+                subtotal = entry['qty'] * entry['rate']
+                total = subtotal - entry['discount']
+                cursor.execute("""
+                    INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash'))
+                sale_id = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    SELECT id, cost_price, selling_price
+                    FROM purchase_batches
+                    WHERE product_id = %s AND remaining_quantity >= %s
+                    ORDER BY date ASC
+                    LIMIT 1
+                """, (product_id, entry['qty']))
+                batch_info = cursor.fetchone()
+                if not batch_info:
+                    error_rows.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
+                    cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
+                    continue
+
+                batch_id, cost_price, selling_price = batch_info
+                selling_price = entry['rate']
+                item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
+
+                cursor.execute("""
+                    INSERT INTO sales_items
+                    (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit, subtotal)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit, subtotal))
+
+                cursor.execute("""
+                    UPDATE purchase_batches
+                    SET remaining_quantity = remaining_quantity - %s
+                    WHERE id = %s
+                """, (entry['qty'], batch_id))
+
+                cursor.execute("""
+                    UPDATE products
+                    SET stock = stock - %s
+                    WHERE id = %s
+                """, (entry['qty'], product_id))
+
+                imported_count += 1
+                update_job_progress(job_id, processed=imported_count)
+
+            conn.commit()
+            update_job_progress(job_id, processed=imported_count)
+        except Exception as e:
+            conn.rollback()
+            error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
+            update_job_progress(job_id, errors=error_rows)
+
+    conn.close()
+    update_job_progress(job_id, status='done', result=f'Imported {imported_count} sales records', errors=error_rows)
 
 @app.route('/api/sales/import', methods=['POST'])
 @admin_required
@@ -1997,6 +2002,10 @@ def api_import_sales():
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
+    # Read file content into memory to avoid stream closure
+    file_content = file.read()
+    file_stream = io.BytesIO(file_content)
+
     job_id = str(uuid.uuid4())
     import_jobs[job_id] = {
         'status': 'pending',
@@ -2009,7 +2018,7 @@ def api_import_sales():
 
     thread = threading.Thread(
         target=run_sales_import,
-        args=(job_id, file, target_category)
+        args=(job_id, file_stream, target_category)
     )
     thread.daemon = True
     thread.start()
