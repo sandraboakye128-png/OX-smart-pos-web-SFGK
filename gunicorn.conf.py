@@ -14,7 +14,7 @@ workers = multiprocessing.cpu_count() * 2 + 1
 worker_connections = 1000  # only used for gevent, but harmless
 
 # --- Request limits ---
-max_requests = 2000
+max_requests = 5000
 max_requests_jitter = 100
 
 # --- Logging ---
