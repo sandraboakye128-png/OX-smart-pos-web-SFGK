@@ -82,16 +82,51 @@ LICENSE_FILE = os.path.join(BASE_DIR, "license.json")
 TRIAL_DAYS = 30
 MASTER_KEY = "OXSMART-1234-KEY"
 
-# ===================== IMPORT JOB TRACKING =====================
-import_jobs = {}
+# ===================== IMPORT JOB TRACKING (DATABASE VERSION) =====================
+def init_import_jobs_table():
+    """Create the import_jobs table if it does not exist."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS import_jobs (
+            job_id UUID PRIMARY KEY,
+            status TEXT NOT NULL,
+            total INTEGER DEFAULT 0,
+            processed INTEGER DEFAULT 0,
+            errors JSONB DEFAULT '[]',
+            result TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+    print("✅ import_jobs table ensured.")
 
 def update_job_progress(job_id, **kwargs):
-    """Update the job status dictionary with given key-values."""
-    job = import_jobs.get(job_id, {})
+    """Update job progress in the database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    set_parts = []
+    params = []
     for key, value in kwargs.items():
-        job[key] = value
-    job['updated_at'] = datetime.now().isoformat()
-    import_jobs[job_id] = job
+        if key == 'errors':
+            set_parts.append(f"{key} = %s::jsonb")
+            params.append(json.dumps(value))  # store as JSON string
+        else:
+            set_parts.append(f"{key} = %s")
+            params.append(value)
+    params.append(job_id)
+    query = f"""
+        UPDATE import_jobs
+        SET {', '.join(set_parts)}, updated_at = CURRENT_TIMESTAMP
+        WHERE job_id = %s
+    """
+    cursor.execute(query, params)
+    conn.commit()
+    conn.close()
+
+# Call table creation on startup
+init_import_jobs_table()
 
 # ---------- (license functions remain unchanged) ----------
 def load_license_data():
@@ -1781,14 +1816,16 @@ def api_import_inventory():
     file_stream = io.BytesIO(file_content)
 
     job_id = str(uuid.uuid4())
-    import_jobs[job_id] = {
-        'status': 'pending',
-        'total': 0,
-        'processed': 0,
-        'errors': [],
-        'result': None,
-        'updated_at': datetime.now().isoformat()
-    }
+
+    # Insert initial job record into the database
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO import_jobs (job_id, status, total, processed, errors, result)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (job_id, 'pending', 0, 0, '[]', None))
+    conn.commit()
+    conn.close()
 
     thread = threading.Thread(
         target=run_inventory_import,
@@ -2007,14 +2044,16 @@ def api_import_sales():
     file_stream = io.BytesIO(file_content)
 
     job_id = str(uuid.uuid4())
-    import_jobs[job_id] = {
-        'status': 'pending',
-        'total': 0,
-        'processed': 0,
-        'errors': [],
-        'result': None,
-        'updated_at': datetime.now().isoformat()
-    }
+
+    # Insert initial job record
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO import_jobs (job_id, status, total, processed, errors, result)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (job_id, 'pending', 0, 0, '[]', None))
+    conn.commit()
+    conn.close()
 
     thread = threading.Thread(
         target=run_sales_import,
@@ -2029,17 +2068,25 @@ def api_import_sales():
 @app.route('/api/import/progress/<job_id>', methods=['GET'])
 @login_required
 def api_import_progress(job_id):
-    job = import_jobs.get(job_id)
-    if not job:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT status, total, processed, errors, result, updated_at
+        FROM import_jobs
+        WHERE job_id = %s
+    """, (job_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
         return jsonify({'success': False, 'error': 'Job not found'}), 404
     return jsonify({
         'success': True,
-        'status': job.get('status'),
-        'total': job.get('total', 0),
-        'processed': job.get('processed', 0),
-        'errors': job.get('errors', []),
-        'result': job.get('result'),
-        'updated_at': job.get('updated_at')
+        'status': row[0],
+        'total': row[1],
+        'processed': row[2],
+        'errors': row[3],  # already JSON
+        'result': row[4],
+        'updated_at': row[5].isoformat() if row[5] else None
     })
 
 # ---------------------- RUN THE APP ----------------------
