@@ -2,20 +2,23 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Offline banner (updated) -->
+    <!-- Offline banner (updated for screens) -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached accessory products. Deletions will be saved and applied when you reconnect.
+        ⚠️ You are offline – showing cached screen products. Deletions will be saved and applied when you reconnect.
     </div>
 
-    <!-- Header -->
+    <!-- Header with screen indicator -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <h2 class="text-2xl font-bold text-indigo-600 mb-4">📦 Product Manager</h2>
-        <p class="text-gray-600">Manage your accessory products and batches</p>
+        <div class="flex items-center gap-2">
+            <h2 class="text-2xl font-bold text-indigo-600 mb-0">📦 Product Manager</h2>
+            <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
+        </div>
+        <p class="text-gray-600 mt-1">Manage your screen products and batches</p>
     </div>
 
     <!-- Search Bar -->
     <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search accessory by name, brand or category..." 
+        <input type="text" id="searchInput" placeholder="🔍 Search screen by name, brand or category..." 
                class="w-full border border-gray-300 rounded-lg px-4 py-2">
     </div>
 
@@ -52,7 +55,7 @@
 <!-- Modal: Delete Product Options -->
 <div id="deleteProductModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
     <div class="bg-white rounded-xl shadow-xl w-96 p-6">
-        <h3 class="text-xl font-bold mb-2">Delete Accessory Product</h3>
+        <h3 class="text-xl font-bold mb-2">Delete Screen Product</h3>
         <p id="deleteProductName" class="mb-4 text-gray-600"></p>
         <button id="deleteKeepBtn" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded mb-2">📦 Keep History (Recommended)</button>
         <p class="text-xs text-gray-500 mb-3">✓ Product deleted but sales/purchase history remains<br>✓ Can be restored from Archive</p>
@@ -110,10 +113,10 @@
     window.addEventListener('online', updateOfflineBanner);
     window.addEventListener('offline', updateOfflineBanner);
 
-    // Cache key for accessories (separate from screens)
-    const PRODUCTS_CACHE_KEY = 'cached_products_accessories';
+    // Cache key for screen products (separate from accessories)
+    const PRODUCTS_CACHE_KEY = 'cached_products_screen';
 
-    // Load products from API or cache (EXCLUDE screens)
+    // Load products from API or cache (filtered to Screen category)
     async function loadProducts() {
         updateOfflineBanner();
         let productsData = null;
@@ -121,7 +124,8 @@
         let fromCache = false;
 
         try {
-            const res = await fetch('/api/products?exclude_category=Screen');
+            // Fetch only screen products
+            const res = await fetch('/api/products?category=Screen');
             if (!res.ok) throw new Error('Network error');
             const data = await res.json();
             productsData = data.products;
@@ -131,7 +135,7 @@
                 localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ products: productsData, summary: summaryData, timestamp: Date.now() }));
             } catch (e) {}
         } catch (err) {
-            console.warn('Offline – using cached accessory products');
+            console.warn('Offline – using cached screen products');
             fromCache = true;
             const cached = localStorage.getItem(PRODUCTS_CACHE_KEY);
             if (cached) {
@@ -145,7 +149,7 @@
         }
 
         currentProducts = productsData || [];
-        document.getElementById('summary').innerHTML = `Total Accessory Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}${fromCache ? ' (cached)' : ''}`;
+        document.getElementById('summary').innerHTML = `Total Screen Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}${fromCache ? ' (cached)' : ''}`;
         applySearch();
     }
 
@@ -163,11 +167,11 @@
         renderProducts(filtered);
     }
 
-    // Render product cards (unchanged except for the empty message)
+    // Render product cards (unchanged)
     function renderProducts(products) {
         const container = document.getElementById('productsList');
         if (!products.length) {
-            container.innerHTML = '<div class="text-center text-gray-400 py-8">No accessory products found.</div>';
+            container.innerHTML = '<div class="text-center text-gray-400 py-8">No screen products found.</div>';
             return;
         }
         container.innerHTML = products.map(p => {
@@ -276,10 +280,10 @@
         loadProducts();
     }
 
-    // ----- Product Deletion (unchanged, but modal title updated) -----
+    // ----- Product Deletion (unchanged) -----
     function confirmDeleteProduct(productId, productName) {
         currentProductIdForDelete = productId;
-        document.getElementById('deleteProductName').innerHTML = `Accessory Product: ${productName}`;
+        document.getElementById('deleteProductName').innerHTML = `Screen Product: ${productName}`;
         document.getElementById('deleteProductModal').classList.remove('hidden');
     }
 
@@ -294,7 +298,7 @@
             const res = await fetch(`/api/products/${currentProductIdForDelete}?type=${deleteType}`, { method: 'DELETE' });
             const data = await res.json();
             if (data.success) {
-                alert(`Accessory product ${deleteType === 'clean' ? 'permanently deleted' : 'deleted (history kept)'}.`);
+                alert(`Screen product ${deleteType === 'clean' ? 'permanently deleted' : 'deleted (history kept)'}.`);
                 closeDeleteProductModal();
                 loadProducts();
             } else {
@@ -303,7 +307,7 @@
         } catch (err) {
             console.warn('Product deletion failed (offline), saving for later:', err);
             savePendingProductDeletion(currentProductIdForDelete, deleteType);
-            alert(`Accessory product deletion saved offline. It will be applied when you reconnect.`);
+            alert(`Screen product deletion saved offline. It will be applied when you reconnect.`);
             closeDeleteProductModal();
             loadProducts();
         }

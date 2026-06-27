@@ -14,9 +14,24 @@
             </span>
             <br>
             <span class="text-xs text-gray-500">Discount is optional (default 0).</span>
+            <br>
+            <span class="text-xs text-gray-500">The "Category" column in the file will be overwritten by your selection below.</span>
         </p>
 
         <form id="importPurchaseForm" enctype="multipart/form-data">
+            <div class="flex flex-wrap items-center gap-4 mb-3">
+                <label class="font-medium text-gray-700">Import to:</label>
+                <div class="flex items-center gap-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="purchase_target" value="Accessory" checked class="form-radio text-teal-500">
+                        <span class="ml-2">Accessories</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="purchase_target" value="Screen" class="form-radio text-teal-500">
+                        <span class="ml-2">Screens</span>
+                    </label>
+                </div>
+            </div>
             <div class="flex items-center gap-4">
                 <input type="file" id="purchaseFileInput" name="file" accept=".xlsx,.xls" required
                        class="border border-gray-300 rounded-md px-3 py-2 focus:ring focus:ring-indigo-200">
@@ -45,10 +60,23 @@
             <br>
             <span class="text-xs text-gray-500">(Columns AMOUNT and TOTAL are ignored.)</span>
             <br>
-            <span class="text-xs text-gray-500">Products must already exist in the system. Stock will be reduced.</span>
+            <span class="text-xs text-gray-500">Products must already exist in the system and match the chosen category.</span>
         </p>
 
         <form id="importSalesForm" enctype="multipart/form-data">
+            <div class="flex flex-wrap items-center gap-4 mb-3">
+                <label class="font-medium text-gray-700">Import to:</label>
+                <div class="flex items-center gap-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="sales_target" value="Accessory" checked class="form-radio text-purple-500">
+                        <span class="ml-2">Accessories</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="sales_target" value="Screen" class="form-radio text-purple-500">
+                        <span class="ml-2">Screens</span>
+                    </label>
+                </div>
+            </div>
             <div class="flex items-center gap-4">
                 <input type="file" id="salesFileInput" name="file" accept=".xlsx,.xls" required
                        class="border border-gray-300 rounded-md px-3 py-2 focus:ring focus:ring-indigo-200">
@@ -69,7 +97,7 @@
 
 <script>
     // ---- Helper function for progress and result ----
-    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint) {
+    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName) {
         const form = document.getElementById(formId);
         const fileInput = document.getElementById(fileInputId);
         const progress = document.getElementById(progressId);
@@ -84,8 +112,13 @@
                 return;
             }
 
+            // Get selected target category
+            const targetRadio = document.querySelector(`input[name="${targetRadioName}"]:checked`);
+            const targetCategory = targetRadio ? targetRadio.value : 'Accessory';
+
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('target_category', targetCategory);
 
             progress.classList.remove('hidden');
             progressBar.style.width = '0%';
@@ -135,7 +168,8 @@
         'purchaseProgress',
         'purchaseProgressBar',
         'purchaseResult',
-        '/api/inventory/import'
+        '/api/inventory/import',
+        'purchase_target'
     );
 
     // Setup sales import
@@ -145,7 +179,8 @@
         'salesProgress',
         'salesProgressBar',
         'salesResult',
-        '/api/sales/import'
+        '/api/sales/import',
+        'sales_target'
     );
 </script>
 {% endblock %}

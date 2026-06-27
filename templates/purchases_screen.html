@@ -2,18 +2,22 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Offline banner (updated) -->
+    <!-- Offline banner (updated for screens) -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached accessory purchases. New purchases will be saved and synced when you reconnect.
+        ⚠️ You are offline – showing cached screen purchases. New purchases will be saved and synced when you reconnect.
     </div>
 
     <!-- ADD / EDIT FORM -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <h2 class="text-xl font-bold mb-4" id="formTitle">➕ Add Purchase</h2>
+        <!-- Screen indicator -->
+        <div class="flex items-center gap-2 mb-4">
+            <h2 class="text-xl font-bold" id="formTitle">➕ Add Screen Purchase</h2>
+            <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
             <div>
                 <label class="block text-sm font-medium text-gray-700">Product Name</label>
-                <input type="text" id="name" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off">
+                <input type="text" id="name" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off" placeholder="Screen name">
                 <div id="nameSuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
             </div>
             <div>
@@ -22,7 +26,8 @@
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700">Category</label>
-                <input type="text" id="category" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off">
+                <input type="text" id="category" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off" value="Screen" readonly>
+                <!-- Hidden suggestions (not needed as category is fixed) -->
                 <div id="categorySuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
             </div>
             <div>
@@ -43,7 +48,7 @@
             </div>
         </div>
         <div class="mt-4 flex gap-3">
-            <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Purchase</button>
+            <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Screen Purchase</button>
             <button id="cancelBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg hidden">Cancel Edit</button>
         </div>
     </div>
@@ -51,8 +56,8 @@
     <!-- SEARCH & FILTER BAR -->
     <div class="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap gap-4 items-end">
         <div class="flex-1 min-w-[200px]">
-            <label class="block text-sm font-medium text-gray-700">Search (name/brand/category)</label>
-            <input type="text" id="searchInput" placeholder="🔍 Type to filter..." class="w-full border border-gray-300 rounded-lg px-3 py-2">
+            <label class="block text-sm font-medium text-gray-700">Search (screen name/brand/category)</label>
+            <input type="text" id="searchInput" placeholder="🔍 Type to filter screens..." class="w-full border border-gray-300 rounded-lg px-3 py-2">
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700">From Date</label>
@@ -92,8 +97,7 @@
     let currentPurchases = [];
     let editMode = false;
     let editBatchId = null;
-    // Separate cache key for accessories
-    const CACHE_KEY = 'cached_purchases_accessories';
+    const CACHE_KEY = 'cached_purchases_screen';  // separate cache
 
     // ---------- Helper functions ----------
     function escapeHtml(str) {
@@ -136,19 +140,20 @@
         }
     }
 
-    // ---------- Load purchases (EXCLUDE screens) ----------
+    // ---------- Load purchases (filtered to screens) ----------
     async function loadPurchases() {
         updateOfflineBanner();
         let purchases = [];
         let fromCache = false;
 
         try {
-            const res = await fetch('/api/purchases?exclude_category=Screen');
+            // Filter by category=Screen
+            const res = await fetch('/api/purchases?category=Screen');
             if (!res.ok) throw new Error('Network error');
             purchases = await res.json();
             cachePurchases(purchases);
         } catch (err) {
-            console.warn('Offline – using cached accessory purchases');
+            console.warn('Offline – using cached screen purchases');
             fromCache = true;
             const cached = loadCachedPurchases();
             if (cached) {
@@ -166,7 +171,7 @@
     function renderList(purchases) {
         const container = document.getElementById('purchasesList');
         if (!purchases.length) {
-            container.innerHTML = '<div class="text-center text-gray-400 py-8">No accessory purchase records found.</div>';
+            container.innerHTML = '<div class="text-center text-gray-400 py-8">No screen purchase records found.</div>';
             updateSummary([]);
             return;
         }
@@ -218,12 +223,12 @@
         };
     }
 
-    // ---------- Submit / Update (unchanged – category can be anything) ----------
+    // ---------- Submit / Update (unchanged – category already set) ----------
     async function submitPurchase() {
         const payload = {
             name: document.getElementById('name').value.trim(),
             brand: document.getElementById('brand').value.trim(),
-            category: document.getElementById('category').value.trim(),
+            category: document.getElementById('category').value.trim() || 'Screen', // default to Screen if empty
             quantity: parseInt(document.getElementById('quantity').value),
             cost_price: parseFloat(document.getElementById('cost_price').value),
             discount: parseFloat(document.getElementById('discount').value) || 0,
@@ -252,23 +257,23 @@
             if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
             const data = await res.json();
             if (data.success) {
-                alert(editMode ? 'Purchase updated!' : 'Purchase added!');
+                alert(editMode ? 'Screen purchase updated!' : 'Screen purchase added!');
                 resetForm();
                 loadPurchases();
             } else {
                 alert('Error: ' + data.error);
             }
         } catch (error) {
-            console.warn('Network error, saving purchase offline:', error);
+            console.warn('Network error, saving screen purchase offline:', error);
             savePendingPurchase(payload, actionType, editMode ? editBatchId : null);
             if (typeof updatePendingBadge === 'function') updatePendingBadge();
-            alert('You are offline. Purchase saved locally and will be synced later.');
+            alert('You are offline. Screen purchase saved locally and will be synced later.');
             resetForm();
             loadPurchases(); // will show cached list
         }
     }
 
-    // ---------- Edit / Reset ----------
+    // ---------- Edit / Reset (unchanged) ----------
     function editPurchase(batchId) {
         const purchase = currentPurchases.find(p => p.batch_id === batchId);
         if (!purchase) return;
@@ -281,38 +286,38 @@
         document.getElementById('selling_price').value = purchase.selling_price;
         editMode = true;
         editBatchId = batchId;
-        document.getElementById('formTitle').innerText = '✏️ Update Purchase';
-        document.getElementById('submitBtn').innerHTML = '✏️ Update Purchase';
+        document.getElementById('formTitle').innerHTML = '✏️ Update Screen Purchase <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>';
+        document.getElementById('submitBtn').innerHTML = '✏️ Update Screen Purchase';
         document.getElementById('cancelBtn').classList.remove('hidden');
     }
 
     function resetForm() {
         document.getElementById('name').value = '';
         document.getElementById('brand').value = '';
-        document.getElementById('category').value = '';
+        document.getElementById('category').value = 'Screen';
         document.getElementById('quantity').value = '';
         document.getElementById('cost_price').value = '';
         document.getElementById('discount').value = '';
         document.getElementById('selling_price').value = '';
         editMode = false;
         editBatchId = null;
-        document.getElementById('formTitle').innerText = '➕ Add Purchase';
-        document.getElementById('submitBtn').innerHTML = '➕ Add Purchase';
+        document.getElementById('formTitle').innerHTML = '➕ Add Screen Purchase <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>';
+        document.getElementById('submitBtn').innerHTML = '➕ Add Screen Purchase';
         document.getElementById('cancelBtn').classList.add('hidden');
     }
 
-    // ---------- Search & Filter (EXCLUDE screens) ----------
+    // ---------- Search & Filter (with offline fallback, category filtered) ----------
     async function filterPurchases() {
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
         if (fromDate && toDate) {
             try {
-                const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}&exclude_category=Screen`);
+                const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}&category=Screen`);
                 if (!res.ok) throw new Error();
                 currentPurchases = await res.json();
                 cachePurchases(currentPurchases);
             } catch (err) {
-                alert('Filter is unavailable offline. Showing cached data.');
+                alert('Filter is unavailable offline. Showing cached screen purchases.');
                 const cached = loadCachedPurchases();
                 if (cached) currentPurchases = cached;
             }
@@ -361,7 +366,7 @@
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Purchases_Accessories_${new Date().toISOString().slice(0,19)}.pdf`;
+            a.download = `Screen_Purchases_${new Date().toISOString().slice(0,19)}.pdf`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -371,7 +376,7 @@
         }
     }
 
-    // ---------- Autocomplete (hide offline, filter to accessories) ----------
+    // ---------- Autocomplete (hide offline, with category filter) ----------
     let nameTimeout, catTimeout;
 
     async function fetchNameSuggestions() {
@@ -382,8 +387,8 @@
         const q = document.getElementById('name').value.trim();
         if (!q) { document.getElementById('nameSuggestions').classList.add('hidden'); return; }
         try {
-            // Exclude screens from suggestions
-            const res = await fetch(`/api/purchases/suggestions/name?q=${encodeURIComponent(q)}&exclude_category=Screen`);
+            // Filter suggestions to screens only
+            const res = await fetch(`/api/purchases/suggestions/name?q=${encodeURIComponent(q)}&category=Screen`);
             if (!res.ok) throw new Error();
             const suggestions = await res.json();
             const box = document.getElementById('nameSuggestions');
@@ -400,40 +405,20 @@
     }
 
     async function fetchCategorySuggestions() {
-        if (!navigator.onLine) {
-            document.getElementById('categorySuggestions').classList.add('hidden');
-            return;
-        }
-        const q = document.getElementById('category').value.trim();
-        if (!q) { document.getElementById('categorySuggestions').classList.add('hidden'); return; }
-        try {
-            // Exclude screens from category suggestions
-            const res = await fetch(`/api/purchases/suggestions/category?q=${encodeURIComponent(q)}&exclude_category=Screen`);
-            if (!res.ok) throw new Error();
-            const suggestions = await res.json();
-            const box = document.getElementById('categorySuggestions');
-            if (!suggestions.length) { box.classList.add('hidden'); return; }
-            box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectCategorySuggestion('${escapeHtml(s.category)}')">${escapeHtml(s.category)}</div>`).join('');
-            box.classList.remove('hidden');
-            const rect = document.getElementById('category').getBoundingClientRect();
-            box.style.top = rect.bottom + window.scrollY + 'px';
-            box.style.left = rect.left + 'px';
-            box.style.width = rect.width + 'px';
-        } catch (err) {
-            document.getElementById('categorySuggestions').classList.add('hidden');
-        }
+        // Category is fixed to "Screen", so we don't need suggestions.
+        // But we keep a dummy to avoid errors.
+        document.getElementById('categorySuggestions').classList.add('hidden');
     }
 
     window.selectNameSuggestion = function(name, brand, category) {
         document.getElementById('name').value = name;
         document.getElementById('brand').value = brand;
-        document.getElementById('category').value = category;
+        document.getElementById('category').value = category || 'Screen';
         document.getElementById('nameSuggestions').classList.add('hidden');
     };
 
     window.selectCategorySuggestion = function(cat) {
-        document.getElementById('category').value = cat;
-        document.getElementById('categorySuggestions').classList.add('hidden');
+        // Not used
     };
 
     // ---------- Event listeners ----------
@@ -443,10 +428,8 @@
     document.getElementById('pdfBtn').addEventListener('click', generatePDF);
     document.getElementById('searchInput').addEventListener('input', applySearch);
     document.getElementById('name').addEventListener('input', () => { clearTimeout(nameTimeout); nameTimeout = setTimeout(fetchNameSuggestions, 300); });
-    document.getElementById('category').addEventListener('input', () => { clearTimeout(catTimeout); catTimeout = setTimeout(fetchCategorySuggestions, 300); });
     document.addEventListener('click', function(e) {
         if (!e.target.closest('#name')) document.getElementById('nameSuggestions').classList.add('hidden');
-        if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
     });
 
     // ---------- On load ----------

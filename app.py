@@ -38,7 +38,7 @@ from services.sales_service import (
     get_batch_by_id,
     create_multi_sale,
     update_product_stock,
-    import_sale_bulk          # <-- NEW
+    import_sale_bulk
 )
 
 # ---------- IMPORT RECEIPT SERVICE ----------
@@ -190,6 +190,11 @@ def dashboard():
 def products():
     return render_template("products.html")
 
+@app.route("/products/screens")   # NEW: screen products page
+@login_required
+def products_screen():
+    return render_template("products_screen.html")
+
 @app.route("/products/add", methods=["POST"])
 @login_required
 def add_product():
@@ -200,10 +205,20 @@ def add_product():
 def sales():
     return render_template("sales.html")
 
+@app.route("/sales/screens")   # NEW: screen sales page
+@login_required
+def sales_screen():
+    return render_template("sales_screen.html")
+
 @app.route("/purchases")
 @login_required
 def purchases():
     return render_template("purchases.html")
+
+@app.route("/purchases/screens")   # NEW: screen purchases page
+@login_required
+def purchases_screen():
+    return render_template("purchases_screen.html")
 
 @app.route("/analytics")
 @login_required
@@ -214,6 +229,11 @@ def analytics():
 @login_required
 def today_sales():
     return render_template("today_sales.html")
+
+@app.route("/today-sales/screens")   # NEW: screen today sales page
+@login_required
+def today_sales_screen():
+    return render_template("today_sales_screen.html")
 
 @app.route("/archive")
 @login_required
@@ -444,7 +464,7 @@ def api_dashboard_sales_history():
         })
     return jsonify(result)
 
-# ===================== PURCHASES API =====================
+# ===================== PURCHASES API (with category filter) =====================
 def serialize_purchase(p):
     p_copy = p.copy()
     if 'date' in p_copy and p_copy['date']:
@@ -457,7 +477,16 @@ def serialize_purchase(p):
 @app.route('/api/purchases', methods=['GET'])
 @login_required
 def api_get_purchases():
-    purchases = get_all_purchases()
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
+    purchases = get_all_purchases()  # returns list of dicts with 'name', 'brand', 'category', etc.
+    
+    # Filter by category
+    if category:
+        purchases = [p for p in purchases if p.get('category') == category]
+    if exclude_category:
+        purchases = [p for p in purchases if p.get('category') != exclude_category]
+    
     return jsonify([serialize_purchase(p) for p in purchases])
 
 @app.route('/api/purchases', methods=['POST'])
@@ -502,32 +531,53 @@ def api_update_purchase(batch_id):
 def api_filter_purchases():
     start = request.args.get('start_date')
     end = request.args.get('end_date')
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
     if not start or not end:
         return jsonify([])
     purchases = get_purchases_by_date_range(start, end)
+    # Filter by category
+    if category:
+        purchases = [p for p in purchases if p.get('category') == category]
+    if exclude_category:
+        purchases = [p for p in purchases if p.get('category') != exclude_category]
     return jsonify([serialize_purchase(p) for p in purchases])
 
 @app.route('/api/purchases/suggestions/name', methods=['GET'])
 @login_required
 def api_suggest_name():
     q = request.args.get('q', '')
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
     if not q:
         return jsonify([])
     suggestions = get_product_suggestions(q)
+    # Filter
+    if category:
+        suggestions = [s for s in suggestions if s.get('category') == category]
+    if exclude_category:
+        suggestions = [s for s in suggestions if s.get('category') != exclude_category]
     return jsonify(suggestions)
 
 @app.route('/api/purchases/suggestions/category', methods=['GET'])
 @login_required
 def api_suggest_category():
     q = request.args.get('q', '')
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
     if not q:
         return jsonify([])
     suggestions = get_category_suggestions(q)
+    if category:
+        suggestions = [s for s in suggestions if s.get('category') == category]
+    if exclude_category:
+        suggestions = [s for s in suggestions if s.get('category') != exclude_category]
     return jsonify(suggestions)
 
 @app.route('/api/purchases/pdf', methods=['POST'])
 @login_required
 def api_purchases_pdf():
+    # Unchanged, but uses already filtered purchases
     data = request.json
     purchases = data.get('purchases', [])
     from_date = data.get('from_date', '')
@@ -599,6 +649,8 @@ def api_purchases_pdf():
 @app.route('/api/products', methods=['GET'])
 @login_required
 def api_get_products():
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
     purchases = get_all_purchases()
     all_products = get_all_products_service()
     id_map = {(prod['name'], prod['brand']): prod['product_id'] for prod in all_products}
@@ -608,10 +660,16 @@ def api_get_products():
         total_batches += 1
         key = (p['name'], p['brand'])
         if key not in products_dict:
+            # Check if product category matches filter
+            prod_category = p.get('category')
+            if category and prod_category != category:
+                continue
+            if exclude_category and prod_category == exclude_category:
+                continue
             products_dict[key] = {
                 'name': p['name'],
                 'brand': p['brand'],
-                'category': p['category'],
+                'category': prod_category,
                 'cost_price': p['cost_price'],
                 'selling_price': p['selling_price'],
                 'discount': p['discount'],
@@ -619,16 +677,19 @@ def api_get_products():
                 'batches': [],
                 'product_id': id_map.get(key)
             }
-        products_dict[key]['stock'] += p['remaining_quantity']
-        products_dict[key]['batches'].append({
-            'batch_id': p['batch_id'],
-            'quantity': p['quantity'],
-            'remaining_quantity': p['remaining_quantity'],
-            'cost_price': p['cost_price'],
-            'selling_price': p['selling_price'],
-            'discount': p['discount'],
-            'date': p['date']
-        })
+        # Add batch to product (even if product already exists, we need to add batch)
+        # If product was skipped, we shouldn't be here, but we need to handle it.
+        if key in products_dict:
+            products_dict[key]['stock'] += p['remaining_quantity']
+            products_dict[key]['batches'].append({
+                'batch_id': p['batch_id'],
+                'quantity': p['quantity'],
+                'remaining_quantity': p['remaining_quantity'],
+                'cost_price': p['cost_price'],
+                'selling_price': p['selling_price'],
+                'discount': p['discount'],
+                'date': p['date']
+            })
     result = list(products_dict.values())
     return jsonify({
         'products': result,
@@ -684,7 +745,14 @@ def api_delete_batch(batch_id):
 @app.route('/api/sales/products', methods=['GET'])
 @login_required
 def api_sales_products():
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
     products = get_products_for_sale()
+    # Filter by category
+    if category:
+        products = [p for p in products if p.get('category') == category]
+    if exclude_category:
+        products = [p for p in products if p.get('category') != exclude_category]
     return jsonify(products)
 
 @app.route('/api/sales/batches/<int:product_id>', methods=['GET'])
@@ -861,13 +929,15 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API =====================
+# ===================== TODAY'S SALES API (with category filter) =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
     period = request.args.get('period', 'daily')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    category = request.args.get('category')
+    exclude_category = request.args.get('exclude_category')
     
     conn = get_connection()
     cursor = conn.cursor()
@@ -899,57 +969,28 @@ def api_today_sales():
         LEFT JOIN purchase_batches ON purchase_batches.id = sales_items.batch_id
     """
     
+    # Build WHERE clause with category filter
+    where_conditions = ["sales.reversed = 0"]
+    if start_date and end_date:
+        where_conditions.append("sales.date::date BETWEEN %s AND %s")
+    if category:
+        where_conditions.append("products.category = %s")
+    if exclude_category:
+        where_conditions.append("products.category != %s")
+    
+    where_clause = " AND ".join(where_conditions)
+    query = f"{select_clause} {from_clause} WHERE {where_clause} ORDER BY sales.date DESC"
+    
+    params = []
+    if start_date and end_date:
+        params.extend([start_date, end_date])
+    if category:
+        params.append(category)
+    if exclude_category:
+        params.append(exclude_category)
+    
     try:
-        if start_date and end_date:
-            cursor.execute(f"""
-                {select_clause}
-                {from_clause}
-                WHERE sales.date::date BETWEEN %s AND %s
-                AND sales.reversed = 0
-                ORDER BY sales.date DESC
-            """, (start_date, end_date))
-        else:
-            if period == 'weekly':
-                cursor.execute(f"""
-                    {select_clause}
-                    {from_clause}
-                    WHERE sales.date >= CURRENT_DATE - INTERVAL '6 days'
-                    AND sales.reversed = 0
-                    ORDER BY sales.date DESC
-                """)
-            elif period == 'monthly':
-                cursor.execute(f"""
-                    {select_clause}
-                    {from_clause}
-                    WHERE EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
-                    AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)
-                    AND sales.reversed = 0
-                    ORDER BY sales.date DESC
-                """)
-            elif period == 'yearly':
-                cursor.execute(f"""
-                    {select_clause}
-                    {from_clause}
-                    WHERE EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)
-                    AND sales.reversed = 0
-                    ORDER BY sales.date DESC
-                """)
-            elif period == 'all':
-                cursor.execute(f"""
-                    {select_clause}
-                    {from_clause}
-                    WHERE sales.reversed = 0
-                    ORDER BY sales.date DESC
-                """)
-            else:
-                cursor.execute(f"""
-                    {select_clause}
-                    {from_clause}
-                    WHERE sales.date::date = CURRENT_DATE
-                    AND sales.reversed = 0
-                    ORDER BY sales.date DESC
-                """)
-        
+        cursor.execute(query, params)
         rows = cursor.fetchall()
         sales_data = []
         for r in rows:
@@ -972,9 +1013,7 @@ def api_today_sales():
                 'payment_method': r[15] if len(r) > 15 else 'cash',
                 'cheque_number': r[16] if len(r) > 16 else None
             })
-        
         return jsonify(sales_data)
-        
     except Exception as e:
         print(f"Error in today_sales API: {str(e)}")
         return jsonify([]), 500
@@ -984,6 +1023,7 @@ def api_today_sales():
 @app.route('/api/today_sales/pdf', methods=['POST'])
 @login_required
 def api_today_sales_pdf():
+    # unchanged, uses already filtered sales_data
     data = request.json
     sales_data = data.get('sales_data', [])
     period_text = data.get('period_text', 'Sales Report')
@@ -1575,24 +1615,27 @@ def api_import_inventory():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
 
+    target_category = request.form.get('target_category', 'Accessory')
+    if target_category not in ['Accessory', 'Screen']:
+        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
+
     try:
         wb = load_workbook(file.stream, data_only=True)
         ws = wb.active
 
-        # --- FIND THE HEADER ROW ---
+        # Find header row (same as before)
         header_row_idx = None
         header_row = None
-        # Scan first 20 rows to locate header
         for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
             if row and any(cell and isinstance(cell, str) and ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
-                header_row_idx = i + 1  # 1-indexed for openpyxl
+                header_row_idx = i + 1
                 header_row = row
                 break
 
         if header_row_idx is None:
             return jsonify({'success': False, 'error': 'Could not find header row (looking for ITEM, QTY, RATE, etc.)'}), 400
 
-        # --- MAP COLUMN POSITIONS ---
+        # Map columns
         header_map = {}
         for idx, cell in enumerate(header_row):
             if cell:
@@ -1604,13 +1647,12 @@ def api_import_inventory():
                 elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                     header_map['cost_price'] = idx
                 elif cell_lower in ['category', 'cat']:
-                    header_map['category'] = idx
+                    header_map['category'] = idx  # we'll ignore this
                 elif cell_lower in ['date', 'purchase date']:
                     header_map['date'] = idx
                 elif cell_lower in ['discount']:
                     header_map['discount'] = idx
 
-        # Verify required fields
         required = ['name', 'quantity', 'cost_price']
         missing = [f for f in required if f not in header_map]
         if missing:
@@ -1619,7 +1661,6 @@ def api_import_inventory():
                 'error': f'Missing columns: {", ".join(missing)}. Found: {list(header_map.keys())}'
             }), 400
 
-        # --- PROCESS ROWS (skip header row) ---
         imported_count = 0
         error_rows = []
         conn = get_connection()
@@ -1627,10 +1668,9 @@ def api_import_inventory():
 
         for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
             try:
-                # Skip rows with missing essential data
                 name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
                 if not name:
-                    continue  # skip empty product names
+                    continue
 
                 quantity_str = row[header_map['quantity']]
                 quantity = float(quantity_str) if quantity_str else 0
@@ -1644,39 +1684,37 @@ def api_import_inventory():
                     error_rows.append(f"Row {row_idx}: Cost price cannot be negative")
                     continue
 
-                # Optional fields
-                category = str(row[header_map.get('category')]).strip() if header_map.get('category') is not None and row[header_map['category']] else ''
+                # Override category with target
+                category = target_category
+
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] else 0.0
+                selling_price = cost_price * 1.2  # default markup
 
-                # Selling price: default = cost price * 1.2 (20% markup)
-                selling_price = cost_price * 1.2  # you can adjust this
-
-                # If date column exists, try to parse it
+                # Date handling
                 purchase_date = None
                 if 'date' in header_map and row[header_map['date']]:
                     try:
-                        # Try to parse as datetime; if it's a numeric Excel date, convert
                         if isinstance(row[header_map['date']], (int, float)):
                             from datetime import datetime, timedelta
                             purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
                         else:
                             purchase_date = datetime.strptime(str(row[header_map['date']]), '%Y-%m-%d')
                     except:
-                        purchase_date = datetime.now()  # fallback
+                        purchase_date = datetime.now()
                 else:
                     purchase_date = datetime.now()
 
-                # Use the existing add_purchase function
+                # Use add_purchase
                 from services.purchase_service import add_purchase
                 batch_id = add_purchase(
                     name=name,
-                    brand='',   # no brand column, leave empty
+                    brand='',
                     category=category,
                     quantity=int(quantity),
                     cost_price=cost_price,
                     discount=discount,
                     selling_price=selling_price,
-                    purchase_date=purchase_date  # this must be supported
+                    purchase_date=purchase_date
                 )
                 imported_count += 1
 
@@ -1694,7 +1732,6 @@ def api_import_inventory():
 
     except Exception as e:
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
-
 # ===================== SALES IMPORT (EXCEL) – NEW =====================
 @app.route('/api/sales/import', methods=['POST'])
 @admin_required
@@ -1709,11 +1746,15 @@ def api_import_sales():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
 
+    target_category = request.form.get('target_category', 'Accessory')
+    if target_category not in ['Accessory', 'Screen']:
+        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
+
     try:
         wb = load_workbook(file.stream, data_only=True)
         ws = wb.active
 
-        # -------- FIND HEADER ROW --------
+        # Find header
         header_row_idx = None
         header_row = None
         for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
@@ -1726,7 +1767,7 @@ def api_import_sales():
         if header_row_idx is None:
             return jsonify({'success': False, 'error': 'Could not find header row (looking for ITEM, QTY, RATE)'}), 400
 
-        # -------- MAP COLUMNS --------
+        # Map columns
         header_map = {}
         for idx, cell in enumerate(header_row):
             if cell:
@@ -1752,12 +1793,12 @@ def api_import_sales():
                 'error': f'Missing columns: {", ".join(missing)}. Found: {list(header_map.keys())}'
             }), 400
 
-        # -------- PROCESS ROWS --------
         imported_count = 0
         error_rows = []
+        conn = get_connection()
+        cursor = conn.cursor()
 
         for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
-            # Skip completely empty rows
             if not any(row):
                 continue
 
@@ -1778,6 +1819,17 @@ def api_import_sales():
                     continue
 
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
+
+                # Check product exists and belongs to target category
+                cursor.execute("SELECT id, category FROM products WHERE name = %s", (item,))
+                product = cursor.fetchone()
+                if not product:
+                    error_rows.append(f"Row {row_idx}: Product '{item}' not found")
+                    continue
+                product_id, product_category = product
+                if product_category != target_category:
+                    error_rows.append(f"Row {row_idx}: Product '{item}' exists but category '{product_category}' != '{target_category}'")
+                    continue
 
                 # Parse date
                 sale_date = None
@@ -1801,7 +1853,7 @@ def api_import_sales():
                 else:
                     sale_date = datetime.now()
 
-                # Call import_sale_bulk
+                # Call import_sale_bulk (this should handle stock reduction)
                 sale_id = import_sale_bulk(
                     product_name=item,
                     quantity=int(qty),
@@ -1814,7 +1866,9 @@ def api_import_sales():
 
             except Exception as e:
                 error_rows.append(f"Row {row_idx}: {str(e)}")
+                continue
 
+        conn.close()
         return jsonify({
             'success': True,
             'imported': imported_count,
@@ -1823,7 +1877,6 @@ def api_import_sales():
 
     except Exception as e:
         return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
-
 
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":

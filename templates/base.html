@@ -11,10 +11,45 @@
     <!-- Your custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        /* Custom scrollbar to match desktop feel */
+        /* Custom scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 8px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+
+        /* Sidebar link hover & active states */
+        .nav-link {
+            transition: all 0.2s ease;
+        }
+        .nav-link:hover {
+            background-color: #334155;
+        }
+        .nav-link.active {
+            background-color: #00CFCF;
+            color: #0f172a;
+        }
+
+        /* Dropdown toggle */
+        .dropdown-toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+        .dropdown-toggle i.fa-chevron-down {
+            transition: transform 0.2s ease;
+        }
+        .dropdown-toggle.open i.fa-chevron-down {
+            transform: rotate(180deg);
+        }
+        .dropdown-menu {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .dropdown-menu.open {
+            max-height: 500px; /* enough for all items */
+        }
+        .dropdown-menu a {
+            padding-left: 2.5rem;
+        }
     </style>
 
     <!-- ===== SERVICE WORKER REGISTRATION ===== -->
@@ -49,57 +84,90 @@
         {% endif %}
 
         <!-- Navigation -->
-        <nav class="flex-1 px-2 space-y-1">
-            <a href="/" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+        <nav class="flex-1 px-2 space-y-1 overflow-y-auto">
+
+            <!-- DASHBOARD -->
+            <a href="/" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-tachometer-alt w-5"></i> Dashboard
             </a>
-            <a href="/sales" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-cash-register w-5"></i> Sales
+
+            <!-- SALES (Accessories) -->
+            <a href="/sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-cash-register w-5"></i> Sales (Accessories)
             </a>
 
-            <!-- Admin-only links -->
-            {% if current_user and current_user.role == 'admin' %}
-            <a href="/products" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-boxes w-5"></i> Products
+            <!-- PRODUCTS (Accessories) -->
+            <a href="/products" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-boxes w-5"></i> Products (Accessories)
             </a>
-            <a href="/purchases" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-shopping-cart w-5"></i> Purchases
+
+            <!-- TODAY'S SALES (Accessories) -->
+            <a href="/today-sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-chart-line w-5"></i> Today's Sales (Accessories)
             </a>
-            <a href="/today-sales" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-chart-line w-5"></i> Today's Sales
-            </a>
-            <a href="/analytics" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+
+            <!-- ANALYTICS -->
+            <a href="/analytics" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-chart-pie w-5"></i> Analytics
             </a>
-            <a href="/archive" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+
+            <!-- ARCHIVE -->
+            <a href="/archive" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-archive w-5"></i> Archive
             </a>
-            <!-- NEW: Inventory Import (admin only) -->
-            <a href="/inventory/import" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+
+            <!-- ===== SCREENS DROPDOWN (Public) ===== -->
+            <div class="mt-2">
+                <div class="dropdown-toggle flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm" onclick="toggleDropdown(this)">
+                    <span class="flex items-center gap-3">
+                        <i class="fas fa-mobile-alt w-5"></i> Screens
+                    </span>
+                    <i class="fas fa-chevron-down text-xs"></i>
+                </div>
+                <div class="dropdown-menu space-y-1 pl-2">
+                    <a href="/sales/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                        <i class="fas fa-cash-register w-5"></i> Sales (Screens)
+                    </a>
+                    <a href="/products/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                        <i class="fas fa-boxes w-5"></i> Products (Screens)
+                    </a>
+                    <a href="/today-sales/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                        <i class="fas fa-chart-line w-5"></i> Today's Sales (Screens)
+                    </a>
+                </div>
+            </div>
+
+            <!-- ===== ADMIN-ONLY LINKS ===== -->
+            {% if current_user and current_user.role == 'admin' %}
+            <div class="border-t border-gray-700 my-2"></div>
+            <div class="text-xs text-gray-500 uppercase px-3 py-1">Admin</div>
+            <!-- Purchases (Accessories) -->
+            <a href="/purchases" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-shopping-cart w-5"></i> Purchases (Accessories)
+            </a>
+            <!-- Purchases (Screens) -->
+            <a href="/purchases/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-shopping-cart w-5"></i> Purchases (Screens)
+            </a>
+            <!-- Import Data -->
+            <a href="/inventory/import" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-file-import w-5"></i> Import Data
             </a>
-            <!-- NEW: Users management (admin only) -->
-            <a href="/admin/users" class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <!-- Users -->
+            <a href="/admin/users" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-users w-5"></i> Users
             </a>
             {% endif %}
 
-            <!-- Refresh & Sync Buttons -->
-            <div class="mt-4 space-y-1">
-                <button onclick="refreshPageData()" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                    <i class="fas fa-sync-alt w-5"></i> Refresh
+            <!-- ===== PENDING BADGE & SYNC BUTTON ===== -->
+            {% if current_user %}
+            <div class="mt-4 flex items-center gap-2 px-3 py-1">
+                <span id="pending-badge" class="text-xs text-yellow-300 bg-gray-700 px-2 py-0.5 rounded-full" style="display:none;"></span>
+                <button onclick="syncPendingSales()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition">
+                    <i class="fas fa-cloud-upload-alt mr-1"></i> Sync Offline
                 </button>
-
-                <!-- Pending badge & Sync button (visible to all logged-in users) -->
-                {% if current_user %}
-                <div class="flex items-center gap-2 px-3 py-1">
-                    <span id="pending-badge" class="text-xs text-yellow-300 bg-gray-700 px-2 py-0.5 rounded-full" style="display:none;"></span>
-                    <button onclick="syncPendingSales()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition">
-                        <i class="fas fa-cloud-upload-alt mr-1"></i> Sync Offline
-                    </button>
-                </div>
-                {% endif %}
             </div>
+            {% endif %}
         </nav>
 
         <!-- Logout Button -->
@@ -119,7 +187,7 @@
             {% block content %}{% endblock %}
         </div>
 
-        <!-- Footer (matching desktop) -->
+        <!-- Footer -->
         <footer class="bg-[#1E293B] text-gray-300 text-center py-3 text-xs">
             TOMFRIMP MOBICOM SOLUTIONS  | HOME OF COMPUTER, PHONES, AND ACCESSORIES<br>
             Developed by HUMMNINGBIRD DIGITAL SOLUTIONS © 2026 - All Rights Reserved
@@ -131,6 +199,14 @@
 <script src="{{ url_for('static', filename='js/offline.js') }}"></script>
 
 <script>
+    // Dropdown toggle function
+    function toggleDropdown(element) {
+        const parent = element.closest('.dropdown-toggle');
+        const menu = parent.nextElementSibling;
+        parent.classList.toggle('open');
+        menu.classList.toggle('open');
+    }
+
     // Helper: refresh the current page's data
     function refreshPageData() {
         window.dispatchEvent(new CustomEvent('refresh-request'));
@@ -151,6 +227,17 @@
             alert('Logout failed');
         }
     }
+
+    // Auto-close dropdown if clicked outside (optional)
+    document.addEventListener('click', function(e) {
+        const dropdown = e.target.closest('.dropdown-toggle');
+        if (!dropdown) {
+            document.querySelectorAll('.dropdown-toggle.open').forEach(el => {
+                el.classList.remove('open');
+                el.nextElementSibling.classList.remove('open');
+            });
+        }
+    });
 </script>
 </body>
 </html>

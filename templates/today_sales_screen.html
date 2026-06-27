@@ -2,22 +2,25 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Offline banner -->
+    <!-- Offline banner (updated for screens) -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached sales data (accessories). Data will refresh when you reconnect.
+        ⚠️ You are offline – showing cached screen sales data. Data will refresh when you reconnect.
     </div>
 
-    <!-- Header -->
+    <!-- Header with screen indicator -->
     <div class="flex justify-between items-center mb-6">
-        <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
+        <div class="flex items-center gap-2">
+            <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
+            <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
+        </div>
         <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
     </div>
 
     <!-- Search Bar -->
     <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search product or brand..." 
+        <input type="text" id="searchInput" placeholder="🔍 Search screen product or brand..." 
                class="w-full border border-gray-300 rounded-lg px-4 py-2">
-        <p class="text-xs text-gray-500 mt-1">🔎 Type to filter sales records by product or brand</p>
+        <p class="text-xs text-gray-500 mt-1">🔎 Type to filter screen sales records by product or brand</p>
     </div>
 
     <!-- Period Filter Buttons -->
@@ -47,7 +50,7 @@
 
     <!-- Sales List (cards) -->
     <div id="salesList" class="space-y-4">
-        <div class="text-center text-gray-400 py-8">Loading sales data...</div>
+        <div class="text-center text-gray-400 py-8">Loading screen sales data...</div>
     </div>
 
     <!-- Summary Bar (fixed at bottom of scroll) -->
@@ -79,7 +82,7 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        console.log("DOM fully loaded - initializing today sales page (accessories only)");
+        console.log("DOM fully loaded - initializing screen today sales page");
         
         let currentSalesData = [];
         let currentPeriod = 'daily';
@@ -102,7 +105,7 @@
         window.addEventListener('online', updateOfflineBanner);
         window.addEventListener('offline', updateOfflineBanner);
 
-        // ---------- Caching helpers (separate cache for accessories) ----------
+        // ---------- Caching helpers (distinct cache key for screens) ----------
         function cacheData(key, data) {
             try {
                 localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
@@ -120,11 +123,11 @@
         }
 
         function getCacheKey() {
-            // Distinct key for accessories (exclude screens)
+            const category = 'Screen';
             if (currentStartDate && currentEndDate) {
-                return `sales_data_accessories_custom_${currentStartDate}_${currentEndDate}`;
+                return `sales_data_screen_custom_${currentStartDate}_${currentEndDate}`;
             } else {
-                return `sales_data_accessories_period_${currentPeriod}`;
+                return `sales_data_screen_period_${currentPeriod}`;
             }
         }
 
@@ -155,24 +158,24 @@
             }
         }
 
-        // ---------- Fetch sales data with offline fallback (EXCLUDE SCREENS) ----------
+        // ---------- Fetch sales data with offline fallback (filtered to screens) ----------
         async function loadSalesData() {
             updateOfflineBanner();
-            console.log("Loading sales data (accessories only)...");
+            console.log("Loading screen sales data...");
             
             let url = '';
             if (currentStartDate && currentEndDate) {
-                url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}&exclude_category=Screen`;
+                url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}&category=Screen`;
             } else if (currentPeriod === 'all') {
-                url = '/api/today_sales?period=all&exclude_category=Screen';
+                url = '/api/today_sales?period=all&category=Screen';
             } else if (currentPeriod === 'weekly') {
-                url = '/api/today_sales?period=weekly&exclude_category=Screen';
+                url = '/api/today_sales?period=weekly&category=Screen';
             } else if (currentPeriod === 'monthly') {
-                url = '/api/today_sales?period=monthly&exclude_category=Screen';
+                url = '/api/today_sales?period=monthly&category=Screen';
             } else if (currentPeriod === 'yearly') {
-                url = '/api/today_sales?period=yearly&exclude_category=Screen';
+                url = '/api/today_sales?period=yearly&category=Screen';
             } else {
-                url = '/api/today_sales?period=daily&exclude_category=Screen';
+                url = '/api/today_sales?period=daily&category=Screen';
             }
             
             console.log("Fetching from URL:", url);
@@ -189,7 +192,7 @@
                 cacheData(getCacheKey(), data);
                 console.log("Received data:", data.length, "records");
             } catch (error) {
-                console.warn("Offline – using cached accessory sales data");
+                console.warn("Offline – using cached screen sales data");
                 fromCache = true;
                 const cached = getCachedData(getCacheKey());
                 if (cached) {
@@ -311,7 +314,7 @@
         function renderSales(sales) {
             const container = document.getElementById('salesList');
             if (!sales || sales.length === 0) {
-                container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded for this period.</div>';
+                container.innerHTML = '<div class="text-center text-gray-400 py-8">No screen sales recorded for this period.</div>';
                 updateSummary([]);
                 return;
             }
@@ -427,7 +430,7 @@
                 <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
         }
 
-        // ---------- PDF export (offline-aware) ----------
+        // ---------- PDF export (offline-aware, updated filename) ----------
         async function exportPDF() {
             if (!navigator.onLine) {
                 alert('PDF export requires internet. Please connect and try again.');
@@ -456,7 +459,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sales_data: currentSalesData,
-                        period_text: periodText + ' (Accessories)'
+                        period_text: periodText + ' (Screens)'
                     })
                 });
                 if (response.ok) {
@@ -464,7 +467,7 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `SalesReport_Accessories_${new Date().toISOString().slice(0,19)}.pdf`;
+                    a.download = `Screen_SalesReport_${new Date().toISOString().slice(0,19)}.pdf`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
