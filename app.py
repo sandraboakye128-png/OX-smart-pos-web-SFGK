@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 from functools import wraps
 from services.product_service import get_all_products as get_all_products_service
 import os
+import uuid
+import threading
 
 # ---------- IMPORT PURCHASE SERVICES ----------
 from services.purchase_service import (
@@ -80,6 +82,18 @@ LICENSE_FILE = os.path.join(BASE_DIR, "license.json")
 TRIAL_DAYS = 30
 MASTER_KEY = "OXSMART-1234-KEY"
 
+# ===================== IMPORT JOB TRACKING =====================
+import_jobs = {}
+
+def update_job_progress(job_id, **kwargs):
+    """Update the job status dictionary with given key-values."""
+    job = import_jobs.get(job_id, {})
+    for key, value in kwargs.items():
+        job[key] = value
+    job['updated_at'] = datetime.now().isoformat()
+    import_jobs[job_id] = job
+
+# ---------- (license functions remain unchanged) ----------
 def load_license_data():
     try:
         if os.path.exists(LICENSE_FILE):
@@ -190,7 +204,7 @@ def dashboard():
 def products():
     return render_template("products.html")
 
-@app.route("/products/screens")   # NEW: screen products page
+@app.route("/products/screens")
 @login_required
 def products_screen():
     return render_template("products_screen.html")
@@ -205,7 +219,7 @@ def add_product():
 def sales():
     return render_template("sales.html")
 
-@app.route("/sales/screens")   # NEW: screen sales page
+@app.route("/sales/screens")
 @login_required
 def sales_screen():
     return render_template("sales_screen.html")
@@ -215,7 +229,7 @@ def sales_screen():
 def purchases():
     return render_template("purchases.html")
 
-@app.route("/purchases/screens")   # NEW: screen purchases page
+@app.route("/purchases/screens")
 @login_required
 def purchases_screen():
     return render_template("purchases_screen.html")
@@ -230,7 +244,7 @@ def analytics():
 def today_sales():
     return render_template("today_sales.html")
 
-@app.route("/today-sales/screens")   # NEW: screen today sales page
+@app.route("/today-sales/screens")
 @login_required
 def today_sales_screen():
     return render_template("today_sales_screen.html")
@@ -479,9 +493,8 @@ def serialize_purchase(p):
 def api_get_purchases():
     category = request.args.get('category')
     exclude_category = request.args.get('exclude_category')
-    purchases = get_all_purchases()  # returns list of dicts with 'name', 'brand', 'category', etc.
+    purchases = get_all_purchases()
     
-    # Filter by category
     if category:
         purchases = [p for p in purchases if p.get('category') == category]
     if exclude_category:
@@ -536,7 +549,6 @@ def api_filter_purchases():
     if not start or not end:
         return jsonify([])
     purchases = get_purchases_by_date_range(start, end)
-    # Filter by category
     if category:
         purchases = [p for p in purchases if p.get('category') == category]
     if exclude_category:
@@ -552,7 +564,6 @@ def api_suggest_name():
     if not q:
         return jsonify([])
     suggestions = get_product_suggestions(q)
-    # Filter
     if category:
         suggestions = [s for s in suggestions if s.get('category') == category]
     if exclude_category:
@@ -577,7 +588,6 @@ def api_suggest_category():
 @app.route('/api/purchases/pdf', methods=['POST'])
 @login_required
 def api_purchases_pdf():
-    # Unchanged, but uses already filtered purchases
     data = request.json
     purchases = data.get('purchases', [])
     from_date = data.get('from_date', '')
@@ -660,7 +670,6 @@ def api_get_products():
         total_batches += 1
         key = (p['name'], p['brand'])
         if key not in products_dict:
-            # Check if product category matches filter
             prod_category = p.get('category')
             if category and prod_category != category:
                 continue
@@ -677,8 +686,6 @@ def api_get_products():
                 'batches': [],
                 'product_id': id_map.get(key)
             }
-        # Add batch to product (even if product already exists, we need to add batch)
-        # If product was skipped, we shouldn't be here, but we need to handle it.
         if key in products_dict:
             products_dict[key]['stock'] += p['remaining_quantity']
             products_dict[key]['batches'].append({
@@ -748,7 +755,6 @@ def api_sales_products():
     category = request.args.get('category')
     exclude_category = request.args.get('exclude_category')
     products = get_products_for_sale()
-    # Filter by category
     if category:
         products = [p for p in products if p.get('category') == category]
     if exclude_category:
@@ -969,7 +975,6 @@ def api_today_sales():
         LEFT JOIN purchase_batches ON purchase_batches.id = sales_items.batch_id
     """
     
-    # Build WHERE clause with category filter
     where_conditions = ["sales.reversed = 0"]
     if start_date and end_date:
         where_conditions.append("sales.date::date BETWEEN %s AND %s")
@@ -1023,7 +1028,6 @@ def api_today_sales():
 @app.route('/api/today_sales/pdf', methods=['POST'])
 @login_required
 def api_today_sales_pdf():
-    # unchanged, uses already filtered sales_data
     data = request.json
     sales_data = data.get('sales_data', [])
     period_text = data.get('period_text', 'Sales Report')
@@ -1164,7 +1168,7 @@ def api_analytics_summary():
             LEFT JOIN sales_items si ON s.id = si.sale_id
             WHERE s.reversed = 0
         """)
-    else:  # daily
+    else:
         cursor.execute("""
             SELECT 
                 COALESCE(SUM(s.total), 0),
@@ -1259,7 +1263,7 @@ def api_analytics_trend():
             ORDER BY label ASC
             LIMIT 24
         """)
-    else:  # daily
+    else:
         cursor.execute("""
             SELECT 
                 s.date::date as label,
@@ -1418,7 +1422,7 @@ def api_analytics_top_products():
             ORDER BY qty DESC
             LIMIT %s
         """, (limit,))
-    else:  # daily
+    else:
         cursor.execute("""
             SELECT 
                 p.name, 
@@ -1587,7 +1591,7 @@ def api_archive_batches():
     batches = [b for b in purchases if b['name'] == name and b['brand'] == brand]
     return jsonify(batches)
 
-# ===================== INVENTORY IMPORT (EXCEL) =====================
+# ===================== IMPORT ENDPOINTS (with progress) =====================
 import openpyxl
 from openpyxl import load_workbook
 from werkzeug.utils import secure_filename
@@ -1602,28 +1606,13 @@ def allowed_file(filename):
 def import_inventory_page():
     return render_template('import_inventory.html')
 
-@app.route('/api/inventory/import', methods=['POST'])
-@admin_required
-def api_import_inventory():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'}), 400
-
-    if not allowed_file(file.filename):
-        return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
-
-    target_category = request.form.get('target_category', 'Accessory')
-    if target_category not in ['Accessory', 'Screen']:
-        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
-
+# ----- INVENTORY IMPORT (background thread) -----
+def run_inventory_import(job_id, file, target_category):
     try:
         wb = load_workbook(file.stream, data_only=True)
         ws = wb.active
 
-        # Find header row (same as before)
+        # Find header row
         header_row_idx = None
         header_row = None
         for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
@@ -1633,9 +1622,9 @@ def api_import_inventory():
                 break
 
         if header_row_idx is None:
-            return jsonify({'success': False, 'error': 'Could not find header row'}), 400
+            update_job_progress(job_id, status='error', errors=['Could not find header row'])
+            return
 
-        # Map columns
         header_map = {}
         for idx, cell in enumerate(header_row):
             if cell:
@@ -1654,44 +1643,29 @@ def api_import_inventory():
         required = ['name', 'quantity', 'cost_price']
         missing = [f for f in required if f not in header_map]
         if missing:
-            return jsonify({'success': False, 'error': f'Missing columns: {", ".join(missing)}'}), 400
+            update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
+            return
 
-        # Use a single connection for the entire import
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        imported_count = 0
-        error_rows = []
-        BATCH_SIZE = 2000
         rows_to_process = []
-
-        # Collect all valid rows first
+        error_rows = []
         for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
-            # Skip completely empty rows
             if not any(row):
                 continue
-
             try:
                 name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
                 if not name:
                     continue
-
-                quantity_str = row[header_map['quantity']]
-                quantity = float(quantity_str) if quantity_str else 0
+                quantity = float(row[header_map['quantity']]) if row[header_map['quantity']] else 0
                 if quantity <= 0:
                     error_rows.append(f"Row {row_idx}: Quantity must be positive")
                     continue
-
-                cost_price_str = row[header_map['cost_price']]
-                cost_price = float(cost_price_str) if cost_price_str else 0.0
+                cost_price = float(row[header_map['cost_price']]) if row[header_map['cost_price']] else 0.0
                 if cost_price < 0:
                     error_rows.append(f"Row {row_idx}: Cost price cannot be negative")
                     continue
-
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] else 0.0
-                selling_price = cost_price * 1.2  # default markup
+                selling_price = cost_price * 1.2
 
-                # Parse date
                 purchase_date = None
                 if 'date' in header_map and row[header_map['date']] is not None:
                     try:
@@ -1723,16 +1697,25 @@ def api_import_inventory():
                     'category': target_category,
                     'purchase_date': purchase_date
                 })
-
             except Exception as e:
                 error_rows.append(f"Row {row_idx}: {str(e)}")
 
-        # Process in batches
-        for i in range(0, len(rows_to_process), BATCH_SIZE):
+        total_rows = len(rows_to_process)
+        update_job_progress(job_id, total=total_rows, processed=0, status='processing', errors=error_rows)
+
+        if total_rows == 0:
+            update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
+            return
+
+        conn = get_connection()
+        cursor = conn.cursor()
+        BATCH_SIZE = 2000
+        imported_count = 0
+
+        for i in range(0, total_rows, BATCH_SIZE):
             batch = rows_to_process[i:i+BATCH_SIZE]
             try:
                 for item in batch:
-                    # Insert product if it doesn't exist
                     cursor.execute(
                         "SELECT id FROM products WHERE name = %s AND brand = '' AND category = %s",
                         (item['name'], item['category'])
@@ -1747,14 +1730,12 @@ def api_import_inventory():
                         )
                         product_id = cursor.fetchone()[0]
 
-                    # Insert purchase batch
                     cursor.execute("""
                         INSERT INTO purchase_batches
                         (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """, (product_id, item['quantity'], item['quantity'], item['cost_price'], item['selling_price'], item['discount'], item['purchase_date']))
 
-                    # Update product stock
                     cursor.execute("""
                         UPDATE products
                         SET stock = stock + %s
@@ -1762,30 +1743,24 @@ def api_import_inventory():
                     """, (item['quantity'], product_id))
 
                     imported_count += 1
+                    update_job_progress(job_id, processed=imported_count)
 
-                # Commit batch
                 conn.commit()
-
+                update_job_progress(job_id, processed=imported_count)
             except Exception as e:
                 conn.rollback()
-                # Log error for this batch
                 error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-                # Continue with next batch
+                update_job_progress(job_id, errors=error_rows)
 
         conn.close()
-
-        return jsonify({
-            'success': True,
-            'imported': imported_count,
-            'errors': error_rows
-        })
+        update_job_progress(job_id, status='done', result=f'Imported {imported_count} records', errors=error_rows)
 
     except Exception as e:
-        return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
-# ===================== SALES IMPORT (EXCEL) – NEW =====================
-@app.route('/api/sales/import', methods=['POST'])
+        update_job_progress(job_id, status='error', errors=[str(e)])
+
+@app.route('/api/inventory/import', methods=['POST'])
 @admin_required
-def api_import_sales():
+def api_import_inventory():
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file uploaded'}), 400
 
@@ -1794,12 +1769,33 @@ def api_import_sales():
         return jsonify({'success': False, 'error': 'No file selected'}), 400
 
     if not allowed_file(file.filename):
-        return jsonify({'success': False, 'error': 'File type not allowed. Use .xlsx or .xls'}), 400
+        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
 
     target_category = request.form.get('target_category', 'Accessory')
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
+    job_id = str(uuid.uuid4())
+    import_jobs[job_id] = {
+        'status': 'pending',
+        'total': 0,
+        'processed': 0,
+        'errors': [],
+        'result': None,
+        'updated_at': datetime.now().isoformat()
+    }
+
+    thread = threading.Thread(
+        target=run_inventory_import,
+        args=(job_id, file, target_category)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id})
+
+# ----- SALES IMPORT (background thread) -----
+def run_sales_import(job_id, file, target_category):
     try:
         wb = load_workbook(file.stream, data_only=True)
         ws = wb.active
@@ -1815,9 +1811,9 @@ def api_import_sales():
                 break
 
         if header_row_idx is None:
-            return jsonify({'success': False, 'error': 'Could not find header row (looking for ITEM, QTY, RATE)'}), 400
+            update_job_progress(job_id, status='error', errors=['Could not find header row'])
+            return
 
-        # Map columns
         header_map = {}
         for idx, cell in enumerate(header_row):
             if cell:
@@ -1836,25 +1832,14 @@ def api_import_sales():
         required = ['item', 'qty', 'rate']
         missing = [f for f in required if f not in header_map]
         if missing:
-            return jsonify({
-                'success': False,
-                'error': f'Missing columns: {", ".join(missing)}. Found: {list(header_map.keys())}'
-            }), 400
+            update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
+            return
 
-        # Use a single connection for the whole import
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        imported_count = 0
-        error_rows = []
-        BATCH_SIZE = 2000
         rows_to_process = []
-
-        # Collect valid rows first
+        error_rows = []
         for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
             if not any(row):
                 continue
-
             try:
                 item = str(row[header_map['item']]).strip() if row[header_map['item']] else ''
                 if not item:
@@ -1873,7 +1858,6 @@ def api_import_sales():
 
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
 
-                # Parse date
                 sale_date = None
                 if 'date' in header_map and row[header_map['date']] is not None:
                     try:
@@ -1903,16 +1887,26 @@ def api_import_sales():
                     'discount': discount,
                     'sale_date': sale_date
                 })
-
             except Exception as e:
                 error_rows.append(f"Row {row_idx}: {str(e)}")
 
-        # Process in batches
-        for i in range(0, len(rows_to_process), BATCH_SIZE):
+        total_rows = len(rows_to_process)
+        update_job_progress(job_id, total=total_rows, processed=0, status='processing', errors=error_rows)
+
+        if total_rows == 0:
+            update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
+            return
+
+        conn = get_connection()
+        cursor = conn.cursor()
+        BATCH_SIZE = 2000
+        imported_count = 0
+
+        for i in range(0, total_rows, BATCH_SIZE):
             batch = rows_to_process[i:i+BATCH_SIZE]
             try:
                 for entry in batch:
-                    # Find product (must exist and match category)
+                    # Find product
                     cursor.execute(
                         "SELECT id, category FROM products WHERE name = %s",
                         (entry['item'],)
@@ -1926,7 +1920,6 @@ def api_import_sales():
                         error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
                         continue
 
-                    # Create sale record
                     subtotal = entry['qty'] * entry['rate']
                     total = subtotal - entry['discount']
                     cursor.execute("""
@@ -1936,7 +1929,6 @@ def api_import_sales():
                     """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash'))
                     sale_id = cursor.fetchone()[0]
 
-                    # Find a batch for this product (oldest available) to reduce stock
                     cursor.execute("""
                         SELECT id, cost_price, selling_price
                         FROM purchase_batches
@@ -1947,31 +1939,25 @@ def api_import_sales():
                     batch_info = cursor.fetchone()
                     if not batch_info:
                         error_rows.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
-                        # Rollback sale?
                         cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
                         continue
 
                     batch_id, cost_price, selling_price = batch_info
-                    # Use the rate from the import as selling price, or fallback to batch selling_price?
-                    # We'll use the rate provided (override)
                     selling_price = entry['rate']
                     item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
 
-                    # Insert sales item
                     cursor.execute("""
                         INSERT INTO sales_items
                         (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit, subtotal)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit, subtotal))
 
-                    # Reduce batch stock
                     cursor.execute("""
                         UPDATE purchase_batches
                         SET remaining_quantity = remaining_quantity - %s
                         WHERE id = %s
                     """, (entry['qty'], batch_id))
 
-                    # Update product stock
                     cursor.execute("""
                         UPDATE products
                         SET stock = stock - %s
@@ -1979,24 +1965,73 @@ def api_import_sales():
                     """, (entry['qty'], product_id))
 
                     imported_count += 1
+                    update_job_progress(job_id, processed=imported_count)
 
-                # Commit batch
                 conn.commit()
-
+                update_job_progress(job_id, processed=imported_count)
             except Exception as e:
                 conn.rollback()
                 error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-                # Continue with next batch
+                update_job_progress(job_id, errors=error_rows)
 
         conn.close()
-        return jsonify({
-            'success': True,
-            'imported': imported_count,
-            'errors': error_rows
-        })
+        update_job_progress(job_id, status='done', result=f'Imported {imported_count} sales records', errors=error_rows)
 
     except Exception as e:
-        return jsonify({'success': False, 'error': f'Server error: {str(e)}'}), 500
+        update_job_progress(job_id, status='error', errors=[str(e)])
+
+@app.route('/api/sales/import', methods=['POST'])
+@admin_required
+def api_import_sales():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
+
+    target_category = request.form.get('target_category', 'Accessory')
+    if target_category not in ['Accessory', 'Screen']:
+        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
+
+    job_id = str(uuid.uuid4())
+    import_jobs[job_id] = {
+        'status': 'pending',
+        'total': 0,
+        'processed': 0,
+        'errors': [],
+        'result': None,
+        'updated_at': datetime.now().isoformat()
+    }
+
+    thread = threading.Thread(
+        target=run_sales_import,
+        args=(job_id, file, target_category)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id})
+
+# ===================== PROGRESS POLLING ENDPOINT =====================
+@app.route('/api/import/progress/<job_id>', methods=['GET'])
+@login_required
+def api_import_progress(job_id):
+    job = import_jobs.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({
+        'success': True,
+        'status': job.get('status'),
+        'total': job.get('total', 0),
+        'processed': job.get('processed', 0),
+        'errors': job.get('errors', []),
+        'result': job.get('result'),
+        'updated_at': job.get('updated_at')
+    })
 
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":

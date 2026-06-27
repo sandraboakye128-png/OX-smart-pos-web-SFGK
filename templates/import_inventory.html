@@ -40,10 +40,11 @@
                 </button>
             </div>
             <div id="purchaseProgress" class="mt-4 hidden">
-                <div class="text-sm text-gray-600">Processing...</div>
+                <div class="text-sm text-gray-600" id="purchaseStatusText">Processing...</div>
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
                     <div id="purchaseProgressBar" class="bg-teal-500 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
+                <div id="purchaseCounter" class="text-xs text-gray-500 mt-1"></div>
             </div>
             <div id="purchaseResult" class="mt-4"></div>
         </form>
@@ -85,10 +86,11 @@
                 </button>
             </div>
             <div id="salesProgress" class="mt-4 hidden">
-                <div class="text-sm text-gray-600">Processing...</div>
+                <div class="text-sm text-gray-600" id="salesStatusText">Processing...</div>
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
                     <div id="salesProgressBar" class="bg-purple-500 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
+                <div id="salesCounter" class="text-xs text-gray-500 mt-1"></div>
             </div>
             <div id="salesResult" class="mt-4"></div>
         </form>
@@ -96,13 +98,15 @@
 </div>
 
 <script>
-    // ---- Helper function for progress and result ----
-    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName) {
+    // ---- Helper function for progress and result with polling ----
+    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName, statusTextId, counterId) {
         const form = document.getElementById(formId);
         const fileInput = document.getElementById(fileInputId);
         const progress = document.getElementById(progressId);
         const progressBar = document.getElementById(progressBarId);
         const resultDiv = document.getElementById(resultId);
+        const statusText = document.getElementById(statusTextId);
+        const counterDiv = document.getElementById(counterId);
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -112,7 +116,6 @@
                 return;
             }
 
-            // Get selected target category
             const targetRadio = document.querySelector(`input[name="${targetRadioName}"]:checked`);
             const targetCategory = targetRadio ? targetRadio.value : 'Accessory';
 
@@ -120,42 +123,111 @@
             formData.append('file', file);
             formData.append('target_category', targetCategory);
 
+            // Reset UI
             progress.classList.remove('hidden');
             progressBar.style.width = '0%';
             resultDiv.innerHTML = '';
+            statusText.textContent = 'Starting import...';
+            counterDiv.textContent = '';
+            let pollInterval = null;
 
             try {
+                // Submit the import
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     body: formData
                 });
 
                 const data = await response.json();
-
-                progressBar.style.width = '100%';
-
-                if (data.success) {
-                    let html = `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-                        <strong>✅ Import successful!</strong><br>
-                        Imported: ${data.imported} records.
-                    </div>`;
-                    if (data.errors && data.errors.length > 0) {
-                        html += `<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mt-2">
-                            <strong>⚠️ Errors (${data.errors.length})</strong>
-                            <ul class="list-disc list-inside text-sm">${data.errors.map(e => `<li>${e}</li>`).join('')}</ul>
-                        </div>`;
-                    }
-                    resultDiv.innerHTML = html;
-                } else {
-                    resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                        <strong>❌ Import failed:</strong> ${data.error || 'Unknown error'}
-                    </div>`;
+                if (!data.success || !data.job_id) {
+                    throw new Error(data.error || 'Import failed to start');
                 }
+
+                const jobId = data.job_id;
+                statusText.textContent = 'Processing...';
+                progressBar.style.width = '0%';
+                let previousPercent = 0;
+
+                // Poll for progress
+                pollInterval = setInterval(async () => {
+                    try {
+                        const progRes = await fetch(`/api/import/progress/${jobId}`);
+                        const progData = await progRes.json();
+                        if (!progData.success) {
+                            clearInterval(pollInterval);
+                            throw new Error(progData.error || 'Progress check failed');
+                        }
+
+                        const status = progData.status;
+                        const total = progData.total || 0;
+                        const processed = progData.processed || 0;
+                        const errors = progData.errors || [];
+                        const result = progData.result || '';
+
+                        // Update progress bar
+                        const percent = total > 0 ? Math.min((processed / total) * 100, 100) : 0;
+                        // Smooth progress animation: update if percent increased by at least 0.5%
+                        if (percent - previousPercent >= 0.5) {
+                            progressBar.style.width = percent + '%';
+                            previousPercent = percent;
+                        }
+                        // Update counter
+                        if (total > 0) {
+                            counterDiv.textContent = `${processed} of ${total} records processed`;
+                        } else {
+                            counterDiv.textContent = `Processing ${processed} records...`;
+                        }
+
+                        if (status === 'done' || status === 'error') {
+                            clearInterval(pollInterval);
+                            progressBar.style.width = '100%';
+                            if (status === 'done') {
+                                progressBar.className = 'bg-green-500 h-2.5 rounded-full';
+                                statusText.textContent = '✅ Import complete!';
+                            } else {
+                                progressBar.className = 'bg-red-500 h-2.5 rounded-full';
+                                statusText.textContent = '❌ Import failed!';
+                            }
+                            counterDiv.textContent = '';
+
+                            // Show final result
+                            let html = '';
+                            if (status === 'done') {
+                                html = `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                                    <strong>✅ Import successful!</strong><br>
+                                    Imported: ${processed} records. ${result}
+                                </div>`;
+                            } else {
+                                html = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                                    <strong>❌ Import failed:</strong> ${result || 'Unknown error'}
+                                </div>`;
+                            }
+                            if (errors && errors.length > 0) {
+                                html += `<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mt-2">
+                                    <strong>⚠️ Errors (${errors.length})</strong>
+                                    <ul class="list-disc list-inside text-sm max-h-40 overflow-y-auto">${errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                                </div>`;
+                            }
+                            resultDiv.innerHTML = html;
+                            // Hide progress after a few seconds (but keep visible so user sees 100%)
+                            setTimeout(() => {
+                                progress.classList.add('hidden');
+                            }, 5000);
+                        }
+                    } catch (pollErr) {
+                        clearInterval(pollInterval);
+                        resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                            <strong>❌ Polling error:</strong> ${pollErr.message}
+                        </div>`;
+                        progress.classList.add('hidden');
+                    }
+                }, 1000);
+
             } catch (err) {
+                if (pollInterval) clearInterval(pollInterval);
                 resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                     <strong>❌ Network error:</strong> ${err.message}
                 </div>`;
-            } finally {
                 progress.classList.add('hidden');
             }
         });
@@ -169,7 +241,9 @@
         'purchaseProgressBar',
         'purchaseResult',
         '/api/inventory/import',
-        'purchase_target'
+        'purchase_target',
+        'purchaseStatusText',
+        'purchaseCounter'
     );
 
     // Setup sales import
@@ -180,7 +254,9 @@
         'salesProgressBar',
         'salesResult',
         '/api/sales/import',
-        'sales_target'
+        'sales_target',
+        'salesStatusText',
+        'salesCounter'
     );
 </script>
 {% endblock %}
