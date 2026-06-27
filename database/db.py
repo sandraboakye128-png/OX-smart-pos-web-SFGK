@@ -193,8 +193,8 @@ if USE_POSTGRES:
         
         try:
             connection_pool = pool.SimpleConnectionPool(
-                1,                     # min connections
-                20,                    # max connections (increased from 10)
+                2,                     # min connections (increased from 1)
+                30,                    # max connections (increased from 20)
                 DATABASE_URL,
                 keepalives=1,
                 keepalives_idle=30,

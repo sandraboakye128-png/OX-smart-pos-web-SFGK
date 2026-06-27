@@ -1691,20 +1691,21 @@ def run_inventory_import(job_id, file_stream, target_category):
             elif cell_lower in ['discount']:
                 header_map['discount'] = idx
 
-    required = ['name', 'quantity', 'cost_price']
+    required = ['name']
     missing = [f for f in required if f not in header_map]
     if missing:
-        update_job_progress(job_id, status='error', errors=[f'Missing columns: {", ".join(missing)}'])
+        update_job_progress(job_id, status='error', errors=[f'Missing column: {", ".join(missing)} (only Name is required)'])
         return
 
     rows_to_process = []
-    skipped_rows = []
-    error_rows = []
+    skipped_rows = []   # only rows with no product name or fatal errors
+    warning_rows = []   # rows with missing numeric fields (will be imported with defaults)
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
         if not any(row):
             continue
         try:
+            # ---- Product name ----
             name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
             if not name:
                 skipped_rows.append({
@@ -1714,44 +1715,52 @@ def run_inventory_import(job_id, file_stream, target_category):
                         'qty': row[header_map.get('quantity')] if header_map.get('quantity') is not None else None,
                         'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None
                     },
-                    'reason': 'Product name is empty'
+                    'reason': 'Product name is empty (row skipped)'
                 })
                 continue
 
-            quantity = float(row[header_map['quantity']]) if row[header_map['quantity']] is not None else 0
-            if quantity <= 0:
-                skipped_rows.append({
-                    'row': row_idx,
-                    'data': {
-                        'name': name,
-                        'qty': quantity,
-                        'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None
-                    },
-                    'reason': f'Quantity must be positive (got {quantity})'
-                })
-                continue
+            # ---- Quantity (allow 0 or missing) ----
+            try:
+                quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
+                if quantity < 0:
+                    quantity = 0
+                    warning_rows.append(f"Row {row_idx}: Quantity was negative, set to 0")
+            except:
+                quantity = 0
+                warning_rows.append(f"Row {row_idx}: Invalid quantity, set to 0")
 
-            cost_price = float(row[header_map['cost_price']]) if row[header_map['cost_price']] is not None else 0.0
-            if cost_price < 0:
-                skipped_rows.append({
-                    'row': row_idx,
-                    'data': {
-                        'name': name,
-                        'qty': quantity,
-                        'rate': cost_price
-                    },
-                    'reason': 'Cost price cannot be negative'
-                })
-                continue
+            # ---- Cost price (allow 0 or missing) ----
+            try:
+                cost_price = float(row[header_map['cost_price']]) if header_map.get('cost_price') is not None and row[header_map['cost_price']] is not None else 0
+                if cost_price < 0:
+                    cost_price = 0
+                    warning_rows.append(f"Row {row_idx}: Cost price was negative, set to 0")
+            except:
+                cost_price = 0
+                warning_rows.append(f"Row {row_idx}: Invalid cost price, set to 0")
 
-            discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
-            selling_price = cost_price * 1.2
+            # ---- Discount ----
+            try:
+                discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
+                if discount < 0:
+                    discount = 0
+            except:
+                discount = 0
 
+            # ---- Selling price ----
+            # If missing, set to 0 (user will update later)
+            try:
+                selling_price = float(row[header_map.get('selling_price')]) if header_map.get('selling_price') is not None and row[header_map['selling_price']] is not None else 0
+                if selling_price < 0:
+                    selling_price = 0
+            except:
+                selling_price = 0
+
+            # ---- Purchase date ----
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 try:
                     if isinstance(row[header_map['date']], (int, float)):
-                        from datetime import datetime, timedelta
                         purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
                     else:
                         date_str = str(row[header_map['date']]).strip()
@@ -1786,7 +1795,7 @@ def run_inventory_import(job_id, file_stream, target_category):
                     'qty': row[header_map.get('quantity')] if header_map.get('quantity') is not None else None,
                     'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None
                 },
-                'reason': str(e)
+                'reason': f'Fatal error: {str(e)}'
             })
 
     total_rows = len(rows_to_process)
@@ -1794,17 +1803,17 @@ def run_inventory_import(job_id, file_stream, target_category):
                         total=total_rows, 
                         processed=0, 
                         status='processing',
-                        errors=error_rows,
-                        result={'imported': 0, 'skipped': skipped_rows, 'message': 'Parsing completed'})
+                        errors=warning_rows,  # warnings are stored in errors (not critical)
+                        result={'imported': 0, 'skipped': skipped_rows, 'warnings': warning_rows, 'message': 'Parsing completed'})
 
     if total_rows == 0:
         update_job_progress(job_id, status='done',
-                            result={'imported': 0, 'skipped': skipped_rows, 'message': 'No valid rows to import'})
+                            result={'imported': 0, 'skipped': skipped_rows, 'warnings': warning_rows, 'message': 'No valid rows to import (all rows missing product name or had fatal errors)'})
         return
 
-    BATCH_SIZE = 2000
+    BATCH_SIZE = 5000
     imported_count = 0
-    overall_errors = error_rows.copy()
+    overall_errors = warning_rows.copy()
 
     if not DATABASE_URL:
         update_job_progress(job_id, status='error', errors=['DATABASE_URL not configured'])
@@ -1819,7 +1828,7 @@ def run_inventory_import(job_id, file_stream, target_category):
             cursor = conn.cursor()
 
             for item in batch:
-                # ----- FIXED PRODUCT LOOKUP (ignores category, updates if needed) -----
+                # Product lookup (ignores category, updates if needed)
                 cursor.execute(
                     "SELECT id, category FROM products WHERE name = %s AND brand = ''",
                     (item['name'],)
@@ -1840,20 +1849,27 @@ def run_inventory_import(job_id, file_stream, target_category):
                     )
                     product_id = cursor.fetchone()[0]
 
+                # Insert purchase batch
                 cursor.execute("""
                     INSERT INTO purchase_batches
                     (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (product_id, item['quantity'], item['quantity'], item['cost_price'], item['selling_price'], item['discount'], item['purchase_date']))
 
-                cursor.execute("""
-                    UPDATE products
-                    SET stock = stock + %s
-                    WHERE id = %s
-                """, (item['quantity'], product_id))
+                # Update product stock (even if quantity is 0, stock remains unchanged)
+                if item['quantity'] != 0:
+                    cursor.execute("""
+                        UPDATE products
+                        SET stock = stock + %s
+                        WHERE id = %s
+                    """, (item['quantity'], product_id))
+                else:
+                    # If quantity is 0, we still ensure stock is recalculated (optional)
+                    # For simplicity, we'll just leave stock as is (it should already be 0 for new products)
+                    pass
 
                 imported_count += 1
-                if imported_count % 10 == 0:
+                if imported_count % 50 == 0:
                     update_job_progress(job_id, processed=imported_count)
 
             conn.commit()
@@ -1876,49 +1892,9 @@ def run_inventory_import(job_id, file_stream, target_category):
                             result={
                                 'imported': imported_count,
                                 'skipped': skipped_rows,
-                                'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped'
+                                'warnings': warning_rows,
+                                'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped (missing product name), {len(warning_rows)} warnings (defaults applied)'
                             })
-@app.route('/api/inventory/import', methods=['POST'])
-@admin_required
-def api_import_inventory():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'}), 400
-
-    if not allowed_file(file.filename):
-        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
-
-    target_category = request.form.get('target_category', 'Accessory')
-    if target_category not in ['Accessory', 'Screen']:
-        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
-
-    file_content = file.read()
-    file_stream = io.BytesIO(file_content)
-
-    job_id = str(uuid.uuid4())
-
-    # Insert initial job record
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO import_jobs (job_id, status, total, processed, errors, result)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (job_id, 'pending', 0, 0, '[]', None))
-    conn.commit()
-    conn.close()
-
-    thread = threading.Thread(
-        target=run_inventory_import,
-        args=(job_id, file_stream, target_category)
-    )
-    thread.daemon = True
-    thread.start()
-
-    return jsonify({'success': True, 'job_id': job_id})
-
 # ----- SALES IMPORT (background thread) with direct connection -----
 def run_sales_import(job_id, file_stream, target_category):
     try:
@@ -2065,7 +2041,7 @@ def run_sales_import(job_id, file_stream, target_category):
                             result={'imported': 0, 'skipped': skipped_rows, 'message': 'No valid rows to import'})
         return
 
-    BATCH_SIZE = 2000
+    BATCH_SIZE = 5000
     imported_count = 0
     overall_errors = error_rows.copy()
 
@@ -2141,7 +2117,7 @@ def run_sales_import(job_id, file_stream, target_category):
                 """, (entry['qty'], product_id))
 
                 imported_count += 1
-                if imported_count % 10 == 0:
+                if imported_count % 50 == 0:
                     update_job_progress(job_id, processed=imported_count)
 
             conn.commit()
