@@ -23,14 +23,14 @@ def handle_timeout(func):
     return wrapper
 
 # ---------------------------
-# GET PRODUCTS FOR SALE
+# GET PRODUCTS FOR SALE (includes category)
 # ---------------------------
 def get_products_for_sale():
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT p.id, p.name, p.brand, p.selling_price, p.stock
+            SELECT p.id, p.name, p.brand, p.selling_price, p.stock, p.category
             FROM products p
             WHERE p.stock > 0
             AND NOT EXISTS (
@@ -50,6 +50,7 @@ def get_products_for_sale():
                 "brand": r[2] or "",
                 "selling_price": float(r[3] or 0),
                 "stock": int(r[4] or 0),
+                "category": r[5] or "",   # <-- added category
             }
             for r in rows
         ]
