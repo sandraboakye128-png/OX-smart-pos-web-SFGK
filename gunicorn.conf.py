@@ -4,28 +4,23 @@ import os
 
 # --- Timeouts (critical for large imports) ---
 timeout = 600              # 10 minutes – enough for 5000+ rows
-graceful_timeout = 60      # 30 seconds grace after worker timeout
-keepalive = 5              # Keep connections alive
+graceful_timeout = 60
+keepalive = 5
 
 # --- Workers ---
-# Use gevent for async I/O if you have many concurrent requests;
-# otherwise sync workers with high timeout are fine.
-worker_class = 'gevent'    # or 'sync' if you prefer
-workers = multiprocessing.cpu_count() * 2 + 1  # typical formula
-worker_connections = 1000  # only for gevent
+# Use sync workers (gevent requires installation; sync works fine with timeout)
+worker_class = 'sync'      # <-- changed from 'gevent'
+workers = multiprocessing.cpu_count() * 2 + 1
+worker_connections = 1000  # only used for gevent, but harmless
 
-# --- Request limits (prevents memory leaks) ---
+# --- Request limits ---
 max_requests = 2000
 max_requests_jitter = 100
 
 # --- Logging ---
-accesslog = '-'            # stdout
-errorlog = '-'             # stderr
+accesslog = '-'
+errorlog = '-'
 loglevel = 'info'
 
-# --- Performance ---
-# Preload app to reduce memory overhead on fork (optional)
-preload_app = False
-
-# Bind to the port Render uses (or default)
+# --- Bind ---
 bind = f"0.0.0.0:{os.environ.get('PORT', 10000)}"
