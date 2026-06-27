@@ -2235,7 +2235,69 @@ def api_import_progress(job_id):
         'result': result_data,
         'updated_at': row[5].isoformat() if row[5] else None
     })
+@app.route('/api/import/failed-report/<job_id>', methods=['GET'])
+@login_required
+def api_import_failed_report(job_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT result FROM import_jobs WHERE job_id = %s", (job_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
 
+    result = row[0]
+    # Ensure it's a dict
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except:
+            pass
+
+    if not result or not result.get('skipped'):
+        return jsonify({'success': False, 'error': 'No skipped rows to report'}), 400
+
+    skipped = result['skipped']
+    # ... rest of PDF generation is fine ...
+    # Generate PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    elements.append(Paragraph("📋 Import Failed Items Report", styles["Title"]))
+    elements.append(Spacer(1, 6))
+    elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    # Table header
+    table_data = [["Row", "Name/Item", "Qty", "Rate", "Reason"]]
+    for s in skipped:
+        table_data.append([
+            str(s.get('row', '')),
+            s.get('data', {}).get('name') or s.get('data', {}).get('item') or '-',
+            str(s.get('data', {}).get('qty', '')),
+            str(s.get('data', {}).get('rate', '')),
+            s.get('reason', '')
+        ])
+
+    table = Table(table_data, repeatRows=1, colWidths=[50, 150, 50, 50, 200])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1E3A5F")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True,
+                     download_name=f"failed_import_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                     mimetype='application/pdf')
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

@@ -129,14 +129,12 @@
             resultDiv.innerHTML = '';
             statusText.textContent = 'Starting import...';
             counterDiv.textContent = '';
-            // Reset progress bar color
-            progressBar.className = 'bg-teal-500 h-2.5 rounded-full'; // default for purchase; will be overridden by specific color later? We'll set dynamically.
-            // Use appropriate color for each form (but we keep it generic)
             const isPurchase = endpoint.includes('inventory');
             const baseColor = isPurchase ? 'bg-teal-500' : 'bg-purple-500';
             progressBar.className = `${baseColor} h-2.5 rounded-full`;
 
             let pollInterval = null;
+            let jobId = null;
 
             try {
                 // Submit the import
@@ -150,7 +148,7 @@
                     throw new Error(data.error || 'Import failed to start');
                 }
 
-                const jobId = data.job_id;
+                jobId = data.job_id;
                 statusText.textContent = 'Processing...';
                 progressBar.style.width = '0%';
                 let previousPercent = 0;
@@ -169,7 +167,6 @@
                         const total = progData.total || 0;
                         const processed = progData.processed || 0;
                         const errors = progData.errors || [];
-                        // result is an object: { imported, skipped, message }
                         const result = progData.result || {};
                         const imported = result.imported || 0;
                         const skipped = result.skipped || [];
@@ -181,7 +178,6 @@
                             progressBar.style.width = percent + '%';
                             previousPercent = percent;
                         }
-                        // Update counter
                         if (total > 0) {
                             counterDiv.textContent = `${processed} of ${total} records processed`;
                         } else {
@@ -213,7 +209,7 @@
                                 </div>`;
                             }
 
-                            // Show skipped rows (if any)
+                            // Show skipped rows (if any) and download button
                             if (skipped && skipped.length > 0) {
                                 html += `<div class="mt-4">
                                     <h4 class="font-semibold text-gray-700">⚠️ Skipped rows (${skipped.length})</h4>
@@ -241,6 +237,12 @@
                                             </tbody>
                                         </table>
                                     </div>
+                                    <div class="mt-3">
+                                        <a href="/api/import/failed-report/${jobId}" target="_blank" 
+                                           class="inline-block bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md text-sm">
+                                            📄 Download Failed Report (PDF)
+                                        </a>
+                                    </div>
                                 </div>`;
                             } else {
                                 html += `<div class="mt-2 text-sm text-gray-600">No rows were skipped.</div>`;
@@ -256,7 +258,6 @@
 
                             resultDiv.innerHTML = html;
 
-                            // Hide progress after a few seconds (but keep visible so user sees 100%)
                             setTimeout(() => {
                                 progress.classList.add('hidden');
                             }, 5000);
