@@ -194,7 +194,7 @@ if USE_POSTGRES:
         try:
             connection_pool = pool.SimpleConnectionPool(
                 1,                     # min connections
-                10,                    # max connections (reduce to avoid timeouts)
+                20,                    # max connections (increased from 10)
                 DATABASE_URL,
                 keepalives=1,
                 keepalives_idle=30,
@@ -287,13 +287,13 @@ if USE_POSTGRES:
                     raise
 
     def return_connection(conn):
-        """Return connection to the pool, or close it if not pooled"""
+        """Return connection to the pool, or close it if not pooled."""
         global connection_pool
         if conn is None:
             return
         try:
-            # Check if it's a pooled connection
-            if connection_pool and hasattr(conn, '_pool_key'):
+            # Check if connection is from the pool (has _pool attribute)
+            if connection_pool and hasattr(conn, '_pool'):
                 connection_pool.putconn(conn)
             else:
                 conn.close()

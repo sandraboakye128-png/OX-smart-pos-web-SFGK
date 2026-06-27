@@ -62,6 +62,11 @@ from services.product_service import get_deleted_products, restore_archive
 
 # ---------- DATABASE CONNECTION ----------
 from database.db import get_connection
+# We'll also need DATABASE_URL – if not exported, read from env
+try:
+    from database.db import DATABASE_URL
+except ImportError:
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
 # ---------- PDF GENERATION ----------
 import io
@@ -1630,6 +1635,8 @@ def api_archive_batches():
 import openpyxl
 from openpyxl import load_workbook
 from werkzeug.utils import secure_filename
+import psycopg2
+from psycopg2 import sql
 
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 
@@ -1641,10 +1648,9 @@ def allowed_file(filename):
 def import_inventory_page():
     return render_template('import_inventory.html')
 
-# ----- INVENTORY IMPORT (background thread) -----
+# ----- INVENTORY IMPORT (background thread) with direct connection -----
 def run_inventory_import(job_id, file_stream, target_category):
     try:
-        # Load workbook from the in-memory stream
         wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
     except Exception as e:
@@ -1746,14 +1752,23 @@ def run_inventory_import(job_id, file_stream, target_category):
         update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
         return
 
-    conn = get_connection()
-    cursor = conn.cursor()
     BATCH_SIZE = 2000
     imported_count = 0
+    overall_errors = error_rows.copy()
+
+    # Create a direct connection (not from pool) for this thread
+    if not DATABASE_URL:
+        update_job_progress(job_id, status='error', errors=['DATABASE_URL not configured'])
+        return
 
     for i in range(0, total_rows, BATCH_SIZE):
         batch = rows_to_process[i:i+BATCH_SIZE]
+        conn = None
         try:
+            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+            conn.autocommit = False
+            cursor = conn.cursor()
+
             for item in batch:
                 cursor.execute(
                     "SELECT id FROM products WHERE name = %s AND brand = '' AND category = %s",
@@ -1782,17 +1797,29 @@ def run_inventory_import(job_id, file_stream, target_category):
                 """, (item['quantity'], product_id))
 
                 imported_count += 1
-                update_job_progress(job_id, processed=imported_count)
+                # Update progress periodically (every 10 rows to reduce DB writes)
+                if imported_count % 10 == 0:
+                    update_job_progress(job_id, processed=imported_count)
 
             conn.commit()
             update_job_progress(job_id, processed=imported_count)
-        except Exception as e:
-            conn.rollback()
-            error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-            update_job_progress(job_id, errors=error_rows)
 
-    conn.close()
-    update_job_progress(job_id, status='done', result=f'Imported {imported_count} records', errors=error_rows)
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            overall_errors.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
+            update_job_progress(job_id, errors=overall_errors)
+            # Stop processing on batch error
+            break
+        finally:
+            if conn:
+                conn.close()
+
+    if overall_errors and len(overall_errors) > len(error_rows):
+        # Some batch errors occurred
+        update_job_progress(job_id, status='error', errors=overall_errors)
+    else:
+        update_job_progress(job_id, status='done', result=f'Imported {imported_count} records', errors=overall_errors)
 
 @app.route('/api/inventory/import', methods=['POST'])
 @admin_required
@@ -1811,13 +1838,12 @@ def api_import_inventory():
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
-    # Read file content into memory to avoid stream closure
     file_content = file.read()
     file_stream = io.BytesIO(file_content)
 
     job_id = str(uuid.uuid4())
 
-    # Insert initial job record into the database
+    # Insert initial job record
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -1836,7 +1862,7 @@ def api_import_inventory():
 
     return jsonify({'success': True, 'job_id': job_id})
 
-# ----- SALES IMPORT (background thread) -----
+# ----- SALES IMPORT (background thread) with direct connection -----
 def run_sales_import(job_id, file_stream, target_category):
     try:
         wb = load_workbook(file_stream, data_only=True)
@@ -1942,14 +1968,22 @@ def run_sales_import(job_id, file_stream, target_category):
         update_job_progress(job_id, status='done', result='No valid rows to import', errors=error_rows)
         return
 
-    conn = get_connection()
-    cursor = conn.cursor()
     BATCH_SIZE = 2000
     imported_count = 0
+    overall_errors = error_rows.copy()
+
+    if not DATABASE_URL:
+        update_job_progress(job_id, status='error', errors=['DATABASE_URL not configured'])
+        return
 
     for i in range(0, total_rows, BATCH_SIZE):
         batch = rows_to_process[i:i+BATCH_SIZE]
+        conn = None
         try:
+            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+            conn.autocommit = False
+            cursor = conn.cursor()
+
             for entry in batch:
                 # Find product
                 cursor.execute(
@@ -1958,11 +1992,11 @@ def run_sales_import(job_id, file_stream, target_category):
                 )
                 product = cursor.fetchone()
                 if not product:
-                    error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
+                    overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
                     continue
                 product_id, product_category = product
                 if product_category != target_category:
-                    error_rows.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
+                    overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
                     continue
 
                 subtotal = entry['qty'] * entry['rate']
@@ -1983,7 +2017,7 @@ def run_sales_import(job_id, file_stream, target_category):
                 """, (product_id, entry['qty']))
                 batch_info = cursor.fetchone()
                 if not batch_info:
-                    error_rows.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
+                    overall_errors.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
                     cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
                     continue
 
@@ -2010,17 +2044,26 @@ def run_sales_import(job_id, file_stream, target_category):
                 """, (entry['qty'], product_id))
 
                 imported_count += 1
-                update_job_progress(job_id, processed=imported_count)
+                if imported_count % 10 == 0:
+                    update_job_progress(job_id, processed=imported_count)
 
             conn.commit()
             update_job_progress(job_id, processed=imported_count)
-        except Exception as e:
-            conn.rollback()
-            error_rows.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-            update_job_progress(job_id, errors=error_rows)
 
-    conn.close()
-    update_job_progress(job_id, status='done', result=f'Imported {imported_count} sales records', errors=error_rows)
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            overall_errors.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
+            update_job_progress(job_id, errors=overall_errors)
+            break
+        finally:
+            if conn:
+                conn.close()
+
+    if overall_errors and len(overall_errors) > len(error_rows):
+        update_job_progress(job_id, status='error', errors=overall_errors)
+    else:
+        update_job_progress(job_id, status='done', result=f'Imported {imported_count} sales records', errors=overall_errors)
 
 @app.route('/api/sales/import', methods=['POST'])
 @admin_required
@@ -2039,7 +2082,6 @@ def api_import_sales():
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
-    # Read file content into memory to avoid stream closure
     file_content = file.read()
     file_stream = io.BytesIO(file_content)
 
@@ -2084,7 +2126,7 @@ def api_import_progress(job_id):
         'status': row[0],
         'total': row[1],
         'processed': row[2],
-        'errors': row[3],  # already JSON
+        'errors': row[3],
         'result': row[4],
         'updated_at': row[5].isoformat() if row[5] else None
     })
