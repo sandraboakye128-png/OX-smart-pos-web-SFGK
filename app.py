@@ -1654,8 +1654,12 @@ def allowed_file(filename):
 def import_inventory_page():
     return render_template('import_inventory.html')
 
-# ----- INVENTORY IMPORT (background thread) with direct connection -----
+# ---------- CANCEL FLAGS (in-memory) ----------
+cancel_flags = {}   # job_id -> True if cancellation requested
+
+# ----- INVENTORY IMPORT (background thread) with single transaction -----
 def run_inventory_import(job_id, file_stream, target_category):
+    conn = None
     try:
         wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
@@ -1811,83 +1815,66 @@ def run_inventory_import(job_id, file_stream, target_category):
                             result={'imported': 0, 'skipped': skipped_rows, 'warnings': warning_rows, 'message': 'No valid rows to import (all rows missing product name or had fatal errors)'})
         return
 
-    BATCH_SIZE = 5000
-    imported_count = 0
-    overall_errors = warning_rows.copy()
-
     if not DATABASE_URL:
         update_job_progress(job_id, status='error', errors=['DATABASE_URL not configured'])
         return
 
-    for i in range(0, total_rows, BATCH_SIZE):
-        batch = rows_to_process[i:i+BATCH_SIZE]
-        conn = None
-        try:
-            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-            conn.autocommit = False
-            cursor = conn.cursor()
+    imported_count = 0
+    overall_errors = warning_rows.copy()
 
-            for item in batch:
-                # Product lookup (ignores category, updates if needed)
-                cursor.execute(
-                    "SELECT id, category FROM products WHERE name = %s AND brand = ''",
-                    (item['name'],)
-                )
-                result = cursor.fetchone()
-                if result:
-                    product_id = result[0]
-                    existing_category = result[1]
-                    if existing_category != item['category']:
-                        cursor.execute(
-                            "UPDATE products SET category = %s WHERE id = %s",
-                            (item['category'], product_id)
-                        )
-                else:
+    # ----- SINGLE TRANSACTION -----
+    try:
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        conn.autocommit = False
+        cursor = conn.cursor()
+
+        for idx, item in enumerate(rows_to_process, start=1):
+            # Product lookup (ignores category, updates if needed)
+            cursor.execute(
+                "SELECT id, category FROM products WHERE name = %s AND brand = ''",
+                (item['name'],)
+            )
+            result = cursor.fetchone()
+            if result:
+                product_id = result[0]
+                existing_category = result[1]
+                if existing_category != item['category']:
                     cursor.execute(
-                        "INSERT INTO products (name, brand, category, cost_price, selling_price, discount, stock) VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING id",
-                        (item['name'], '', item['category'], item['cost_price'], item['selling_price'], item['discount'])
+                        "UPDATE products SET category = %s WHERE id = %s",
+                        (item['category'], product_id)
                     )
-                    product_id = cursor.fetchone()[0]
+            else:
+                cursor.execute(
+                    "INSERT INTO products (name, brand, category, cost_price, selling_price, discount, stock) VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING id",
+                    (item['name'], '', item['category'], item['cost_price'], item['selling_price'], item['discount'])
+                )
+                product_id = cursor.fetchone()[0]
 
-                # Insert purchase batch
+            # Insert purchase batch
+            cursor.execute("""
+                INSERT INTO purchase_batches
+                (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (product_id, item['quantity'], item['quantity'], item['cost_price'], item['selling_price'], item['discount'], item['purchase_date']))
+
+            # Update product stock (only if quantity != 0)
+            if item['quantity'] != 0:
                 cursor.execute("""
-                    INSERT INTO purchase_batches
-                    (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (product_id, item['quantity'], item['quantity'], item['cost_price'], item['selling_price'], item['discount'], item['purchase_date']))
+                    UPDATE products
+                    SET stock = stock + %s
+                    WHERE id = %s
+                """, (item['quantity'], product_id))
 
-                # Update product stock (even if quantity is 0, stock remains unchanged)
-                if item['quantity'] != 0:
-                    cursor.execute("""
-                        UPDATE products
-                        SET stock = stock + %s
-                        WHERE id = %s
-                    """, (item['quantity'], product_id))
-                else:
-                    # If quantity is 0, we still ensure stock is recalculated (optional)
-                    # For simplicity, we'll just leave stock as is (it should already be 0 for new products)
-                    pass
+            imported_count += 1
+            if imported_count % 100 == 0:
+                update_job_progress(job_id, processed=imported_count)
+                # Check cancellation
+                if cancel_flags.get(job_id):
+                    raise Exception("CANCELLED_BY_USER")
 
-                imported_count += 1
-                if imported_count % 50 == 0:
-                    update_job_progress(job_id, processed=imported_count)
-
-            conn.commit()
-            update_job_progress(job_id, processed=imported_count)
-
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            overall_errors.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-            update_job_progress(job_id, errors=overall_errors)
-            break
-        finally:
-            if conn:
-                conn.close()
-
-    if overall_errors and len(overall_errors) > 0:
-        update_job_progress(job_id, status='error', errors=overall_errors)
-    else:
+        # ---- All rows processed successfully ----
+        conn.commit()
+        cancel_flags.pop(job_id, None)
         update_job_progress(job_id, status='done',
                             result={
                                 'imported': imported_count,
@@ -1896,48 +1883,24 @@ def run_inventory_import(job_id, file_stream, target_category):
                                 'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped (missing product name), {len(warning_rows)} warnings (defaults applied)'
                             })
 
-@app.route('/api/inventory/import', methods=['POST'])
-@admin_required
-def api_import_inventory():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        if str(e) == "CANCELLED_BY_USER":
+            update_job_progress(job_id, status='cancelled',
+                                result={'imported': 0, 'skipped': skipped_rows, 'warnings': warning_rows,
+                                        'message': 'Import cancelled – no data was committed'})
+        else:
+            overall_errors.append(str(e))
+            update_job_progress(job_id, status='error', errors=overall_errors)
+    finally:
+        if conn:
+            conn.close()
+        cancel_flags.pop(job_id, None)
 
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'}), 400
-
-    if not allowed_file(file.filename):
-        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
-
-    target_category = request.form.get('target_category', 'Accessory')
-    if target_category not in ['Accessory', 'Screen']:
-        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
-
-    file_content = file.read()
-    file_stream = io.BytesIO(file_content)
-
-    job_id = str(uuid.uuid4())
-
-    # Insert initial job record
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO import_jobs (job_id, status, total, processed, errors, result)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (job_id, 'pending', 0, 0, '[]', None))
-    conn.commit()
-    conn.close()
-
-    thread = threading.Thread(
-        target=run_inventory_import,
-        args=(job_id, file_stream, target_category)
-    )
-    thread.daemon = True
-    thread.start()
-
-    return jsonify({'success': True, 'job_id': job_id})
-# ----- SALES IMPORT (background thread) with direct connection -----
+# ----- SALES IMPORT (background thread) with single transaction -----
 def run_sales_import(job_id, file_stream, target_category):
+    conn = None
     try:
         wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
@@ -2082,101 +2045,88 @@ def run_sales_import(job_id, file_stream, target_category):
                             result={'imported': 0, 'skipped': skipped_rows, 'message': 'No valid rows to import'})
         return
 
-    BATCH_SIZE = 5000
-    imported_count = 0
-    overall_errors = error_rows.copy()
-
     if not DATABASE_URL:
         update_job_progress(job_id, status='error', errors=['DATABASE_URL not configured'])
         return
 
-    for i in range(0, total_rows, BATCH_SIZE):
-        batch = rows_to_process[i:i+BATCH_SIZE]
-        conn = None
-        try:
-            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-            conn.autocommit = False
-            cursor = conn.cursor()
+    imported_count = 0
+    overall_errors = error_rows.copy()
 
-            for entry in batch:
-                # Find product
-                cursor.execute(
-                    "SELECT id, category FROM products WHERE name = %s",
-                    (entry['item'],)
-                )
-                product = cursor.fetchone()
-                if not product:
-                    overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
-                    continue
-                product_id, product_category = product
-                if product_category != target_category:
-                    overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
-                    continue
+    # ----- SINGLE TRANSACTION -----
+    try:
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        conn.autocommit = False
+        cursor = conn.cursor()
 
-                subtotal = entry['qty'] * entry['rate']
-                total = subtotal - entry['discount']
-                cursor.execute("""
-                    INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash'))
-                sale_id = cursor.fetchone()[0]
+        for idx, entry in enumerate(rows_to_process, start=1):
+            # Find product
+            cursor.execute(
+                "SELECT id, category FROM products WHERE name = %s",
+                (entry['item'],)
+            )
+            product = cursor.fetchone()
+            if not product:
+                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
+                continue
+            product_id, product_category = product
+            if product_category != target_category:
+                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
+                continue
 
-                cursor.execute("""
-                    SELECT id, cost_price, selling_price
-                    FROM purchase_batches
-                    WHERE product_id = %s AND remaining_quantity >= %s
-                    ORDER BY date ASC
-                    LIMIT 1
-                """, (product_id, entry['qty']))
-                batch_info = cursor.fetchone()
-                if not batch_info:
-                    overall_errors.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
-                    cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
-                    continue
+            subtotal = entry['qty'] * entry['rate']
+            total = subtotal - entry['discount']
+            cursor.execute("""
+                INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash'))
+            sale_id = cursor.fetchone()[0]
 
-                batch_id, cost_price, selling_price = batch_info
-                selling_price = entry['rate']
-                item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
+            cursor.execute("""
+                SELECT id, cost_price, selling_price
+                FROM purchase_batches
+                WHERE product_id = %s AND remaining_quantity >= %s
+                ORDER BY date ASC
+                LIMIT 1
+            """, (product_id, entry['qty']))
+            batch_info = cursor.fetchone()
+            if not batch_info:
+                overall_errors.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
+                cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
+                continue
 
-                cursor.execute("""
-                    INSERT INTO sales_items
-                    (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit, subtotal)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit, subtotal))
+            batch_id, cost_price, selling_price = batch_info
+            selling_price = entry['rate']
+            item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
 
-                cursor.execute("""
-                    UPDATE purchase_batches
-                    SET remaining_quantity = remaining_quantity - %s
-                    WHERE id = %s
-                """, (entry['qty'], batch_id))
+            cursor.execute("""
+                INSERT INTO sales_items
+                (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit, subtotal)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit, subtotal))
 
-                cursor.execute("""
-                    UPDATE products
-                    SET stock = stock - %s
-                    WHERE id = %s
-                """, (entry['qty'], product_id))
+            cursor.execute("""
+                UPDATE purchase_batches
+                SET remaining_quantity = remaining_quantity - %s
+                WHERE id = %s
+            """, (entry['qty'], batch_id))
 
-                imported_count += 1
-                if imported_count % 50 == 0:
-                    update_job_progress(job_id, processed=imported_count)
+            cursor.execute("""
+                UPDATE products
+                SET stock = stock - %s
+                WHERE id = %s
+            """, (entry['qty'], product_id))
 
-            conn.commit()
-            update_job_progress(job_id, processed=imported_count)
+            imported_count += 1
+            if imported_count % 100 == 0:
+                update_job_progress(job_id, processed=imported_count)
+                # Check cancellation
+                if cancel_flags.get(job_id):
+                    raise Exception("CANCELLED_BY_USER")
 
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            overall_errors.append(f"Batch starting at row {batch[0]['row_idx']}: {str(e)}")
-            update_job_progress(job_id, errors=overall_errors)
-            break
-        finally:
-            if conn:
-                conn.close()
-
-    if overall_errors and len(overall_errors) > 0:
-        update_job_progress(job_id, status='error', errors=overall_errors)
-    else:
+        # ---- All rows processed successfully ----
+        conn.commit()
+        cancel_flags.pop(job_id, None)
         update_job_progress(job_id, status='done',
                             result={
                                 'imported': imported_count,
@@ -2184,6 +2134,64 @@ def run_sales_import(job_id, file_stream, target_category):
                                 'message': f'Imported {imported_count} sales records, {len(skipped_rows)} rows skipped'
                             })
 
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        if str(e) == "CANCELLED_BY_USER":
+            update_job_progress(job_id, status='cancelled',
+                                result={'imported': 0, 'skipped': skipped_rows,
+                                        'message': 'Import cancelled – no data was committed'})
+        else:
+            overall_errors.append(str(e))
+            update_job_progress(job_id, status='error', errors=overall_errors)
+    finally:
+        if conn:
+            conn.close()
+        cancel_flags.pop(job_id, None)
+
+# ----- INVENTORY IMPORT ENDPOINT -----
+@app.route('/api/inventory/import', methods=['POST'])
+@admin_required
+def api_import_inventory():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
+
+    target_category = request.form.get('target_category', 'Accessory')
+    if target_category not in ['Accessory', 'Screen']:
+        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
+
+    file_content = file.read()
+    file_stream = io.BytesIO(file_content)
+
+    job_id = str(uuid.uuid4())
+
+    # Insert initial job record
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO import_jobs (job_id, status, total, processed, errors, result)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (job_id, 'pending', 0, 0, '[]', None))
+    conn.commit()
+    conn.close()
+
+    thread = threading.Thread(
+        target=run_inventory_import,
+        args=(job_id, file_stream, target_category)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id})
+
+# ----- SALES IMPORT ENDPOINT -----
 @app.route('/api/sales/import', methods=['POST'])
 @admin_required
 def api_import_sales():
@@ -2258,6 +2266,27 @@ def api_import_progress(job_id):
         'result': result_data,
         'updated_at': row[5].isoformat() if row[5] else None
     })
+
+# ===================== IMPORT CANCELLATION ENDPOINT =====================
+@app.route('/api/import/cancel/<job_id>', methods=['POST'])
+@login_required
+def api_import_cancel(job_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT status FROM import_jobs WHERE job_id = %s", (job_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    status = row[0]
+    if status in ('done', 'error', 'cancelled'):
+        return jsonify({'success': False, 'error': f'Job already {status}'}), 400
+
+    cancel_flags[job_id] = True
+    update_job_progress(job_id, status='cancelling')
+    return jsonify({'success': True, 'message': 'Cancellation requested'})
+
+# ===================== FAILED REPORT PDF =====================
 @app.route('/api/import/failed-report/<job_id>', methods=['GET'])
 @login_required
 def api_import_failed_report(job_id):
@@ -2281,7 +2310,6 @@ def api_import_failed_report(job_id):
         return jsonify({'success': False, 'error': 'No skipped rows to report'}), 400
 
     skipped = result['skipped']
-    # ... rest of PDF generation is fine ...
     # Generate PDF
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
@@ -2321,9 +2349,11 @@ def api_import_failed_report(job_id):
     return send_file(buffer, as_attachment=True,
                      download_name=f"failed_import_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
+
 @app.route('/api/ping', methods=['GET'])
 def ping():
-    return jsonify({"status": "ok", "message": "Deployed version is current"})               
+    return jsonify({"status": "ok", "message": "Deployed version is current"})
+
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

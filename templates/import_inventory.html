@@ -40,7 +40,12 @@
                 </button>
             </div>
             <div id="purchaseProgress" class="mt-4 hidden">
-                <div class="text-sm text-gray-600" id="purchaseStatusText">Processing...</div>
+                <div class="flex items-center justify-between">
+                    <div class="text-sm text-gray-600" id="purchaseStatusText">Processing...</div>
+                    <button id="purchaseCancelBtn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm hidden">
+                        Cancel
+                    </button>
+                </div>
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
                     <div id="purchaseProgressBar" class="bg-teal-500 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
@@ -86,7 +91,12 @@
                 </button>
             </div>
             <div id="salesProgress" class="mt-4 hidden">
-                <div class="text-sm text-gray-600" id="salesStatusText">Processing...</div>
+                <div class="flex items-center justify-between">
+                    <div class="text-sm text-gray-600" id="salesStatusText">Processing...</div>
+                    <button id="salesCancelBtn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm hidden">
+                        Cancel
+                    </button>
+                </div>
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
                     <div id="salesProgressBar" class="bg-purple-500 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
@@ -99,7 +109,7 @@
 
 <script>
     // ---- Helper function for progress and result with polling ----
-    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName, statusTextId, counterId) {
+    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName, statusTextId, counterId, cancelBtnId) {
         const form = document.getElementById(formId);
         const fileInput = document.getElementById(fileInputId);
         const progress = document.getElementById(progressId);
@@ -107,9 +117,19 @@
         const resultDiv = document.getElementById(resultId);
         const statusText = document.getElementById(statusTextId);
         const counterDiv = document.getElementById(counterId);
+        const cancelBtn = document.getElementById(cancelBtnId);
+
+        let pollInterval = null;
+        let jobId = null;
+        let isCancelling = false;
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (pollInterval) {
+                alert('An import is already running. Please wait or cancel it.');
+                return;
+            }
+
             const file = fileInput.files[0];
             if (!file) {
                 alert('Please select a file.');
@@ -129,12 +149,12 @@
             resultDiv.innerHTML = '';
             statusText.textContent = 'Starting import...';
             counterDiv.textContent = '';
+            cancelBtn.classList.add('hidden');
+            isCancelling = false;
+
             const isPurchase = endpoint.includes('inventory');
             const baseColor = isPurchase ? 'bg-teal-500' : 'bg-purple-500';
             progressBar.className = `${baseColor} h-2.5 rounded-full`;
-
-            let pollInterval = null;
-            let jobId = null;
 
             try {
                 // Submit the import
@@ -152,6 +172,7 @@
                 statusText.textContent = 'Processing...';
                 progressBar.style.width = '0%';
                 let previousPercent = 0;
+                cancelBtn.classList.remove('hidden');
 
                 // Poll for progress
                 pollInterval = setInterval(async () => {
@@ -160,6 +181,7 @@
                         const progData = await progRes.json();
                         if (!progData.success) {
                             clearInterval(pollInterval);
+                            pollInterval = null;
                             throw new Error(progData.error || 'Progress check failed');
                         }
 
@@ -184,10 +206,16 @@
                             counterDiv.textContent = `Processing ${processed} records...`;
                         }
 
-                        if (status === 'done' || status === 'error') {
+                        // If cancelled or done, hide cancel button and stop polling
+                        if (status === 'cancelled' || status === 'done' || status === 'error') {
                             clearInterval(pollInterval);
+                            pollInterval = null;
+                            cancelBtn.classList.add('hidden');
                             progressBar.style.width = '100%';
-                            if (status === 'done') {
+                            if (status === 'cancelled') {
+                                progressBar.className = 'bg-gray-500 h-2.5 rounded-full';
+                                statusText.textContent = '⛔ Import cancelled';
+                            } else if (status === 'done') {
                                 progressBar.className = 'bg-green-500 h-2.5 rounded-full';
                                 statusText.textContent = '✅ Import complete!';
                             } else {
@@ -202,6 +230,11 @@
                                 html += `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
                                     <strong>✅ Import successful!</strong><br>
                                     ${message || `Imported ${imported} records.`}
+                                </div>`;
+                            } else if (status === 'cancelled') {
+                                html += `<div class="bg-gray-100 border border-gray-400 text-gray-700 px-4 py-3 rounded">
+                                    <strong>⛔ Import cancelled by user.</strong><br>
+                                    ${message || 'No data was committed.'}
                                 </div>`;
                             } else {
                                 html += `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -261,22 +294,59 @@
                             setTimeout(() => {
                                 progress.classList.add('hidden');
                             }, 5000);
+                            jobId = null;
                         }
                     } catch (pollErr) {
                         clearInterval(pollInterval);
+                        pollInterval = null;
                         resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                             <strong>❌ Polling error:</strong> ${pollErr.message}
                         </div>`;
                         progress.classList.add('hidden');
+                        cancelBtn.classList.add('hidden');
+                        jobId = null;
                     }
                 }, 1000);
 
             } catch (err) {
-                if (pollInterval) clearInterval(pollInterval);
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                }
                 resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                     <strong>❌ Network error:</strong> ${err.message}
                 </div>`;
                 progress.classList.add('hidden');
+                cancelBtn.classList.add('hidden');
+                jobId = null;
+            }
+        });
+
+        // Cancel button handler
+        cancelBtn.addEventListener('click', async () => {
+            if (!jobId || isCancelling) return;
+            if (!confirm('Are you sure you want to cancel this import? The data already imported will remain.')) {
+                return;
+            }
+            isCancelling = true;
+            cancelBtn.disabled = true;
+            cancelBtn.textContent = 'Cancelling...';
+            try {
+                const res = await fetch(`/api/import/cancel/${jobId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    statusText.textContent = 'Cancellation requested...';
+                } else {
+                    alert('Cancel failed: ' + data.error);
+                    isCancelling = false;
+                    cancelBtn.disabled = false;
+                    cancelBtn.textContent = 'Cancel';
+                }
+            } catch (err) {
+                alert('Error cancelling: ' + err.message);
+                isCancelling = false;
+                cancelBtn.disabled = false;
+                cancelBtn.textContent = 'Cancel';
             }
         });
     }
@@ -291,7 +361,8 @@
         '/api/inventory/import',
         'purchase_target',
         'purchaseStatusText',
-        'purchaseCounter'
+        'purchaseCounter',
+        'purchaseCancelBtn'
     );
 
     // Setup sales import
@@ -304,7 +375,8 @@
         '/api/sales/import',
         'sales_target',
         'salesStatusText',
-        'salesCounter'
+        'salesCounter',
+        'salesCancelBtn'
     );
 </script>
 {% endblock %}
