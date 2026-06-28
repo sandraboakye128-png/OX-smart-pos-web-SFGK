@@ -2280,6 +2280,9 @@ def api_import_failed_report(job_id):
     return send_file(buffer, as_attachment=True,
                      download_name=f"failed_import_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
+@app.route('/api/ping', methods=['GET'])
+def ping():
+    return jsonify({"status": "ok", "message": "Deployed version is current"})               
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
