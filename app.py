@@ -1895,6 +1895,47 @@ def run_inventory_import(job_id, file_stream, target_category):
                                 'warnings': warning_rows,
                                 'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped (missing product name), {len(warning_rows)} warnings (defaults applied)'
                             })
+
+@app.route('/api/inventory/import', methods=['POST'])
+@admin_required
+def api_import_inventory():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File type not allowed'}), 400
+
+    target_category = request.form.get('target_category', 'Accessory')
+    if target_category not in ['Accessory', 'Screen']:
+        return jsonify({'success': False, 'error': 'Invalid target category'}), 400
+
+    file_content = file.read()
+    file_stream = io.BytesIO(file_content)
+
+    job_id = str(uuid.uuid4())
+
+    # Insert initial job record
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO import_jobs (job_id, status, total, processed, errors, result)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (job_id, 'pending', 0, 0, '[]', None))
+    conn.commit()
+    conn.close()
+
+    thread = threading.Thread(
+        target=run_inventory_import,
+        args=(job_id, file_stream, target_category)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id})
 # ----- SALES IMPORT (background thread) with direct connection -----
 def run_sales_import(job_id, file_stream, target_category):
     try:
