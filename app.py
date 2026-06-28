@@ -1667,11 +1667,12 @@ def run_inventory_import(job_id, file_stream, target_category):
         update_job_progress(job_id, status='error', errors=[f"Unable to read workbook: {str(e)}"])
         return
 
-    # Find header row
+    # --- Header detection (unchanged) ---
     header_row_idx = None
     header_row = None
     for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
-        if row and any(cell and isinstance(cell, str) and ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
+        if row and any(cell and isinstance(cell, str) and 
+                       ('item' in cell.lower() or 'qty' in cell.lower() or 'rate' in cell.lower()) for cell in row):
             header_row_idx = i + 1
             header_row = row
             break
@@ -1680,7 +1681,6 @@ def run_inventory_import(job_id, file_stream, target_category):
         update_job_progress(job_id, status='error', errors=['Could not find header row'])
         return
 
-    # Build header map: map column names to indices
     header_map = {}
     for idx, cell in enumerate(header_row):
         if cell:
@@ -1691,8 +1691,8 @@ def run_inventory_import(job_id, file_stream, target_category):
                 header_map['quantity'] = idx
             elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                 header_map['cost_price'] = idx
-            elif cell_lower in ['amount', 'selling price', 'price', 'total']:
-                header_map['selling_price'] = idx   # use AMOUNT as selling price
+            elif cell_lower in ['amount', 'selling price', 'price']:
+                header_map['selling_price'] = idx
             elif cell_lower in ['date', 'purchase date']:
                 header_map['date'] = idx
             elif cell_lower in ['discount']:
@@ -1712,7 +1712,6 @@ def run_inventory_import(job_id, file_stream, target_category):
         if not any(row):
             continue
         try:
-            # ---- Product name ----
             name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
             if not name:
                 skipped_rows.append({
@@ -1727,7 +1726,7 @@ def run_inventory_import(job_id, file_stream, target_category):
                 })
                 continue
 
-            # ---- Quantity (allow 0 or missing) ----
+            # ---- Quantity (default 0) ----
             try:
                 quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
                 if quantity < 0:
@@ -1747,14 +1746,14 @@ def run_inventory_import(job_id, file_stream, target_category):
                 cost_price = 0
                 warning_rows.append(f"Row {row_idx}: Invalid cost price, set to 0")
 
-            # ---- Selling price (AMOUNT) ----
+            # ---- Selling price (AMOUNT) – store total ----
             try:
-                selling_price = float(row[header_map['selling_price']]) if header_map.get('selling_price') is not None and row[header_map['selling_price']] is not None else 0
-                if selling_price < 0:
-                    selling_price = 0
+                selling_price_total = float(row[header_map['selling_price']]) if header_map.get('selling_price') is not None and row[header_map['selling_price']] is not None else 0
+                if selling_price_total < 0:
+                    selling_price_total = 0
                     warning_rows.append(f"Row {row_idx}: Selling price was negative, set to 0")
             except:
-                selling_price = 0
+                selling_price_total = 0
                 warning_rows.append(f"Row {row_idx}: Invalid selling price, set to 0")
 
             # ---- Discount ----
@@ -1765,7 +1764,7 @@ def run_inventory_import(job_id, file_stream, target_category):
             except:
                 discount = 0
 
-            # ---- Purchase date ----
+            # ---- Purchase date (force DD/MM/YYYY) ----
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 try:
@@ -1773,7 +1772,7 @@ def run_inventory_import(job_id, file_stream, target_category):
                         purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
                     else:
                         date_str = str(row[header_map['date']]).strip()
-                        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+                        for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%d/%m/%y', '%Y-%m-%d', '%m/%d/%Y'):
                             try:
                                 purchase_date = datetime.strptime(date_str, fmt)
                                 break
@@ -1789,9 +1788,10 @@ def run_inventory_import(job_id, file_stream, target_category):
             rows_to_process.append({
                 'row_idx': row_idx,
                 'name': name,
+                'brand': '',   # No brand column in your file
                 'quantity': int(quantity),
                 'cost_price': cost_price,
-                'selling_price': selling_price,
+                'selling_price': selling_price_total,
                 'discount': discount,
                 'category': target_category,
                 'purchase_date': purchase_date
@@ -1836,37 +1836,49 @@ def run_inventory_import(job_id, file_stream, target_category):
         cursor = conn.cursor()
 
         for idx, item in enumerate(rows_to_process, start=1):
-            # Product lookup (ignores category, updates if needed)
-            cursor.execute(
-                "SELECT id, category FROM products WHERE name = %s AND brand = ''",
-                (item['name'],)
-            )
-            result = cursor.fetchone()
-            if result:
-                product_id = result[0]
-                existing_category = result[1]
-                if existing_category != item['category']:
-                    cursor.execute(
-                        "UPDATE products SET category = %s WHERE id = %s",
-                        (item['category'], product_id)
-                    )
+            # Get or create product (ignoring permanently deleted)
+            cursor.execute("""
+                SELECT p.id 
+                FROM products p
+                LEFT JOIN deleted_products dp ON dp.product_id = p.id AND dp.action = 'PERMANENTLY DELETED' AND dp.source = 'product'
+                WHERE p.name = %s AND p.brand = %s AND dp.id IS NULL
+            """, (item['name'], item['brand']))
+            product = cursor.fetchone()
+
+            if product:
+                product_id = product[0]
+                cursor.execute("""
+                    UPDATE products
+                    SET category = %s
+                    WHERE id = %s
+                """, (item['category'], product_id))
             else:
-                cursor.execute(
-                    "INSERT INTO products (name, brand, category, cost_price, selling_price, discount, stock) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING id",
-                    (item['name'], '', item['category'], item['cost_price'], item['selling_price'], item['discount'])
-                )
+                cursor.execute("""
+                    INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (item['name'], item['brand'], item['cost_price'], item['selling_price'], 0, item['category']))
                 product_id = cursor.fetchone()[0]
 
-            # Insert purchase batch
+            # ---- Insert into purchases table (like add_purchase does) ----
+            total = (item['cost_price'] * item['quantity']) - item['discount']
+            cursor.execute("""
+                INSERT INTO purchases
+                (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (item['name'], item['brand'], item['category'], item['quantity'],
+                  item['cost_price'], item['discount'], total, item['selling_price'], item['purchase_date']))
+
+            # ---- Insert into purchase_batches ----
             cursor.execute("""
                 INSERT INTO purchase_batches
-                (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
             """, (product_id, item['quantity'], item['quantity'], item['cost_price'],
-                  item['selling_price'], item['discount'], item['purchase_date']))
+                  item['selling_price'], item['discount'], item['purchase_date'], "added"))
 
-            # Update stock (only if quantity > 0)
+            # ---- Update product stock ----
             if item['quantity'] != 0:
                 cursor.execute("""
                     UPDATE products SET stock = stock + %s WHERE id = %s
@@ -1875,11 +1887,9 @@ def run_inventory_import(job_id, file_stream, target_category):
             imported_count += 1
             if imported_count % 100 == 0:
                 update_job_progress(job_id, processed=imported_count)
-                # Check cancellation
                 if cancel_flags.get(job_id):
                     raise Exception("CANCELLED_BY_USER")
 
-        # ---- All rows processed successfully ----
         conn.commit()
         cancel_flags.pop(job_id, None)
         update_job_progress(job_id, status='done',
@@ -1887,7 +1897,7 @@ def run_inventory_import(job_id, file_stream, target_category):
                                 'imported': imported_count,
                                 'skipped': skipped_rows,
                                 'warnings': warning_rows,
-                                'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped (missing product name), {len(warning_rows)} warnings (defaults applied)'
+                                'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped, {len(warning_rows)} warnings'
                             })
 
     except Exception as e:
@@ -1904,7 +1914,6 @@ def run_inventory_import(job_id, file_stream, target_category):
         if conn:
             conn.close()
         cancel_flags.pop(job_id, None)
-
 # ----- SALES IMPORT (background thread) with single transaction -----
 def run_sales_import(job_id, file_stream, target_category):
     try:
@@ -2153,7 +2162,7 @@ def run_sales_import(job_id, file_stream, target_category):
     finally:
         if conn:
             conn.close()
-        cancel_flags.pop(job_id, None)
+        cancel_flags.pop(job_id, None)        
 
 # ----- INVENTORY IMPORT ENDPOINT -----
 @app.route('/api/inventory/import', methods=['POST'])
