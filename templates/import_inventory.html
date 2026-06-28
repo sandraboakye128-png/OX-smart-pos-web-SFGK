@@ -108,8 +108,180 @@
 </div>
 
 <script>
-    // ---- Helper function for progress and result with polling ----
-    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName, statusTextId, counterId, cancelBtnId) {
+    // ---- Utility: start polling for a given job ID ----
+    function startPolling(jobId, type, statusTextId, progressBarId, counterId, resultDivId, cancelBtnId, progressId) {
+        const statusText = document.getElementById(statusTextId);
+        const progressBar = document.getElementById(progressBarId);
+        const counterDiv = document.getElementById(counterId);
+        const resultDiv = document.getElementById(resultDivId);
+        const cancelBtn = document.getElementById(cancelBtnId);
+        const progressContainer = document.getElementById(progressId);
+
+        // Clear any existing interval
+        if (window[`${type}PollInterval`]) {
+            clearInterval(window[`${type}PollInterval`]);
+            window[`${type}PollInterval`] = null;
+        }
+
+        // Show progress container
+        progressContainer.classList.remove('hidden');
+        cancelBtn.classList.remove('hidden');
+        resultDiv.innerHTML = ''; // clear old result
+        progressBar.style.width = '0%';
+        let previousPercent = 0;
+
+        // Poll function
+        const poll = async () => {
+            try {
+                const resp = await fetch(`/api/import/progress/${jobId}`);
+                const data = await resp.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Progress check failed');
+                }
+
+                const status = data.status;
+                const total = data.total || 0;
+                const processed = data.processed || 0;
+                const errors = data.errors || [];
+                const result = data.result || {};
+                const imported = result.imported || 0;
+                const skipped = result.skipped || [];
+                const message = result.message || '';
+
+                // Update progress bar
+                const percent = total > 0 ? Math.min((processed / total) * 100, 100) : 0;
+                if (percent - previousPercent >= 0.5) {
+                    progressBar.style.width = percent + '%';
+                    previousPercent = percent;
+                }
+                if (total > 0) {
+                    counterDiv.textContent = `${processed} of ${total} records processed`;
+                } else {
+                    counterDiv.textContent = `Processing ${processed} records...`;
+                }
+
+                // If status is terminal, stop polling and display final result
+                if (status === 'done' || status === 'error' || status === 'cancelled') {
+                    clearInterval(window[`${type}PollInterval`]);
+                    window[`${type}PollInterval`] = null;
+                    cancelBtn.classList.add('hidden');
+                    progressBar.style.width = '100%';
+
+                    let statusTextStr = '';
+                    let colorClass = '';
+                    if (status === 'done') {
+                        statusTextStr = '✅ Import complete!';
+                        colorClass = 'bg-green-500';
+                    } else if (status === 'cancelled') {
+                        statusTextStr = '⛔ Import cancelled';
+                        colorClass = 'bg-gray-500';
+                    } else {
+                        statusTextStr = '❌ Import failed!';
+                        colorClass = 'bg-red-500';
+                    }
+                    statusText.textContent = statusTextStr;
+                    progressBar.className = `${colorClass} h-2.5 rounded-full`;
+                    counterDiv.textContent = '';
+
+                    // Build detailed result HTML
+                    let html = '';
+                    if (status === 'done') {
+                        html += `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                            <strong>✅ Import successful!</strong><br>
+                            ${message || `Imported ${imported} records.`}
+                        </div>`;
+                    } else if (status === 'cancelled') {
+                        html += `<div class="bg-gray-100 border border-gray-400 text-gray-700 px-4 py-3 rounded">
+                            <strong>⛔ Import cancelled by user.</strong><br>
+                            ${message || 'No data was committed.'}
+                        </div>`;
+                    } else {
+                        html += `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                            <strong>❌ Import failed:</strong> ${message || 'Unknown error'}
+                        </div>`;
+                    }
+
+                    // Show skipped rows and download report
+                    if (skipped && skipped.length > 0) {
+                        html += `<div class="mt-4">
+                            <h4 class="font-semibold text-gray-700">⚠️ Skipped rows (${skipped.length})</h4>
+                            <div class="overflow-x-auto max-h-96 overflow-y-auto border border-gray-300 rounded-md mt-2">
+                                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead class="bg-gray-50 sticky top-0">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Row</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name / Item</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        ${skipped.map(s => `
+                                            <tr>
+                                                <td class="px-3 py-2 whitespace-nowrap">${s.row}</td>
+                                                <td class="px-3 py-2">${s.data?.name || s.data?.item || '-'}</td>
+                                                <td class="px-3 py-2">${s.data?.qty || '-'}</td>
+                                                <td class="px-3 py-2">${s.data?.rate || '-'}</td>
+                                                <td class="px-3 py-2">${s.reason}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-3">
+                                <a href="/api/import/failed-report/${jobId}" target="_blank" 
+                                   class="inline-block bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md text-sm">
+                                    📄 Download Failed Report (PDF)
+                                </a>
+                            </div>
+                        </div>`;
+                    } else {
+                        html += `<div class="mt-2 text-sm text-gray-600">No rows were skipped.</div>`;
+                    }
+
+                    if (errors && errors.length > 0) {
+                        html += `<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mt-2">
+                            <strong>⚠️ Errors (${errors.length})</strong>
+                            <ul class="list-disc list-inside text-sm max-h-40 overflow-y-auto">${errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                        </div>`;
+                    }
+
+                    resultDiv.innerHTML = html;
+
+                    // Remove job ID from storage when done
+                    const storageKey = (type === 'purchase') ? 'purchaseJobId' : 'salesJobId';
+                    sessionStorage.removeItem(storageKey);
+                    // Hide progress container after a delay
+                    setTimeout(() => {
+                        progressContainer.classList.add('hidden');
+                    }, 5000);
+                } else {
+                    // Still processing: update status text
+                    statusText.textContent = 'Processing...';
+                }
+            } catch (err) {
+                clearInterval(window[`${type}PollInterval`]);
+                window[`${type}PollInterval`] = null;
+                cancelBtn.classList.add('hidden');
+                resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                    <strong>❌ Polling error:</strong> ${err.message}
+                </div>`;
+                progressContainer.classList.add('hidden');
+                // Remove job ID from storage on error
+                const storageKey = (type === 'purchase') ? 'purchaseJobId' : 'salesJobId';
+                sessionStorage.removeItem(storageKey);
+            }
+        };
+
+        // Initial call
+        poll();
+        // Set up interval
+        window[`${type}PollInterval`] = setInterval(poll, 1500);
+    }
+
+    // ---- Helper function to set up the import form with sessionStorage support ----
+    function setupImportForm(formId, fileInputId, progressId, progressBarId, resultId, endpoint, targetRadioName, statusTextId, counterId, cancelBtnId, type) {
         const form = document.getElementById(formId);
         const fileInput = document.getElementById(fileInputId);
         const progress = document.getElementById(progressId);
@@ -119,15 +291,29 @@
         const counterDiv = document.getElementById(counterId);
         const cancelBtn = document.getElementById(cancelBtnId);
 
-        let pollInterval = null;
-        let jobId = null;
         let isCancelling = false;
+        const storageKey = (type === 'purchase') ? 'purchaseJobId' : 'salesJobId';
+
+        // On page load, check if there's a stored job ID for this type
+        (function init() {
+            const storedJobId = sessionStorage.getItem(storageKey);
+            if (storedJobId) {
+                // Show progress UI, hide form inputs (optional)
+                progress.classList.remove('hidden');
+                resultDiv.innerHTML = ''; // clear result
+                statusText.textContent = 'Reconnecting to running import...';
+                cancelBtn.classList.remove('hidden');
+                // Start polling
+                startPolling(storedJobId, type, statusTextId, progressBarId, counterId, resultId, cancelBtnId, progressId);
+            }
+        })();
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (pollInterval) {
-                alert('An import is already running. Please wait or cancel it.');
-                return;
+            // If there is already a polling interval, clear it (old job)
+            if (window[`${type}PollInterval`]) {
+                clearInterval(window[`${type}PollInterval`]);
+                window[`${type}PollInterval`] = null;
             }
 
             const file = fileInput.files[0];
@@ -149,15 +335,13 @@
             resultDiv.innerHTML = '';
             statusText.textContent = 'Starting import...';
             counterDiv.textContent = '';
-            cancelBtn.classList.add('hidden');
+            cancelBtn.classList.remove('hidden');
             isCancelling = false;
 
-            const isPurchase = endpoint.includes('inventory');
-            const baseColor = isPurchase ? 'bg-teal-500' : 'bg-purple-500';
+            const baseColor = (type === 'purchase') ? 'bg-teal-500' : 'bg-purple-500';
             progressBar.className = `${baseColor} h-2.5 rounded-full`;
 
             try {
-                // Submit the import
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     body: formData
@@ -168,162 +352,27 @@
                     throw new Error(data.error || 'Import failed to start');
                 }
 
-                jobId = data.job_id;
-                statusText.textContent = 'Processing...';
-                progressBar.style.width = '0%';
-                let previousPercent = 0;
-                cancelBtn.classList.remove('hidden');
+                const jobId = data.job_id;
+                // Store in sessionStorage
+                sessionStorage.setItem(storageKey, jobId);
 
-                // Poll for progress
-                pollInterval = setInterval(async () => {
-                    try {
-                        const progRes = await fetch(`/api/import/progress/${jobId}`);
-                        const progData = await progRes.json();
-                        if (!progData.success) {
-                            clearInterval(pollInterval);
-                            pollInterval = null;
-                            throw new Error(progData.error || 'Progress check failed');
-                        }
-
-                        const status = progData.status;
-                        const total = progData.total || 0;
-                        const processed = progData.processed || 0;
-                        const errors = progData.errors || [];
-                        const result = progData.result || {};
-                        const imported = result.imported || 0;
-                        const skipped = result.skipped || [];
-                        const message = result.message || '';
-
-                        // Update progress bar
-                        const percent = total > 0 ? Math.min((processed / total) * 100, 100) : 0;
-                        if (percent - previousPercent >= 0.5) {
-                            progressBar.style.width = percent + '%';
-                            previousPercent = percent;
-                        }
-                        if (total > 0) {
-                            counterDiv.textContent = `${processed} of ${total} records processed`;
-                        } else {
-                            counterDiv.textContent = `Processing ${processed} records...`;
-                        }
-
-                        // If cancelled or done, hide cancel button and stop polling
-                        if (status === 'cancelled' || status === 'done' || status === 'error') {
-                            clearInterval(pollInterval);
-                            pollInterval = null;
-                            cancelBtn.classList.add('hidden');
-                            progressBar.style.width = '100%';
-                            if (status === 'cancelled') {
-                                progressBar.className = 'bg-gray-500 h-2.5 rounded-full';
-                                statusText.textContent = '⛔ Import cancelled';
-                            } else if (status === 'done') {
-                                progressBar.className = 'bg-green-500 h-2.5 rounded-full';
-                                statusText.textContent = '✅ Import complete!';
-                            } else {
-                                progressBar.className = 'bg-red-500 h-2.5 rounded-full';
-                                statusText.textContent = '❌ Import failed!';
-                            }
-                            counterDiv.textContent = '';
-
-                            // Build detailed report
-                            let html = '';
-                            if (status === 'done') {
-                                html += `<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-                                    <strong>✅ Import successful!</strong><br>
-                                    ${message || `Imported ${imported} records.`}
-                                </div>`;
-                            } else if (status === 'cancelled') {
-                                html += `<div class="bg-gray-100 border border-gray-400 text-gray-700 px-4 py-3 rounded">
-                                    <strong>⛔ Import cancelled by user.</strong><br>
-                                    ${message || 'No data was committed.'}
-                                </div>`;
-                            } else {
-                                html += `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                                    <strong>❌ Import failed:</strong> ${message || 'Unknown error'}
-                                </div>`;
-                            }
-
-                            // Show skipped rows (if any) and download button
-                            if (skipped && skipped.length > 0) {
-                                html += `<div class="mt-4">
-                                    <h4 class="font-semibold text-gray-700">⚠️ Skipped rows (${skipped.length})</h4>
-                                    <div class="overflow-x-auto max-h-96 overflow-y-auto border border-gray-300 rounded-md mt-2">
-                                        <table class="min-w-full divide-y divide-gray-200 text-sm">
-                                            <thead class="bg-gray-50 sticky top-0">
-                                                <tr>
-                                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Row</th>
-                                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name / Item</th>
-                                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
-                                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody class="bg-white divide-y divide-gray-200">
-                                                ${skipped.map(s => `
-                                                    <tr>
-                                                        <td class="px-3 py-2 whitespace-nowrap">${s.row}</td>
-                                                        <td class="px-3 py-2">${s.data?.name || s.data?.item || '-'}</td>
-                                                        <td class="px-3 py-2">${s.data?.qty || '-'}</td>
-                                                        <td class="px-3 py-2">${s.data?.rate || '-'}</td>
-                                                        <td class="px-3 py-2">${s.reason}</td>
-                                                    </tr>
-                                                `).join('')}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <div class="mt-3">
-                                        <a href="/api/import/failed-report/${jobId}" target="_blank" 
-                                           class="inline-block bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md text-sm">
-                                            📄 Download Failed Report (PDF)
-                                        </a>
-                                    </div>
-                                </div>`;
-                            } else {
-                                html += `<div class="mt-2 text-sm text-gray-600">No rows were skipped.</div>`;
-                            }
-
-                            // Show general errors (if any)
-                            if (errors && errors.length > 0) {
-                                html += `<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mt-2">
-                                    <strong>⚠️ Errors (${errors.length})</strong>
-                                    <ul class="list-disc list-inside text-sm max-h-40 overflow-y-auto">${errors.map(e => `<li>${e}</li>`).join('')}</ul>
-                                </div>`;
-                            }
-
-                            resultDiv.innerHTML = html;
-
-                            setTimeout(() => {
-                                progress.classList.add('hidden');
-                            }, 5000);
-                            jobId = null;
-                        }
-                    } catch (pollErr) {
-                        clearInterval(pollInterval);
-                        pollInterval = null;
-                        resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                            <strong>❌ Polling error:</strong> ${pollErr.message}
-                        </div>`;
-                        progress.classList.add('hidden');
-                        cancelBtn.classList.add('hidden');
-                        jobId = null;
-                    }
-                }, 1000);
+                // Start polling for this job
+                startPolling(jobId, type, statusTextId, progressBarId, counterId, resultId, cancelBtnId, progressId);
 
             } catch (err) {
-                if (pollInterval) {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
-                }
-                resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                    <strong>❌ Network error:</strong> ${err.message}
-                </div>`;
                 progress.classList.add('hidden');
                 cancelBtn.classList.add('hidden');
-                jobId = null;
+                resultDiv.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                    <strong>❌ Error:</strong> ${err.message}
+                </div>`;
+                sessionStorage.removeItem(storageKey);
             }
         });
 
         // Cancel button handler
         cancelBtn.addEventListener('click', async () => {
+            // Get the job ID from storage or from polling variable
+            const jobId = sessionStorage.getItem(storageKey);
             if (!jobId || isCancelling) return;
             if (!confirm('Are you sure you want to cancel this import? The data already imported will remain.')) {
                 return;
@@ -362,7 +411,8 @@
         'purchase_target',
         'purchaseStatusText',
         'purchaseCounter',
-        'purchaseCancelBtn'
+        'purchaseCancelBtn',
+        'purchase'
     );
 
     // Setup sales import
@@ -376,7 +426,8 @@
         'sales_target',
         'salesStatusText',
         'salesCounter',
-        'salesCancelBtn'
+        'salesCancelBtn',
+        'sales'
     );
 </script>
 {% endblock %}
