@@ -1704,7 +1704,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                 header_map['cost_price'] = idx
             elif cell_lower in ['amount', 'selling price', 'price']:
-                header_map['total_selling'] = idx   # This is the total selling price (AMOUNT)
+                header_map['total_selling'] = idx
             elif cell_lower in ['date', 'purchase date']:
                 header_map['date'] = idx
             elif cell_lower in ['discount']:
@@ -1724,7 +1724,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         if not any(row):
             continue
         try:
-            # ---- Product Name ----
             name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
             if not name:
                 skipped_rows.append({
@@ -1739,7 +1738,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 })
                 continue
 
-            # ---- Quantity ----
             try:
                 quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
                 if quantity < 0:
@@ -1749,7 +1747,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 quantity = 0
                 warning_rows.append(f"Row {row_idx}: Invalid quantity, set to 0")
 
-            # ---- Cost price (RATE) ----
             try:
                 cost_price = float(row[header_map['cost_price']]) if header_map.get('cost_price') is not None and row[header_map['cost_price']] is not None else 0
                 if cost_price < 0:
@@ -1759,7 +1756,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 cost_price = 0
                 warning_rows.append(f"Row {row_idx}: Invalid cost price, set to 0")
 
-            # ---- Total Selling Price (AMOUNT) ----
             try:
                 total_selling = float(row[header_map['total_selling']]) if header_map.get('total_selling') is not None and row[header_map['total_selling']] is not None else 0
                 if total_selling < 0:
@@ -1769,10 +1765,8 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 total_selling = 0
                 warning_rows.append(f"Row {row_idx}: Invalid Amount, set to 0")
 
-            # ---- Selling price per unit = total_selling / quantity ----
             selling_price_per_unit = total_selling / quantity if quantity > 0 else 0
 
-            # ---- Discount ----
             try:
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
                 if discount < 0:
@@ -1780,7 +1774,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             except:
                 discount = 0
 
-            # ---- Purchase date ----
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 try:
@@ -1804,10 +1797,10 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             rows_to_process.append({
                 'row_idx': row_idx,
                 'name': name,
-                'brand': '',   # No brand column in your file
+                'brand': '',
                 'quantity': int(quantity),
                 'cost_price': cost_price,
-                'selling_price': selling_price_per_unit,  # Now per-unit selling price
+                'selling_price': selling_price_per_unit,
                 'discount': discount,
                 'category': target_category,
                 'purchase_date': purchase_date
@@ -1845,13 +1838,12 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
     imported_count = 0
     overall_errors = warning_rows.copy()
 
-    # ----- SINGLE TRANSACTION -----
     try:
         conn = psycopg2.connect(DATABASE_URL, sslmode='require')
         conn.autocommit = False
         cursor = conn.cursor()
 
-        # --- REPLACE MODE: delete all existing data for this category ---
+        # --- REPLACE MODE: delete ALL products, purchases, and batches for this category ---
         if mode == 'replace':
             # Delete purchase_batches for products in this category
             cursor.execute("""
@@ -1860,43 +1852,60 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     SELECT id FROM products WHERE category = %s
                 )
             """, (target_category,))
-            # Delete purchases (purchase records) for this category
+            # Delete purchases for this category
             cursor.execute("""
                 DELETE FROM purchases
                 WHERE category = %s
             """, (target_category,))
-            # Reset stock for products in this category to 0
+            # Delete products of this category (this removes them entirely)
             cursor.execute("""
-                UPDATE products SET stock = 0 WHERE category = %s
+                DELETE FROM products
+                WHERE category = %s
             """, (target_category,))
+            # Reset the product sequence to the max id (or 1 if no products left)
+            cursor.execute("SELECT setval('products_id_seq', (SELECT COALESCE(MAX(id), 1) FROM products))")
 
         # ---- Process rows ----
         for idx, item in enumerate(rows_to_process, start=1):
-            # Get or create product (ignoring permanently deleted)
-            cursor.execute("""
-                SELECT p.id 
-                FROM products p
-                LEFT JOIN deleted_products dp ON dp.product_id = p.id AND dp.action = 'PERMANENTLY DELETED' AND dp.source = 'product'
-                WHERE p.name = %s AND p.brand = %s AND dp.id IS NULL
-            """, (item['name'], item['brand']))
-            product = cursor.fetchone()
-
-            if product:
-                product_id = product[0]
-                cursor.execute("""
-                    UPDATE products
-                    SET category = %s
-                    WHERE id = %s
-                """, (item['category'], product_id))
-            else:
+            # For replace mode, no products of this category exist, so we always insert.
+            # For append mode, check for existing product in the same category.
+            if mode == 'replace':
+                # Insert new product
                 cursor.execute("""
                     INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (item['name'], item['brand'], item['cost_price'], item['selling_price'], 0, item['category']))
                 product_id = cursor.fetchone()[0]
+            else:
+                # Append mode: find existing product in the same category
+                cursor.execute("""
+                    SELECT p.id, p.cost_price, p.selling_price
+                    FROM products p
+                    LEFT JOIN deleted_products dp ON dp.product_id = p.id AND dp.action = 'PERMANENTLY DELETED' AND dp.source = 'product'
+                    WHERE p.name = %s AND p.brand = %s AND p.category = %s AND dp.id IS NULL
+                """, (item['name'], item['brand'], item['category']))
+                product = cursor.fetchone()
 
-            # ---- Insert into purchases table (like add_purchase does) ----
+                if product:
+                    product_id, existing_cost, existing_selling = product
+                    # Update product details if changed
+                    if (existing_cost != item['cost_price'] or existing_selling != item['selling_price']):
+                        cursor.execute("""
+                            UPDATE products
+                            SET cost_price = %s, selling_price = %s
+                            WHERE id = %s
+                        """, (item['cost_price'], item['selling_price'], product_id))
+                else:
+                    # Insert new product
+                    cursor.execute("""
+                        INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (item['name'], item['brand'], item['cost_price'], item['selling_price'], 0, item['category']))
+                    product_id = cursor.fetchone()[0]
+
+            # ---- Insert into purchases table ----
             total = (item['cost_price'] * item['quantity']) - item['discount']
             cursor.execute("""
                 INSERT INTO purchases
