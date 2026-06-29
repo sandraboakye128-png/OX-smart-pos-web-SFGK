@@ -1692,7 +1692,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                 header_map['cost_price'] = idx
             elif cell_lower in ['amount', 'selling price', 'price']:
-                header_map['selling_price'] = idx
+                header_map['total_selling'] = idx   # This is the total selling price (AMOUNT)
             elif cell_lower in ['date', 'purchase date']:
                 header_map['date'] = idx
             elif cell_lower in ['discount']:
@@ -1712,6 +1712,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         if not any(row):
             continue
         try:
+            # ---- Product Name ----
             name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
             if not name:
                 skipped_rows.append({
@@ -1720,13 +1721,13 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                         'name': None,
                         'qty': row[header_map.get('quantity')] if header_map.get('quantity') is not None else None,
                         'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None,
-                        'amount': row[header_map.get('selling_price')] if header_map.get('selling_price') is not None else None
+                        'amount': row[header_map.get('total_selling')] if header_map.get('total_selling') is not None else None
                     },
                     'reason': 'Product name is empty (row skipped)'
                 })
                 continue
 
-            # ---- Quantity (default 0) ----
+            # ---- Quantity ----
             try:
                 quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
                 if quantity < 0:
@@ -1746,15 +1747,18 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 cost_price = 0
                 warning_rows.append(f"Row {row_idx}: Invalid cost price, set to 0")
 
-            # ---- Selling price (AMOUNT) – store total ----
+            # ---- Total Selling Price (AMOUNT) ----
             try:
-                selling_price_total = float(row[header_map['selling_price']]) if header_map.get('selling_price') is not None and row[header_map['selling_price']] is not None else 0
-                if selling_price_total < 0:
-                    selling_price_total = 0
-                    warning_rows.append(f"Row {row_idx}: Selling price was negative, set to 0")
+                total_selling = float(row[header_map['total_selling']]) if header_map.get('total_selling') is not None and row[header_map['total_selling']] is not None else 0
+                if total_selling < 0:
+                    total_selling = 0
+                    warning_rows.append(f"Row {row_idx}: Amount was negative, set to 0")
             except:
-                selling_price_total = 0
-                warning_rows.append(f"Row {row_idx}: Invalid selling price, set to 0")
+                total_selling = 0
+                warning_rows.append(f"Row {row_idx}: Invalid Amount, set to 0")
+
+            # ---- Selling price per unit = total_selling / quantity ----
+            selling_price_per_unit = total_selling / quantity if quantity > 0 else 0
 
             # ---- Discount ----
             try:
@@ -1764,7 +1768,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             except:
                 discount = 0
 
-            # ---- Purchase date (force DD/MM/YYYY) ----
+            # ---- Purchase date ----
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 try:
@@ -1791,7 +1795,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 'brand': '',   # No brand column in your file
                 'quantity': int(quantity),
                 'cost_price': cost_price,
-                'selling_price': selling_price_total,
+                'selling_price': selling_price_per_unit,  # Now per-unit selling price
                 'discount': discount,
                 'category': target_category,
                 'purchase_date': purchase_date
@@ -1803,7 +1807,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     'name': row[header_map.get('name')] if header_map.get('name') is not None else None,
                     'qty': row[header_map.get('quantity')] if header_map.get('quantity') is not None else None,
                     'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None,
-                    'amount': row[header_map.get('selling_price')] if header_map.get('selling_price') is not None else None
+                    'amount': row[header_map.get('total_selling')] if header_map.get('total_selling') is not None else None
                 },
                 'reason': f'Fatal error: {str(e)}'
             })
@@ -1853,9 +1857,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             cursor.execute("""
                 UPDATE products SET stock = 0 WHERE category = %s
             """, (target_category,))
-            # Optionally, you could also delete sales_items and sales for this category,
-            # but that is usually done separately via the sales import replace mode.
-            # We keep product definitions to preserve history.
 
         # ---- Process rows ----
         for idx, item in enumerate(rows_to_process, start=1):
