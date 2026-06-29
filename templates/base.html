@@ -160,26 +160,37 @@
             </a>
             {% endif %}
 
-            <!-- ===== PENDING BADGE & SYNC BUTTON ===== -->
+            <!-- ===== PENDING BADGE & SYNC / CLEAR BUTTONS (stacked vertically) ===== -->
             {% if current_user %}
-            <div class="mt-4 flex items-center gap-2 px-3 py-1">
-                <span id="pending-badge" class="text-xs text-yellow-300 bg-gray-700 px-2 py-0.5 rounded-full" style="display:none;"></span>
-                <button onclick="syncPendingSales()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition">
-                    <i class="fas fa-cloud-upload-alt mr-1"></i> Sync Offline
+            <div class="mt-4 flex flex-col gap-2 px-3 py-1">
+                <!-- First row: badge + Sync button -->
+                <div class="flex items-center gap-2">
+                    <span id="pending-badge" class="text-xs text-yellow-300 bg-gray-700 px-2 py-0.5 rounded-full" style="display:none;"></span>
+                    <button onclick="syncPendingSales()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition">
+                        <i class="fas fa-cloud-upload-alt mr-1"></i> Sync Offline
+                    </button>
+                </div>
+                <!-- Second row: Clear Offline Data button -->
+                <button onclick="clearOfflineData()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-md transition">
+                    <i class="fas fa-trash mr-1"></i> Clear Offline Data
                 </button>
             </div>
             {% endif %}
-        </nav>
 
-        <!-- Logout Button -->
-        {% if current_user %}
-        <div class="p-3 mt-auto">
-            <button onclick="logout()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2 text-sm">
-                <i class="fas fa-sign-out-alt"></i> Logout
-            </button>
-        </div>
-        {% endif %}
+            <!-- ===== LOGOUT BUTTON (now placed here, after all nav items) ===== -->
+            {% if current_user %}
+            <div class="pt-4 pb-2">
+                <button onclick="logout()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+            {% endif %}
+
+        </nav>
+        <!-- end of nav -->
+
     </div>
+    <!-- end of sidebar -->
 
     <!-- ========== MAIN CONTENT AREA ========== -->
     <div class="flex-1 flex flex-col">
@@ -230,6 +241,61 @@
         } else {
             alert('Logout failed');
         }
+    }
+
+    // Clear all offline storage (pending sales, imports, badge counts)
+    function clearOfflineData() {
+        if (!confirm('⚠️ This will clear all pending offline sales and import data. Proceed?')) return;
+        
+        // 1. Remove all known localStorage & sessionStorage keys
+        const keysToRemove = [
+            'pendingCount', 
+            'pendingSales', 
+            'offlineQueue', 
+            'importPending',
+            'pendingImports',
+            'offlineSales',
+            'pendingJobId',
+            'pendingJobStatus'
+        ];
+        keysToRemove.forEach(key => {
+            localStorage.removeItem(key);
+            sessionStorage.removeItem(key);
+        });
+        
+        // 2. Delete IndexedDB databases (common names used in offline.js)
+        const dbNames = [
+            'OfflineSalesDB', 
+            'SalesDB', 
+            'offlineDB', 
+            'PendingDB',
+            'ImportQueueDB'
+        ];
+        dbNames.forEach(name => {
+            try {
+                const request = indexedDB.deleteDatabase(name);
+                request.onerror = function() { 
+                    console.warn('Could not delete DB:', name); 
+                };
+                request.onsuccess = function() { 
+                    console.log('✅ Deleted DB:', name); 
+                };
+            } catch(e) {
+                console.warn('Error deleting DB:', name, e);
+            }
+        });
+        
+        // 3. Hide the pending badge immediately
+        const badge = document.getElementById('pending-badge');
+        if (badge) {
+            badge.style.display = 'none';
+            badge.textContent = '';
+        }
+        
+        // 4. Refresh the page after a short delay
+        setTimeout(() => {
+            location.reload();
+        }, 600);
     }
 
     // Auto-close dropdown if clicked outside (optional)
