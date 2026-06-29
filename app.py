@@ -70,7 +70,7 @@ except ImportError:
 
 # ---------- PDF GENERATION ----------
 import io
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from reportlab.lib.pagesizes import landscape, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -1599,14 +1599,17 @@ def api_archive():
             combined = [item for item in combined if item['action'] == status_filter]
             print(f"📊 Filtered to {len(combined)} items with status '{status_filter}'")
         
+        # ----------------- FIXED sort_key with proper indentation -----------------
         def sort_key(item):
             if item['action'] == 'ACTIVE':
-                return (datetime.max, item['name'])
+                return (datetime.max.replace(tzinfo=timezone.utc), item['name'])
             else:
                 try:
-                    date_obj = datetime.fromisoformat(str(item['date'])) if item['date'] else datetime.min
+                    date_obj = datetime.fromisoformat(str(item['date'])) if item['date'] else datetime.min.replace(tzinfo=timezone.utc)
+                    if date_obj.tzinfo is None:
+                        date_obj = date_obj.replace(tzinfo=timezone.utc)
                 except:
-                    date_obj = datetime.min
+                    date_obj = datetime.min.replace(tzinfo=timezone.utc)
                 return (date_obj, item['name'])
         
         combined.sort(key=sort_key, reverse=True)
