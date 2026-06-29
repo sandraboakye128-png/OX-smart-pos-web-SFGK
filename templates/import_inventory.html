@@ -19,6 +19,7 @@
         </p>
 
         <form id="importPurchaseForm" enctype="multipart/form-data">
+            <!-- Target Category -->
             <div class="flex flex-wrap items-center gap-4 mb-3">
                 <label class="font-medium text-gray-700">Import to:</label>
                 <div class="flex items-center gap-4">
@@ -32,6 +33,23 @@
                     </label>
                 </div>
             </div>
+
+            <!-- Import Mode -->
+            <div class="flex flex-wrap items-center gap-4 mb-3">
+                <label class="font-medium text-gray-700">Import mode:</label>
+                <div class="flex items-center gap-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="purchase_mode" value="append" checked class="form-radio text-teal-500">
+                        <span class="ml-2">Append (keep old data)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="purchase_mode" value="replace" class="form-radio text-red-500">
+                        <span class="ml-2">Replace (delete old data first)</span>
+                    </label>
+                </div>
+                <span class="text-xs text-gray-500 italic">⚠️ Replace will delete all existing purchases and batches for this category before importing.</span>
+            </div>
+
             <div class="flex items-center gap-4">
                 <input type="file" id="purchaseFileInput" name="file" accept=".xlsx,.xls" required
                        class="border border-gray-300 rounded-md px-3 py-2 focus:ring focus:ring-indigo-200">
@@ -70,6 +88,7 @@
         </p>
 
         <form id="importSalesForm" enctype="multipart/form-data">
+            <!-- Target Category -->
             <div class="flex flex-wrap items-center gap-4 mb-3">
                 <label class="font-medium text-gray-700">Import to:</label>
                 <div class="flex items-center gap-4">
@@ -83,6 +102,23 @@
                     </label>
                 </div>
             </div>
+
+            <!-- Import Mode -->
+            <div class="flex flex-wrap items-center gap-4 mb-3">
+                <label class="font-medium text-gray-700">Import mode:</label>
+                <div class="flex items-center gap-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="sales_mode" value="append" checked class="form-radio text-purple-500">
+                        <span class="ml-2">Append (keep old data)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="sales_mode" value="replace" class="form-radio text-red-500">
+                        <span class="ml-2">Replace (delete old data first)</span>
+                    </label>
+                </div>
+                <span class="text-xs text-gray-500 italic">⚠️ Replace will delete all existing sales for this category before importing.</span>
+            </div>
+
             <div class="flex items-center gap-4">
                 <input type="file" id="salesFileInput" name="file" accept=".xlsx,.xls" required
                        class="border border-gray-300 rounded-md px-3 py-2 focus:ring focus:ring-indigo-200">
@@ -325,9 +361,14 @@
             const targetRadio = document.querySelector(`input[name="${targetRadioName}"]:checked`);
             const targetCategory = targetRadio ? targetRadio.value : 'Accessory';
 
+            // NEW: Get selected mode
+            const modeRadio = document.querySelector(`input[name="${type}_mode"]:checked`);
+            const mode = modeRadio ? modeRadio.value : 'append';
+
             const formData = new FormData();
             formData.append('file', file);
             formData.append('target_category', targetCategory);
+            formData.append('mode', mode);    // <-- send mode to backend
 
             // Reset UI
             progress.classList.remove('hidden');

@@ -4,7 +4,20 @@
 <div class="p-6">
     <!-- Offline banner -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached products. Sales will be saved and synced when you reconnect.
+        ⚠️ You are offline – showing cached accessories. Sales will be saved and synced when you reconnect.
+    </div>
+
+    <!-- No accessories banner -->
+    <div id="noProductsBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
+        <strong>⚠️ No accessories found.</strong><br>
+        Please ensure your inventory imports are correctly categorised as <strong>Accessories</strong> (not Screens).
+        <br><br>
+        <a href="/inventory/import" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded inline-block">
+            📥 Go to Import Page
+        </a>
+        <button onclick="refreshProducts()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded ml-2">
+            🔄 Refresh
+        </button>
     </div>
 
     <!-- Two-column layout -->
@@ -12,25 +25,23 @@
         <!-- LEFT PANEL: Products & Form -->
         <div class="w-full lg:w-1/2 px-4 mb-6">
             <div class="bg-white rounded-xl shadow-md p-4">
-                <h2 class="text-xl font-bold text-indigo-600 mb-3">🛒 Sales Terminal</h2>
+                <div class="flex items-center gap-2 mb-2">
+                    <h2 class="text-xl font-bold text-indigo-600">🛒 Sales Terminal</h2>
+                    <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>
+                </div>
                 
-                <!-- Product Search -->
-                <input type="text" id="searchProduct" placeholder="🔍 Search product..." 
+                <input type="text" id="searchProduct" placeholder="🔍 Search accessory..." 
                        class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3">
                 
-                <!-- Product List -->
                 <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4"></div>
                 
-                <!-- Selected Product Info -->
-                <div id="selectedProductInfo" class="text-gray-600 text-sm mb-2">No product selected</div>
+                <div id="selectedProductInfo" class="text-gray-600 text-sm mb-2">No accessory selected</div>
                 
-                <!-- Quantity & Discount -->
                 <div class="grid grid-cols-2 gap-3 mb-3">
                     <input type="number" id="quantity" placeholder="Quantity" class="border rounded-lg px-3 py-2">
                     <input type="number" step="0.01" id="discount" placeholder="Discount (₵)" class="border rounded-lg px-3 py-2">
                 </div>
                 
-                <!-- Date & Time -->
                 <div class="mb-3">
                     <label class="block text-sm font-medium text-gray-700">Sale Date</label>
                     <input type="date" id="saleDate" class="border rounded-lg px-3 py-2 w-full">
@@ -41,7 +52,6 @@
                            class="border rounded-lg px-3 py-2 w-full">
                 </div>
                 
-                <!-- Add to Cart Button -->
                 <button id="addToCartBtn" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 rounded-lg">
                     ➕ Add to Cart
                 </button>
@@ -136,7 +146,7 @@
 </div>
 
 <script>
-    // ---------- Sales JS ----------
+    // ---------- Sales JS (Accessories – excludes Screen) ----------
     let products = [];
     let currentProduct = null;
     let cart = [];
@@ -146,18 +156,15 @@
     let neededQty = 0;
     let batchSelection = [];
 
-    // Payment handling
     let selectedPaymentMethod = null;
     let selectedChequeNumber = null;
     let pendingSaleCallback = null;
 
-    // License state
     let licenseRemainingSeconds = 0;
     let licenseLicensed = false;
     let licenseTrialActive = false;
     let licenseTimerInterval = null;
 
-    // Helper: format currency
     function formatMoney(amount) {
         return '₵' + amount.toFixed(2);
     }
@@ -191,10 +198,10 @@
         } catch(e) { return null; }
     }
 
-    const PRODUCTS_CACHE_KEY = 'sales_products_cache';
+    const PRODUCTS_CACHE_KEY = 'sales_products_cache_accessories'; // changed to avoid conflict
     const LICENSE_CACHE_KEY = 'sales_license_cache';
 
-    // ---------- Load License Status with cache fallback ----------
+    // ---------- Load License Status ----------
     async function loadLicenseStatus() {
         try {
             const res = await fetch('/api/license/status');
@@ -215,7 +222,6 @@
                 licenseRemainingSeconds = cached.remaining_seconds;
                 return cached;
             }
-            // Fallback: assume 7‑day trial
             licenseLicensed = false;
             licenseTrialActive = true;
             licenseRemainingSeconds = 7 * 24 * 3600;
@@ -223,7 +229,7 @@
         }
     }
 
-    // ---------- License Modal (unchanged logic, now uses loadLicenseStatus) ----------
+    // ---------- License Modal (unchanged) ----------
     function showLicenseModal(allowCancel = true) {
         return new Promise(async (resolve) => {
             const modal = document.getElementById('licenseModal');
@@ -337,36 +343,45 @@
         return `${minutes.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
     }
 
-    // ---------- Load Products with cache ----------
+    // ---------- Load Products (exclude Screen) ----------
     async function loadProducts() {
         updateOfflineBanner();
+        const noProductsBanner = document.getElementById('noProductsBanner');
+        noProductsBanner.classList.add('hidden');
+
         let prods = [];
         let fromCache = false;
 
         try {
-            const res = await fetch('/api/sales/products');
+            // EXCLUDE Screen category
+            const res = await fetch('/api/sales/products?exclude_category=Screen');
             if (!res.ok) throw new Error();
             prods = await res.json();
             cacheData(PRODUCTS_CACHE_KEY, prods);
         } catch (err) {
-            console.warn('Offline – using cached products');
+            console.warn('Offline – using cached accessories');
             fromCache = true;
             const cached = getCachedData(PRODUCTS_CACHE_KEY);
             if (cached) prods = cached;
         }
 
         products = prods;
-        renderProductList(products);
-        if (fromCache && products.length === 0) {
-            document.getElementById('productList').innerHTML = 
-                '<div class="text-gray-500 p-2">No cached products – connect to refresh</div>';
+        if (products.length === 0) {
+            document.getElementById('productList').innerHTML = '';
+            noProductsBanner.classList.remove('hidden');
+            if (fromCache) {
+                document.getElementById('productList').innerHTML = 
+                    '<div class="text-gray-500 p-2">No cached accessories – connect to refresh</div>';
+            }
+        } else {
+            renderProductList(products);
         }
     }
 
     function renderProductList(prods) {
         const container = document.getElementById('productList');
         if (!prods.length) {
-            container.innerHTML = '<div class="text-gray-400 p-2">No products available</div>';
+            container.innerHTML = '<div class="text-gray-400 p-2">No accessories available</div>';
             return;
         }
         container.innerHTML = '';
@@ -378,6 +393,11 @@
             container.appendChild(btn);
         });
     }
+
+    function refreshProducts() {
+        loadProducts();
+    }
+    window.refreshProducts = refreshProducts;
 
     function selectProduct(product) {
         currentProduct = product;
@@ -392,7 +412,7 @@
         renderProductList(filtered);
     });
 
-    // ---------- Batch Selector with cache ----------
+    // ---------- Batch Selector (unchanged) ----------
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
@@ -484,27 +504,25 @@
         return true;
     }
 
-    function selectAllBatches() {
+    window.selectAllBatches = function() {
         batchSelection.forEach(sel => {
             sel.checkbox.checked = true;
             sel.qtyInput.disabled = false;
             if (sel.qtyInput.value === '0') sel.qtyInput.value = '1';
         });
         updateBatchTotals();
-    }
+    };
     
-    function deselectAllBatches() {
+    window.deselectAllBatches = function() {
         batchSelection.forEach(sel => {
             sel.checkbox.checked = false;
             sel.qtyInput.disabled = true;
             sel.qtyInput.value = '0';
         });
         updateBatchTotals();
-    }
-    
+    };
+
     function updateBatchTotals() {
-        // already defined inside openBatchSelector, but also needed globally for buttons
-        // We'll redefine it here to be callable from buttons
         let assigned = 0;
         batchSelection.forEach(sel => {
             if (sel.checkbox.checked) {
@@ -523,18 +541,14 @@
         if (remaining === 0) remSpan.classList.add('text-green-600');
         else remSpan.classList.remove('text-green-600');
     }
-    
-    window.selectAllBatches = selectAllBatches;
-    window.deselectAllBatches = deselectAllBatches;
 
-    function closeBatchModal() {
+    window.closeBatchModal = function() {
         document.getElementById('batchModal').classList.add('hidden');
         currentProductForBatch = null;
         neededQty = 0;
-    }
-    window.closeBatchModal = closeBatchModal;
+    };
 
-    function confirmBatchSelection() {
+    window.confirmBatchSelection = function() {
         let assigned = 0;
         let selected = [];
         for (const sel of batchSelection) {
@@ -570,8 +584,7 @@
         closeBatchModal();
         document.getElementById('quantity').value = '';
         document.getElementById('discount').value = '';
-    }
-    window.confirmBatchSelection = confirmBatchSelection;
+    };
 
     // ---------- Cart management ----------
     function updateCart() {
@@ -634,6 +647,7 @@
             if (clickedBtn) clickedBtn.classList.add('bg-indigo-50', 'border-indigo-500');
         }
     }
+    window.selectPayment = selectPayment;
 
     function showChequeInput(event) {
         console.log("✅ Cheque payment selected");
@@ -648,6 +662,7 @@
             if (clickedBtn) clickedBtn.classList.add('bg-indigo-50', 'border-indigo-500');
         }
     }
+    window.showChequeInput = showChequeInput;
 
     function closePaymentModal() {
         document.getElementById('paymentModal').classList.add('hidden');
@@ -673,7 +688,7 @@
         return null;
     }
 
-    // ---------- Execute Sale with Offline Support ----------
+    // ---------- Execute Sale ----------
     async function executeSaleWithPayment(paymentMethod, chequeNum) {
         if (!pendingSaleCallback) return;
         
@@ -729,26 +744,21 @@
                 alert('Error: ' + data.error);
             }
         } catch (error) {
-            // ---- Offline fallback ----
             console.warn('Network error, saving sale offline:', error);
             
-            // Save the sale locally (requires offline.js)
             if (typeof savePendingSale === 'function') {
                 savePendingSale(payload);
             } else {
                 console.warn('savePendingSale not available; sale not saved offline.');
             }
             
-            // Update badge
             if (typeof updatePendingBadge === 'function') {
                 updatePendingBadge();
             }
             
-            // Clear cart
             cart = [];
             updateCart();
             
-            // Show offline receipt placeholder
             document.getElementById('receiptPreview').innerHTML = `
                 <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
                     <strong>⚠️ Offline Sale Saved</strong><br>
@@ -827,7 +837,7 @@
             canProceed = true;
         } else if (licenseData.trial_active && licenseData.remaining_seconds > 0) {
             const userChoice = await showLicenseModal(true);
-            canProceed = true; // allow sale during trial even if user cancels
+            canProceed = true;
         } else {
             const activated = await showLicenseModal(false);
             canProceed = activated;

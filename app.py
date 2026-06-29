@@ -1658,7 +1658,7 @@ def import_inventory_page():
 cancel_flags = {}   # job_id -> True if cancellation requested
 
 # ----- INVENTORY IMPORT (background thread) with single transaction -----
-def run_inventory_import(job_id, file_stream, target_category):
+def run_inventory_import(job_id, file_stream, target_category, mode='append'):
     conn = None
     try:
         wb = load_workbook(file_stream, data_only=True)
@@ -1835,6 +1835,29 @@ def run_inventory_import(job_id, file_stream, target_category):
         conn.autocommit = False
         cursor = conn.cursor()
 
+        # --- REPLACE MODE: delete all existing data for this category ---
+        if mode == 'replace':
+            # Delete purchase_batches for products in this category
+            cursor.execute("""
+                DELETE FROM purchase_batches
+                WHERE product_id IN (
+                    SELECT id FROM products WHERE category = %s
+                )
+            """, (target_category,))
+            # Delete purchases (purchase records) for this category
+            cursor.execute("""
+                DELETE FROM purchases
+                WHERE category = %s
+            """, (target_category,))
+            # Reset stock for products in this category to 0
+            cursor.execute("""
+                UPDATE products SET stock = 0 WHERE category = %s
+            """, (target_category,))
+            # Optionally, you could also delete sales_items and sales for this category,
+            # but that is usually done separately via the sales import replace mode.
+            # We keep product definitions to preserve history.
+
+        # ---- Process rows ----
         for idx, item in enumerate(rows_to_process, start=1):
             # Get or create product (ignoring permanently deleted)
             cursor.execute("""
@@ -1914,8 +1937,9 @@ def run_inventory_import(job_id, file_stream, target_category):
         if conn:
             conn.close()
         cancel_flags.pop(job_id, None)
+
 # ----- SALES IMPORT (background thread) with single transaction -----
-def run_sales_import(job_id, file_stream, target_category):
+def run_sales_import(job_id, file_stream, target_category, mode='append'):
     try:
         wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
@@ -2011,7 +2035,6 @@ def run_sales_import(job_id, file_stream, target_category):
             if 'date' in header_map and row[header_map['date']] is not None:
                 try:
                     if isinstance(row[header_map['date']], (int, float)):
-                        from datetime import datetime, timedelta
                         sale_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
                     else:
                         date_str = str(row[header_map['date']]).strip()
@@ -2073,6 +2096,22 @@ def run_sales_import(job_id, file_stream, target_category):
         conn.autocommit = False
         cursor = conn.cursor()
 
+        # --- REPLACE MODE: delete existing sales for this category ---
+        if mode == 'replace':
+            # Delete sales_items and sales for products in this category
+            cursor.execute("""
+                DELETE FROM sales_items
+                WHERE product_id IN (
+                    SELECT id FROM products WHERE category = %s
+                )
+            """, (target_category,))
+            # Delete sales that no longer have any items (optional, but we can also delete them)
+            cursor.execute("""
+                DELETE FROM sales
+                WHERE id NOT IN (SELECT sale_id FROM sales_items)
+            """)
+
+        # ---- Process rows ----
         for idx, entry in enumerate(rows_to_process, start=1):
             # Find product
             cursor.execute(
@@ -2162,7 +2201,7 @@ def run_sales_import(job_id, file_stream, target_category):
     finally:
         if conn:
             conn.close()
-        cancel_flags.pop(job_id, None)        
+        cancel_flags.pop(job_id, None)
 
 # ----- INVENTORY IMPORT ENDPOINT -----
 @app.route('/api/inventory/import', methods=['POST'])
@@ -2182,6 +2221,10 @@ def api_import_inventory():
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
+    mode = request.form.get('mode', 'append')
+    if mode not in ['append', 'replace']:
+        return jsonify({'success': False, 'error': 'Invalid mode'}), 400
+
     file_content = file.read()
     file_stream = io.BytesIO(file_content)
 
@@ -2199,7 +2242,7 @@ def api_import_inventory():
 
     thread = threading.Thread(
         target=run_inventory_import,
-        args=(job_id, file_stream, target_category)
+        args=(job_id, file_stream, target_category, mode)
     )
     thread.daemon = True
     thread.start()
@@ -2224,6 +2267,10 @@ def api_import_sales():
     if target_category not in ['Accessory', 'Screen']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
+    mode = request.form.get('mode', 'append')
+    if mode not in ['append', 'replace']:
+        return jsonify({'success': False, 'error': 'Invalid mode'}), 400
+
     file_content = file.read()
     file_stream = io.BytesIO(file_content)
 
@@ -2241,7 +2288,7 @@ def api_import_sales():
 
     thread = threading.Thread(
         target=run_sales_import,
-        args=(job_id, file_stream, target_category)
+        args=(job_id, file_stream, target_category, mode)
     )
     thread.daemon = True
     thread.start()
