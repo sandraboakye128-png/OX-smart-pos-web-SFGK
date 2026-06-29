@@ -823,13 +823,17 @@ def api_sales_complete():
     payment_method = data.get('payment_method', 'cash')
     cheque_number = data.get('cheque_number')
     
+    # --- NEW: get the current user's ID from session ---
+    user_id = session.get('user_id')
+    
     try:
         result = create_multi_sale(
             cart_items, 
             sale_datetime, 
             selected_batches,
             payment_method,
-            cheque_number
+            cheque_number,
+            user_id=user_id   # pass user_id
         )
         
         receipt_cart = []
@@ -981,7 +985,7 @@ def api_reverse_sale_items():
     finally:
         conn.close()
 
-# ===================== TODAY'S SALES API (with category filter) =====================
+# ===================== TODAY'S SALES API (with category filter and username) =====================
 @app.route('/api/today_sales', methods=['GET'])
 @login_required
 def api_today_sales():
@@ -994,6 +998,7 @@ def api_today_sales():
     conn = get_connection()
     cursor = conn.cursor()
     
+    # --- MODIFIED: added u.username to SELECT and joined users ---
     select_clause = """
         SELECT 
             sales.id, 
@@ -1012,13 +1017,15 @@ def api_today_sales():
             CASE WHEN purchase_batches.id IS NULL THEN 1 ELSE 0 END as is_deleted_batch,
             sales.profit as net_profit,
             COALESCE(sales.payment_method, 'cash') as payment_method,
-            sales.cheque_number
+            sales.cheque_number,
+            u.username   -- include username
     """
     from_clause = """
         FROM sales
         JOIN sales_items ON sales.id = sales_items.sale_id
         JOIN products ON products.id = sales_items.product_id
         LEFT JOIN purchase_batches ON purchase_batches.id = sales_items.batch_id
+        LEFT JOIN users u ON sales.user_id = u.id   -- join users table
     """
     
     where_conditions = ["sales.reversed = 0"]
@@ -1062,7 +1069,8 @@ def api_today_sales():
                 'is_deleted_batch': bool(r[13]),
                 'net_profit': float(r[14]),
                 'payment_method': r[15] if len(r) > 15 else 'cash',
-                'cheque_number': r[16] if len(r) > 16 else None
+                'cheque_number': r[16] if len(r) > 16 else None,
+                'username': r[17] if len(r) > 17 else 'Unknown'   # include username
             })
         return jsonify(sales_data)
     except Exception as e:
@@ -1106,7 +1114,7 @@ def api_today_sales_pdf():
     ))
     elements.append(Spacer(1, 0.3*cm))
     table_data = [["Name", "Brand", "Category", "Qty", "Price", "Subtotal", 
-                   "Discount", "Total", "Profit", "Batch", "Cost", "Sale Date", "Payment", "Status"]]
+                   "Discount", "Total", "Profit", "Batch", "Cost", "Sale Date", "Payment", "Status", "User"]]
     for s in sales_data:
         status = "Deleted Batch" if s['is_deleted_batch'] else "Active"
         payment_display = s.get('payment_method', 'cash').upper()
@@ -1124,7 +1132,8 @@ def api_today_sales_pdf():
             f"₵{s['cost_price']:.2f}",
             s['sale_date'],
             payment_display,
-            status
+            status,
+            s.get('username', 'Unknown')
         ]
         table_data.append(row)
     table = Table(table_data, repeatRows=1)
@@ -1939,8 +1948,8 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             conn.close()
         cancel_flags.pop(job_id, None)
 
-# ----- SALES IMPORT (background thread) with single transaction -----
-def run_sales_import(job_id, file_stream, target_category, mode='append'):
+# ----- SALES IMPORT (background thread) with single transaction and user tracking -----
+def run_sales_import(job_id, file_stream, target_category, mode='append', user_id=None):
     try:
         wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
@@ -2106,7 +2115,7 @@ def run_sales_import(job_id, file_stream, target_category, mode='append'):
                     SELECT id FROM products WHERE category = %s
                 )
             """, (target_category,))
-            # Delete sales that no longer have any items (optional, but we can also delete them)
+            # Delete sales that no longer have any items
             cursor.execute("""
                 DELETE FROM sales
                 WHERE id NOT IN (SELECT sale_id FROM sales_items)
@@ -2130,11 +2139,12 @@ def run_sales_import(job_id, file_stream, target_category, mode='append'):
 
             subtotal = entry['qty'] * entry['rate']
             total = subtotal - entry['discount']
+            # --- MODIFIED: include user_id in INSERT ---
             cursor.execute("""
-                INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
-            """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash'))
+            """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash', user_id))
             sale_id = cursor.fetchone()[0]
 
             cursor.execute("""
@@ -2175,11 +2185,9 @@ def run_sales_import(job_id, file_stream, target_category, mode='append'):
             imported_count += 1
             if imported_count % 100 == 0:
                 update_job_progress(job_id, processed=imported_count)
-                # Check cancellation
                 if cancel_flags.get(job_id):
                     raise Exception("CANCELLED_BY_USER")
 
-        # ---- All rows processed successfully ----
         conn.commit()
         cancel_flags.pop(job_id, None)
         update_job_progress(job_id, status='done',
@@ -2250,7 +2258,7 @@ def api_import_inventory():
 
     return jsonify({'success': True, 'job_id': job_id})
 
-# ----- SALES IMPORT ENDPOINT -----
+# ----- SALES IMPORT ENDPOINT (with user tracking) -----
 @app.route('/api/sales/import', methods=['POST'])
 @admin_required
 def api_import_sales():
@@ -2287,9 +2295,12 @@ def api_import_sales():
     conn.commit()
     conn.close()
 
+    # --- NEW: get current user ID from session ---
+    user_id = session.get('user_id')
+
     thread = threading.Thread(
         target=run_sales_import,
-        args=(job_id, file_stream, target_category, mode)
+        args=(job_id, file_stream, target_category, mode, user_id)   # pass user_id
     )
     thread.daemon = True
     thread.start()

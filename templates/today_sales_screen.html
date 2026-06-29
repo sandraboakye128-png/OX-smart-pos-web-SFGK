@@ -18,9 +18,9 @@
 
     <!-- Search Bar -->
     <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search screen product or brand..." 
+        <input type="text" id="searchInput" placeholder="🔍 Search screen product, brand, or user..." 
                class="w-full border border-gray-300 rounded-lg px-4 py-2">
-        <p class="text-xs text-gray-500 mt-1">🔎 Type to filter screen sales records by product or brand</p>
+        <p class="text-xs text-gray-500 mt-1">🔎 Type to filter screen sales records by product, brand, or user</p>
     </div>
 
     <!-- Period Filter Buttons -->
@@ -217,7 +217,8 @@
             if (searchTerm) {
                 filtered = currentSalesData.filter(sale => 
                     (sale.name && sale.name.toLowerCase().includes(searchTerm)) || 
-                    (sale.brand && sale.brand.toLowerCase().includes(searchTerm))
+                    (sale.brand && sale.brand.toLowerCase().includes(searchTerm)) ||
+                    (sale.username && sale.username.toLowerCase().includes(searchTerm))   // <-- search by username
                 );
             }
             renderSales(filtered);
@@ -310,7 +311,7 @@
             }
         }
 
-        // ---------- Render sales cards ----------
+        // ---------- Render sales cards (with username) ----------
         function renderSales(sales) {
             const container = document.getElementById('salesList');
             if (!sales || sales.length === 0) {
@@ -329,6 +330,7 @@
                         netProfit: sale.net_profit || 0,
                         payment_method: sale.payment_method || 'unknown',
                         cheque_number: sale.cheque_number,
+                        username: sale.username || 'Unknown',   // <-- store username
                         items: []
                     });
                 }
@@ -362,6 +364,7 @@
                             <div class="text-sm text-gray-500">Sale #${saleId} | ${saleGroup.date}</div>
                             <div>${paymentBadge}</div>
                         </div>
+                        <div class="text-xs text-gray-600 mb-1">👤 User: ${escapeHtml(saleGroup.username)}</div>  <!-- display username -->
                         ${itemsHtml}
                         <div class="mt-2 pt-2 border-t flex justify-between items-center">
                             <button class="reverse-sale-btn bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm" data-sale-id="${saleId}" data-sale-items='${JSON.stringify(saleGroup.items)}'>↺ Reverse Selected Items</button>

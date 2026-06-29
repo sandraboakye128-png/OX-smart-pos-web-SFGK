@@ -27,7 +27,6 @@
             <div>
                 <label class="block text-sm font-medium text-gray-700">Category</label>
                 <input type="text" id="category" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off" value="Screen" readonly>
-                <!-- Hidden suggestions (not needed as category is fixed) -->
                 <div id="categorySuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
             </div>
             <div>
@@ -147,7 +146,6 @@
         let fromCache = false;
 
         try {
-            // Filter by category=Screen
             const res = await fetch('/api/purchases?category=Screen');
             if (!res.ok) throw new Error('Network error');
             purchases = await res.json();
@@ -192,8 +190,10 @@
         updateSummary(purchases);
     }
 
+    // ---------- Update summary (now includes Total Batches) ----------
     function updateSummary(purchases) {
         let totalQty = 0, totalCost = 0, totalDiscount = 0, totalSelling = 0;
+        const totalBatches = purchases.length;  // count of distinct batch records
         purchases.forEach(p => {
             totalQty += p.quantity;
             totalCost += p.total_cost;
@@ -202,7 +202,11 @@
         });
         const isOffline = !navigator.onLine;
         document.getElementById('summary').innerHTML = `
-            Total Qty: ${totalQty} | Total Discount: ₵${totalDiscount.toFixed(2)} | Total Cost: ₵${totalCost.toFixed(2)} | Total Selling: ₵${totalSelling.toFixed(2)}
+            📦 Batches: ${totalBatches} | 
+            🧾 Total Qty: ${totalQty} | 
+            📉 Total Discount: ₵${totalDiscount.toFixed(2)} | 
+            💰 Total Cost: ₵${totalCost.toFixed(2)} | 
+            💵 Total Selling: ₵${totalSelling.toFixed(2)}
             ${isOffline ? ' <span class="text-red-500 text-sm">(offline)</span>' : ''}
         `;
     }
@@ -228,7 +232,7 @@
         const payload = {
             name: document.getElementById('name').value.trim(),
             brand: document.getElementById('brand').value.trim(),
-            category: document.getElementById('category').value.trim() || 'Screen', // default to Screen if empty
+            category: document.getElementById('category').value.trim() || 'Screen',
             quantity: parseInt(document.getElementById('quantity').value),
             cost_price: parseFloat(document.getElementById('cost_price').value),
             discount: parseFloat(document.getElementById('discount').value) || 0,
@@ -269,7 +273,7 @@
             if (typeof updatePendingBadge === 'function') updatePendingBadge();
             alert('You are offline. Screen purchase saved locally and will be synced later.');
             resetForm();
-            loadPurchases(); // will show cached list
+            loadPurchases();
         }
     }
 
@@ -377,7 +381,7 @@
     }
 
     // ---------- Autocomplete (hide offline, with category filter) ----------
-    let nameTimeout, catTimeout;
+    let nameTimeout;
 
     async function fetchNameSuggestions() {
         if (!navigator.onLine) {
@@ -387,7 +391,6 @@
         const q = document.getElementById('name').value.trim();
         if (!q) { document.getElementById('nameSuggestions').classList.add('hidden'); return; }
         try {
-            // Filter suggestions to screens only
             const res = await fetch(`/api/purchases/suggestions/name?q=${encodeURIComponent(q)}&category=Screen`);
             if (!res.ok) throw new Error();
             const suggestions = await res.json();
@@ -404,21 +407,11 @@
         }
     }
 
-    async function fetchCategorySuggestions() {
-        // Category is fixed to "Screen", so we don't need suggestions.
-        // But we keep a dummy to avoid errors.
-        document.getElementById('categorySuggestions').classList.add('hidden');
-    }
-
     window.selectNameSuggestion = function(name, brand, category) {
         document.getElementById('name').value = name;
         document.getElementById('brand').value = brand;
         document.getElementById('category').value = category || 'Screen';
         document.getElementById('nameSuggestions').classList.add('hidden');
-    };
-
-    window.selectCategorySuggestion = function(cat) {
-        // Not used
     };
 
     // ---------- Event listeners ----------

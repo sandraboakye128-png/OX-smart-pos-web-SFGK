@@ -50,7 +50,7 @@ def get_products_for_sale():
                 "brand": r[2] or "",
                 "selling_price": float(r[3] or 0),
                 "stock": int(r[4] or 0),
-                "category": r[5] or "",   # <-- added category
+                "category": r[5] or "",
             }
             for r in rows
         ]
@@ -172,10 +172,14 @@ def bulk_update_product_stocks(cursor, product_ids):
         update_product_stock(cursor, product_id)
 
 # ---------------------------
-# MAIN SALE CREATION FUNCTION (WITH PAYMENT METHOD)
+# MAIN SALE CREATION FUNCTION (WITH PAYMENT METHOD & USER)
 # ---------------------------
 @handle_timeout
-def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, payment_method='cash', cheque_number=None):
+def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, payment_method='cash', cheque_number=None, user_id=None):
+    """
+    Create a sale with multiple items.
+    user_id: optional ID of the user making the sale (for tracking)
+    """
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -190,12 +194,12 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
         else:
             sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 2. Insert sale record with payment fields
+        # 2. Insert sale record with payment fields AND user_id
         cursor.execute("""
-            INSERT INTO sales (subtotal, discount, total, profit, date, payment_method, cheque_number)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO sales (subtotal, discount, total, profit, date, payment_method, cheque_number, user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (0, 0, 0, 0, sale_date_str, payment_method, cheque_number))
+        """, (0, 0, 0, 0, sale_date_str, payment_method, cheque_number, user_id))
         sale_id = cursor.fetchone()[0]
         
         # Prepare data structures
@@ -350,7 +354,7 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
         # IMPORTANT: Commit the transaction BEFORE returning connection
         conn.commit()
         
-        # Prepare the result with payment info
+        # Prepare the result with payment info and user_id
         result = {
             "sale_id": sale_id,
             "items": receipt_data,
@@ -360,7 +364,8 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
             "profit": net_profit,
             "date": sale_date_str,
             "payment_method": payment_method,
-            "cheque_number": cheque_number
+            "cheque_number": cheque_number,
+            "user_id": user_id
         }
         
         # Return connection to pool AFTER preparing result
@@ -377,17 +382,19 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
         raise e
 
 # ---------------------------
-# GET SALE DETAILS (WITH PAYMENT INFO)
+# GET SALE DETAILS (WITH PAYMENT INFO AND USERNAME)
 # ---------------------------
 def get_sale_details(sale_id):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Get sale header with payment info
+        # Get sale header with payment info and username
         cursor.execute("""
-            SELECT id, subtotal, discount, total, profit, date, payment_method, cheque_number
-            FROM sales
-            WHERE id = %s
+            SELECT s.id, s.subtotal, s.discount, s.total, s.profit, s.date, 
+                   s.payment_method, s.cheque_number, u.username
+            FROM sales s
+            LEFT JOIN users u ON s.user_id = u.id
+            WHERE s.id = %s
         """, (sale_id,))
         sale = cursor.fetchone()
         
@@ -420,6 +427,7 @@ def get_sale_details(sale_id):
             "date": sale[5],
             "payment_method": sale[6] if len(sale) > 6 else 'unknown',
             "cheque_number": sale[7] if len(sale) > 7 else None,
+            "username": sale[8] if len(sale) > 8 else 'Unknown',
             "items": [
                 {
                     "product_id": item[0],
@@ -446,17 +454,19 @@ def get_sale_details(sale_id):
         raise e
 
 # ---------------------------
-# GET TODAY'S SALES (WITH PAYMENT INFO)
+# GET TODAY'S SALES (WITH PAYMENT INFO AND USERNAME)
 # ---------------------------
 def get_todays_sales():
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT id, subtotal, discount, total, profit, date, payment_method, cheque_number
-            FROM sales
-            WHERE DATE(date) = CURRENT_DATE
-            ORDER BY date DESC
+            SELECT s.id, s.subtotal, s.discount, s.total, s.profit, s.date, 
+                   s.payment_method, s.cheque_number, u.username
+            FROM sales s
+            LEFT JOIN users u ON s.user_id = u.id
+            WHERE DATE(s.date) = CURRENT_DATE
+            ORDER BY s.date DESC
         """)
         rows = cursor.fetchall()
         
@@ -469,7 +479,8 @@ def get_todays_sales():
                 "profit": float(r[4] or 0),
                 "date": r[5],
                 "payment_method": r[6] if len(r) > 6 else 'unknown',
-                "cheque_number": r[7] if len(r) > 7 else None
+                "cheque_number": r[7] if len(r) > 7 else None,
+                "username": r[8] if len(r) > 8 else 'Unknown'
             }
             for r in rows
         ]
@@ -486,17 +497,19 @@ def get_todays_sales():
         raise e
 
 # ---------------------------
-# GET SALES BY DATE RANGE (WITH PAYMENT INFO)
+# GET SALES BY DATE RANGE (WITH PAYMENT INFO AND USERNAME)
 # ---------------------------
 def get_sales_by_date_range(start_date, end_date):
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT id, subtotal, discount, total, profit, date, payment_method, cheque_number
-            FROM sales
-            WHERE DATE(date) BETWEEN %s AND %s
-            ORDER BY date DESC
+            SELECT s.id, s.subtotal, s.discount, s.total, s.profit, s.date, 
+                   s.payment_method, s.cheque_number, u.username
+            FROM sales s
+            LEFT JOIN users u ON s.user_id = u.id
+            WHERE DATE(s.date) BETWEEN %s AND %s
+            ORDER BY s.date DESC
         """, (start_date, end_date))
         
         rows = cursor.fetchall()
@@ -510,7 +523,8 @@ def get_sales_by_date_range(start_date, end_date):
                 "profit": float(r[4] or 0),
                 "date": r[5],
                 "payment_method": r[6] if len(r) > 6 else 'unknown',
-                "cheque_number": r[7] if len(r) > 7 else None
+                "cheque_number": r[7] if len(r) > 7 else None,
+                "username": r[8] if len(r) > 8 else 'Unknown'
             }
             for r in rows
         ]
@@ -527,13 +541,16 @@ def get_sales_by_date_range(start_date, end_date):
         raise e
 
 # ============================================================================
-# NEW: IMPORT SALE (BULK, FIFO) WITH PRESERVED DATE
+# IMPORT SALE (BULK, FIFO) WITH USER SUPPORT
 # ============================================================================
-def import_sale_bulk(product_name, quantity, selling_price, discount, sale_date, payment_method='cash', cheque_number=None):
+def import_sale_bulk(product_name, quantity, selling_price, discount, sale_date, 
+                     payment_method='cash', cheque_number=None, user_id=None):
     """
     Create a sale for a single product without manual batch selection (FIFO).
     Preserves the given sale_date. Used for bulk importing historical sales.
     Returns sale_id.
+    
+    user_id: optional ID of the user to associate with the sale.
     """
     from database.db import get_connection, return_connection
     from services.purchase_service import update_product_stock  # reuse stock update
@@ -580,14 +597,14 @@ def import_sale_bulk(product_name, quantity, selling_price, discount, sale_date,
         if remaining_to_allocate > 0:
             raise ValueError(f"Not enough stock across batches for '{product_name}'")
 
-        # 4. Create sale record with the provided date
+        # 4. Create sale record with the provided date and user_id
         subtotal = quantity * selling_price
         total = subtotal - discount
         cursor.execute("""
-            INSERT INTO sales (subtotal, discount, total, profit, date, payment_method, cheque_number)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO sales (subtotal, discount, total, profit, date, payment_method, cheque_number, user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (subtotal, discount, total, 0, sale_date, payment_method, cheque_number))
+        """, (subtotal, discount, total, 0, sale_date, payment_method, cheque_number, user_id))
         sale_id = cursor.fetchone()[0]
 
         # 5. Insert sales_items and update batches

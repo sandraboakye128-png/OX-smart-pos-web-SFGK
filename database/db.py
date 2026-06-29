@@ -64,7 +64,8 @@ if USE_POSTGRES:
         profit REAL,
         date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         payment_method VARCHAR(50) DEFAULT 'cash',
-        cheque_number VARCHAR(100)
+        cheque_number VARCHAR(100),
+        user_id INTEGER REFERENCES users(id)   -- <-- added user_id
     );
 
     CREATE TABLE IF NOT EXISTS deleted_products (
@@ -148,6 +149,7 @@ if USE_POSTGRES:
     CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock);
     CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
     CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
+    CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);  -- <-- new index
     """
 
     POSTGRES_MIGRATIONS = [
@@ -160,6 +162,7 @@ if USE_POSTGRES:
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS reversed INTEGER DEFAULT 0",
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'cash'",
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS cheque_number VARCHAR(100)",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)",  # <-- new migration
         "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0",
         "ALTER TABLE purchases ADD COLUMN IF NOT EXISTS remaining_stock INTEGER DEFAULT 0",
         "ALTER TABLE purchase_batches ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0",
@@ -178,7 +181,8 @@ if USE_POSTGRES:
         "CREATE INDEX IF NOT EXISTS idx_purchase_batches_product_id ON purchase_batches(product_id)",
         "CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id)",
         "CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)",
-        "CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)"
+        "CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)",
+        "CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id)"   # <-- new index
     ]
 
     def init_pool():
@@ -193,8 +197,8 @@ if USE_POSTGRES:
         
         try:
             connection_pool = pool.SimpleConnectionPool(
-                2,                     # min connections (increased from 1)
-                30,                    # max connections (increased from 20)
+                2,                     # min connections
+                30,                    # max connections
                 DATABASE_URL,
                 keepalives=1,
                 keepalives_idle=30,
@@ -329,7 +333,8 @@ else:
         profit REAL,
         date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         payment_method VARCHAR(50) DEFAULT 'cash',
-        cheque_number VARCHAR(100)
+        cheque_number VARCHAR(100),
+        user_id INTEGER REFERENCES users(id)   -- <-- added user_id
     );
 
     CREATE TABLE IF NOT EXISTS deleted_products (
@@ -403,6 +408,7 @@ else:
     CREATE INDEX IF NOT EXISTS idx_sales_items_sale_id ON sales_items(sale_id);
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
     CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
+    CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);   -- <-- new index
     """
 
     AUTH_SCHEMA = """
@@ -445,6 +451,8 @@ else:
         try: cursor.execute("ALTER TABLE sales ADD COLUMN payment_method VARCHAR(50) DEFAULT 'cash'")
         except: pass
         try: cursor.execute("ALTER TABLE sales ADD COLUMN cheque_number VARCHAR(100)")
+        except: pass
+        try: cursor.execute("ALTER TABLE sales ADD COLUMN user_id INTEGER REFERENCES users(id)")   # <-- new column
         except: pass
 
         try: cursor.execute("ALTER TABLE purchases ADD COLUMN selling_price REAL DEFAULT 0")
@@ -502,6 +510,8 @@ else:
         try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock)")
         except: pass
         try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)")
+        except: pass
+        try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id)")   # <-- new index
         except: pass
 
         conn.commit()

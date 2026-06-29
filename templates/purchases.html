@@ -187,8 +187,10 @@
         updateSummary(purchases);
     }
 
+    // ---------- Update summary (now includes Total Batches) ----------
     function updateSummary(purchases) {
         let totalQty = 0, totalCost = 0, totalDiscount = 0, totalSelling = 0;
+        const totalBatches = purchases.length;  // count of distinct batch records
         purchases.forEach(p => {
             totalQty += p.quantity;
             totalCost += p.total_cost;
@@ -197,7 +199,11 @@
         });
         const isOffline = !navigator.onLine;
         document.getElementById('summary').innerHTML = `
-            Total Qty: ${totalQty} | Total Discount: ₵${totalDiscount.toFixed(2)} | Total Cost: ₵${totalCost.toFixed(2)} | Total Selling: ₵${totalSelling.toFixed(2)}
+            📦 Batches: ${totalBatches} | 
+            🧾 Total Qty: ${totalQty} | 
+            📉 Total Discount: ₵${totalDiscount.toFixed(2)} | 
+            💰 Total Cost: ₵${totalCost.toFixed(2)} | 
+            💵 Total Selling: ₵${totalSelling.toFixed(2)}
             ${isOffline ? ' <span class="text-red-500 text-sm">(offline)</span>' : ''}
         `;
     }
@@ -218,7 +224,7 @@
         };
     }
 
-    // ---------- Submit / Update (unchanged – category can be anything) ----------
+    // ---------- Submit / Update (unchanged) ----------
     async function submitPurchase() {
         const payload = {
             name: document.getElementById('name').value.trim(),

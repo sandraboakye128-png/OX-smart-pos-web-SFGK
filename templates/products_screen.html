@@ -167,7 +167,7 @@
         renderProducts(filtered);
     }
 
-    // Render product cards (unchanged)
+    // Render product cards
     function renderProducts(products) {
         const container = document.getElementById('productsList');
         if (!products.length) {
@@ -200,12 +200,13 @@
         }).join('');
     }
 
-    // ----- Batch Management (unchanged) -----
+    // ----- Batch Management (updated to show total batches in modal title) -----
     let currentBatches = [];
     function viewBatches(productId, productName, batches) {
         currentBatches = batches;
         currentBatchModalProductName = productName;
-        document.getElementById('modalTitle').innerHTML = `Batches for ${productName}`;
+        const totalBatches = batches.length;
+        document.getElementById('modalTitle').innerHTML = `Batches for ${productName} (${totalBatches} batch${totalBatches !== 1 ? 'es' : ''})`;
         const container = document.getElementById('batchList');
         container.innerHTML = '';
         currentBatchSelections = [];
