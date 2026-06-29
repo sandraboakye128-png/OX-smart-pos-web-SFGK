@@ -1862,8 +1862,10 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 DELETE FROM products
                 WHERE category = %s
             """, (target_category,))
-            # Reset the product sequence to the max id (or 1 if no products left)
+            # Reset sequences to the current max id to avoid duplicate key errors
             cursor.execute("SELECT setval('products_id_seq', (SELECT COALESCE(MAX(id), 1) FROM products))")
+            cursor.execute("SELECT setval('purchases_id_seq', (SELECT COALESCE(MAX(id), 1) FROM purchases))")
+            cursor.execute("SELECT setval('purchase_batches_id_seq', (SELECT COALESCE(MAX(id), 1) FROM purchase_batches))")
 
         # ---- Process rows ----
         for idx, item in enumerate(rows_to_process, start=1):
