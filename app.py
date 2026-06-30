@@ -2178,11 +2178,12 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
             selling_price = entry['rate']
             item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
 
+            # FIX: removed 'subtotal' from sales_items insert
             cursor.execute("""
                 INSERT INTO sales_items
-                (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit, subtotal)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit, subtotal))
+                (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit))
 
             cursor.execute("""
                 UPDATE purchase_batches
