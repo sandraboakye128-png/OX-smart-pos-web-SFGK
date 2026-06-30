@@ -22,7 +22,8 @@ from services.dashboard_service import (
     get_total_products,
     get_low_stock_products,
     get_top_products,
-    get_sales_history
+    get_sales_history,
+    get_total_batches
 )
 
 # ---------- IMPORT PRODUCT DELETION SERVICES ----------
