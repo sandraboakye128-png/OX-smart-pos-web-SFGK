@@ -156,17 +156,46 @@ def get_total_products():
     return total
 
 
-# ----------------- LOW STOCK PRODUCTS (ONLY products with active batches, stock between 1-10) -----------------
+# ----------------- TOTAL BATCHES (all active batches, regardless of stock) -----------------
+def get_total_batches():
+    """
+    Count all purchase batches that belong to non‑deleted products.
+    This includes both Accessories and Screens.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM purchase_batches pb
+        JOIN products p ON p.id = pb.product_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM deleted_products dp 
+            WHERE dp.product_id = p.id 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+            AND dp.source = 'product'
+        )
+    """)
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+# ----------------- LOW STOCK PRODUCTS (including zero stock) -----------------
 def get_low_stock_products(threshold=10):
+    """
+    Return products with stock <= threshold (including 0).
+    Includes products that have at least one batch (active or depleted).
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT p.name, p.brand, p.category, p.stock
         FROM products p
-        WHERE p.stock <= %s AND p.stock > 0
+        WHERE p.stock <= %s
+        AND p.stock >= 0
         AND EXISTS (
             SELECT 1 FROM purchase_batches pb 
-            WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+            WHERE pb.product_id = p.id
         )
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 

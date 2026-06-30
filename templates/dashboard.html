@@ -28,8 +28,8 @@
         </div>
     </div>
 
-    <!-- KPI Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+    <!-- KPI Cards – now 5 columns -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
         <div class="bg-white rounded-xl shadow-md p-4">
             <p class="text-gray-500 text-sm">Total Sales</p>
             <p id="salesValue" class="text-2xl font-bold text-indigo-600">₵0</p>
@@ -41,6 +41,10 @@
         <div class="bg-white rounded-xl shadow-md p-4">
             <p class="text-gray-500 text-sm">Total Products</p>
             <p id="productsValue" class="text-2xl font-bold text-blue-600">0</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-md p-4">
+            <p class="text-gray-500 text-sm">Total Batches</p>
+            <p id="batchesValue" class="text-2xl font-bold text-purple-600">0</p>
         </div>
         <div class="bg-white rounded-xl shadow-md p-4">
             <p class="text-gray-500 text-sm">Low Stock Items</p>
@@ -206,7 +210,7 @@
                 summary = loadCache(CACHE_KEY_SUMMARY);
                 if (!summary) {
                     // No cache – show empty
-                    summary = { sales: 0, profit: 0, total_products: 0, low_stock_count: 0, low_stock_products: [] };
+                    summary = { sales: 0, profit: 0, total_products: 0, total_batches: 0, low_stock_count: 0, low_stock_products: [] };
                 }
             }
 
@@ -214,6 +218,7 @@
             document.getElementById('salesValue').innerText = formatMoney(summary.sales);
             document.getElementById('profitValue').innerText = formatMoney(summary.profit);
             document.getElementById('productsValue').innerText = summary.total_products || 0;
+            document.getElementById('batchesValue').innerText = summary.total_batches || 0;   // new
             document.getElementById('lowStockValue').innerText = summary.low_stock_count || 0;
 
             // Low stock list

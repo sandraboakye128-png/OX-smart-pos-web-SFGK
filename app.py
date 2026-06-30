@@ -451,6 +451,8 @@ def api_admin_update_role(user_id):
 
 
 # ===================== DASHBOARD API =====================
+# Inside app.py, replace the api_dashboard_summary function with this:
+
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required
 def api_dashboard_summary():
@@ -468,6 +470,7 @@ def api_dashboard_summary():
     sales = get_today_sales(selected_date, start_datetime, end_datetime)
     profit = get_today_profit(selected_date, start_datetime, end_datetime)
     total_products = get_total_products()
+    total_batches = get_total_batches()   # new
     low_stock_products = get_low_stock_products(threshold=10)
     low_stock_count = len(low_stock_products)
     
@@ -475,6 +478,7 @@ def api_dashboard_summary():
         'sales': sales,
         'profit': profit,
         'total_products': total_products,
+        'total_batches': total_batches,   # new
         'low_stock_count': low_stock_count,
         'low_stock_products': low_stock_products
     })
@@ -1029,23 +1033,34 @@ def api_today_sales():
     """
     
     where_conditions = ["sales.reversed = 0"]
+    params = []
+    
+    # ---- DATE FILTERING ----
     if start_date and end_date:
+        # Custom date range takes precedence
         where_conditions.append("sales.date::date BETWEEN %s AND %s")
+        params.extend([start_date, end_date])
+    else:
+        # Use period parameter
+        if period == 'daily':
+            where_conditions.append("sales.date::date = CURRENT_DATE")
+        elif period == 'weekly':
+            where_conditions.append("sales.date >= CURRENT_DATE - INTERVAL '6 days'")
+        elif period == 'monthly':
+            where_conditions.append("EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM sales.date) = EXTRACT(MONTH FROM CURRENT_DATE)")
+        elif period == 'yearly':
+            where_conditions.append("EXTRACT(YEAR FROM sales.date) = EXTRACT(YEAR FROM CURRENT_DATE)")
+        # period == 'all' – no date filter
+    
     if category:
         where_conditions.append("products.category = %s")
+        params.append(category)
     if exclude_category:
         where_conditions.append("products.category != %s")
+        params.append(exclude_category)
     
     where_clause = " AND ".join(where_conditions)
     query = f"{select_clause} {from_clause} WHERE {where_clause} ORDER BY sales.date DESC"
-    
-    params = []
-    if start_date and end_date:
-        params.extend([start_date, end_date])
-    if category:
-        params.append(category)
-    if exclude_category:
-        params.append(exclude_category)
     
     try:
         cursor.execute(query, params)
