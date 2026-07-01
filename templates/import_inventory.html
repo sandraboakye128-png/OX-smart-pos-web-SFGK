@@ -226,14 +226,43 @@
                             <strong>✅ Import successful!</strong><br>
                             ${message || `Imported ${imported} records.`}
                         </div>`;
-                        // ---- ADD VERIFY BUTTON ----
-                        html += `<div class="mt-4">
-                            <button id="verifyPurchaseBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
-                                🔍 Verify Import
-                            </button>
-                            <span id="verifyStatus" class="text-sm ml-2"></span>
-                        </div>
-                        <div id="verifyResult" class="mt-4 hidden"></div>`;
+
+                        // ---- AUTOMATIC VERIFICATION REPORT (if present) ----
+                        const verification = result.verification;
+                        if (verification) {
+                            if (verification.error) {
+                                html += `<div class="mt-4 text-red-600">⚠️ Verification error: ${verification.error}</div>`;
+                            } else {
+                                html += `<div class="mt-4 p-4 border rounded-lg bg-gray-50">`;
+                                html += `<h4 class="font-bold">🔍 Verification Report</h4>`;
+                                html += `<p class="text-sm">${verification.message}</p>`;
+                                html += `<div class="mt-2 text-sm">`;
+                                html += `<span class="text-green-600">✅ Matched: ${verification.matched}</span> | `;
+                                html += `<span class="text-red-600">❌ Mismatches: ${verification.mismatches ? verification.mismatches.length : 0}</span> | `;
+                                html += `<span class="text-yellow-600">⚠️ Skipped: ${verification.skipped ? verification.skipped.length : 0}</span>`;
+                                html += `</div>`;
+                                if (verification.mismatches && verification.mismatches.length > 0) {
+                                    html += `<div class="mt-2 max-h-60 overflow-y-auto border rounded p-2 text-xs">`;
+                                    html += `<table class="min-w-full"><thead class="bg-gray-100"><tr><th>Row</th><th>Reason</th><th>Expected</th><th>Actual</th></tr></thead><tbody>`;
+                                    verification.mismatches.forEach(m => {
+                                        const exp = m.expected ? `Qty:${m.expected.qty}, Cost:${m.expected.cost.toFixed(2)}, Sell:${m.expected.selling.toFixed(2)}, Disc:${m.expected.discount.toFixed(2)}` : 'N/A';
+                                        const act = m.actual ? `Stock:${m.actual.stock}, Cost:${m.actual.cost.toFixed(2)}, Sell:${m.actual.selling.toFixed(2)}, Disc:${m.actual.discount.toFixed(2)}` : 'N/A';
+                                        html += `<tr><td>${m.row}</td><td>${m.reason}</td><td>${exp}</td><td>${act}</td></tr>`;
+                                    });
+                                    html += `</tbody></table></div>`;
+                                }
+                                html += `</div>`;
+                            }
+                        } else {
+                            // No verification – show manual verify button (for sales import)
+                            html += `<div class="mt-4">
+                                <button id="verifyBtn_${type}" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                                    🔍 Verify Import
+                                </button>
+                                <span id="verifyStatus_${type}" class="text-sm ml-2"></span>
+                            </div>
+                            <div id="verifyResult_${type}" class="mt-4 hidden"></div>`;
+                        }
                     } else if (status === 'cancelled') {
                         html += `<div class="bg-gray-100 border border-gray-400 text-gray-700 px-4 py-3 rounded">
                             <strong>⛔ Import cancelled by user.</strong><br>
@@ -293,13 +322,14 @@
 
                     resultDiv.innerHTML = html;
 
-                    // ---- Attach verify button event ----
-                    const verifyBtn = document.getElementById('verifyPurchaseBtn');
+                    // Attach manual verify button (if present)
+                    const verifyBtn = document.getElementById(`verifyBtn_${type}`);
                     if (verifyBtn) {
+                        // We need the fileInputId and targetRadioName – we can get them from the outer function's closure
+                        // We'll store them in a data attribute or use a global lookup
+                        const fileInputId = (type === 'purchase') ? 'purchaseFileInput' : 'salesFileInput';
+                        const targetRadioName = (type === 'purchase') ? 'purchase_target' : 'sales_target';
                         verifyBtn.addEventListener('click', function() {
-                            // Get the file input and job ID
-                            const fileInput = document.getElementById(fileInputId); // We need fileInputId from outer scope
-                            // We'll pass fileInputId via the function call
                             verifyImport(jobId, fileInputId, targetRadioName, verifyBtn);
                         });
                     }
@@ -335,7 +365,7 @@
         window[`${type}PollInterval`] = setInterval(poll, 1500);
     }
 
-    // ---- Verify Import function ----
+    // ---- Manual Verify Import function (for sales imports or re-verification) ----
     async function verifyImport(jobId, fileInputId, targetRadioName, button) {
         const fileInput = document.getElementById(fileInputId);
         if (!fileInput.files.length) {
@@ -349,10 +379,10 @@
         formData.append('file', file);
         formData.append('target_category', targetCategory);
 
-        const verifyStatus = document.getElementById('verifyStatus');
+        const verifyStatus = document.getElementById(`verifyStatus_${button.id.split('_')[1]}`);
         if (!verifyStatus) return;
         verifyStatus.innerText = 'Verifying...';
-        const verifyResultDiv = document.getElementById('verifyResult');
+        const verifyResultDiv = document.getElementById(`verifyResult_${button.id.split('_')[1]}`);
         if (!verifyResultDiv) return;
         verifyResultDiv.classList.add('hidden');
         verifyResultDiv.innerHTML = '';

@@ -2006,14 +2006,25 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 if cancel_flags.get(job_id):
                     raise Exception("CANCELLED_BY_USER")
 
+        # ----- COMMIT AND VERIFY (AUTOMATIC) -----
         conn.commit()
         cancel_flags.pop(job_id, None)
+
+        # ---- AUTOMATIC VERIFICATION ----
+        verification = None
+        try:
+            file_stream.seek(0)   # rewind the file stream for verification
+            verification = verify_import(job_id, file_stream, target_category)
+        except Exception as v_err:
+            verification = {'error': str(v_err)}
+
         update_job_progress(job_id, status='done',
                             result={
                                 'imported': imported_count,
                                 'skipped': skipped_rows,
                                 'warnings': warning_rows,
-                                'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped, {len(warning_rows)} warnings'
+                                'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped, {len(warning_rows)} warnings',
+                                'verification': verification   # <-- now included
                             })
 
     except Exception as e:
