@@ -2527,11 +2527,16 @@ def api_import_failed_report(job_id):
                      mimetype='application/pdf')
 
 # ===================== IMPORT VERIFICATION (real‑time comparison) =====================
+# FIXED: Use direct psycopg2 connection (not pool) to avoid "cursor already closed"
 def verify_import(job_id, file_stream, target_category):
     """
     Parse the Excel file and compare each row against the current database state.
+    Uses a direct connection to avoid pool exhaustion issues.
     Returns a dict with summary and mismatch details.
     """
+    if not DATABASE_URL:
+        return {'error': 'DATABASE_URL not configured'}
+
     try:
         wb = load_workbook(file_stream, data_only=True)
         ws = wb.active
@@ -2576,95 +2581,107 @@ def verify_import(job_id, file_stream, target_category):
     matched = 0
     total_rows = 0
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    # Use a direct connection (not the pool) to avoid "cursor already closed" errors
+    conn = None
+    cursor = None
+    try:
+        import time
+        time.sleep(0.2)  # tiny delay to let the pool settle
 
-    for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
-        if not any(row):
-            continue
-        total_rows += 1
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        cursor = conn.cursor()
 
-        name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
-        if not name:
-            skipped.append({'row': row_idx, 'reason': 'Product name is empty'})
-            continue
+        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
+            if not any(row):
+                continue
+            total_rows += 1
 
-        # Parse numeric values (with error handling)
-        try:
-            quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
-        except:
-            quantity = 0
-        try:
-            cost_price = float(row[header_map['cost_price']]) if header_map.get('cost_price') is not None and row[header_map['cost_price']] is not None else 0
-        except:
-            cost_price = 0
-        try:
-            total_selling = float(row[header_map['total_selling']]) if header_map.get('total_selling') is not None and row[header_map['total_selling']] is not None else 0
-        except:
-            total_selling = 0
-        selling_price = total_selling / quantity if quantity > 0 else 0
-        try:
-            discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
-        except:
-            discount = 0
+            name = str(row[header_map['name']]).strip() if row[header_map['name']] else ''
+            if not name:
+                skipped.append({'row': row_idx, 'reason': 'Product name is empty'})
+                continue
 
-        # --- Query the database for this product (same category) ---
-        cursor.execute("""
-            SELECT p.id, p.stock, p.cost_price, p.selling_price, p.discount
-            FROM products p
-            WHERE p.name = %s AND p.brand = '' AND p.category = %s
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp
-                WHERE dp.product_id = p.id
-                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
-                AND dp.source = 'product'
-            )
-        """, (name, target_category))
-        product = cursor.fetchone()
+            # Parse numeric values (with error handling)
+            try:
+                quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
+            except:
+                quantity = 0
+            try:
+                cost_price = float(row[header_map['cost_price']]) if header_map.get('cost_price') is not None and row[header_map['cost_price']] is not None else 0
+            except:
+                cost_price = 0
+            try:
+                total_selling = float(row[header_map['total_selling']]) if header_map.get('total_selling') is not None and row[header_map['total_selling']] is not None else 0
+            except:
+                total_selling = 0
+            selling_price = total_selling / quantity if quantity > 0 else 0
+            try:
+                discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
+            except:
+                discount = 0
 
-        if not product:
-            mismatches.append({
-                'row': row_idx,
-                'reason': 'Product not found in database',
-                'expected': {'name': name, 'qty': quantity, 'cost': cost_price, 'selling': selling_price, 'discount': discount}
-            })
-            continue
+            # Query database – use a new cursor for each row (or reuse; either is fine)
+            cursor.execute("""
+                SELECT p.id, p.stock, p.cost_price, p.selling_price, p.discount
+                FROM products p
+                WHERE p.name = %s AND p.brand = '' AND p.category = %s
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp
+                    WHERE dp.product_id = p.id
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+            """, (name, target_category))
+            product = cursor.fetchone()
 
-        product_id, db_stock, db_cost, db_selling, db_discount = product
+            if not product:
+                mismatches.append({
+                    'row': row_idx,
+                    'reason': 'Product not found in database',
+                    'expected': {'name': name, 'qty': quantity, 'cost': cost_price, 'selling': selling_price, 'discount': discount}
+                })
+                continue
 
-        # Compare fields (allow small floating point tolerance)
-        def compare_float(a, b, tolerance=0.001):
-            return abs(a - b) <= tolerance
+            product_id, db_stock, db_cost, db_selling, db_discount = product
 
-        issues = []
-        if not compare_float(float(db_stock), float(quantity)):
-            issues.append(f"stock: expected {quantity}, got {db_stock}")
-        if not compare_float(float(db_cost), float(cost_price)):
-            issues.append(f"cost: expected {cost_price:.2f}, got {db_cost:.2f}")
-        if not compare_float(float(db_selling), float(selling_price)):
-            issues.append(f"selling price: expected {selling_price:.2f}, got {db_selling:.2f}")
-        if not compare_float(float(db_discount), float(discount)):
-            issues.append(f"discount: expected {discount:.2f}, got {db_discount:.2f}")
+            # Compare fields (allow small floating point tolerance)
+            def compare_float(a, b, tolerance=0.001):
+                return abs(a - b) <= tolerance
 
-        if issues:
-            mismatches.append({
-                'row': row_idx,
-                'reason': '; '.join(issues),
-                'expected': {'name': name, 'qty': quantity, 'cost': cost_price, 'selling': selling_price, 'discount': discount},
-                'actual': {'stock': db_stock, 'cost': db_cost, 'selling': db_selling, 'discount': db_discount}
-            })
-        else:
-            matched += 1
+            issues = []
+            if not compare_float(float(db_stock), float(quantity)):
+                issues.append(f"stock: expected {quantity}, got {db_stock}")
+            if not compare_float(float(db_cost), float(cost_price)):
+                issues.append(f"cost: expected {cost_price:.2f}, got {db_cost:.2f}")
+            if not compare_float(float(db_selling), float(selling_price)):
+                issues.append(f"selling price: expected {selling_price:.2f}, got {db_selling:.2f}")
+            if not compare_float(float(db_discount), float(discount)):
+                issues.append(f"discount: expected {discount:.2f}, got {db_discount:.2f}")
 
-    conn.close()
+            if issues:
+                mismatches.append({
+                    'row': row_idx,
+                    'reason': '; '.join(issues),
+                    'expected': {'name': name, 'qty': quantity, 'cost': cost_price, 'selling': selling_price, 'discount': discount},
+                    'actual': {'stock': db_stock, 'cost': db_cost, 'selling': db_selling, 'discount': db_discount}
+                })
+            else:
+                matched += 1
 
-    return {
-        'total_rows': total_rows,
-        'matched': matched,
-        'mismatches': mismatches,
-        'skipped': skipped,
-        'message': f"Verified {total_rows} rows: {matched} matched, {len(mismatches)} mismatches, {len(skipped)} skipped"
-    }
+        return {
+            'total_rows': total_rows,
+            'matched': matched,
+            'mismatches': mismatches,
+            'skipped': skipped,
+            'message': f"Verified {total_rows} rows: {matched} matched, {len(mismatches)} mismatches, {len(skipped)} skipped"
+        }
+    except Exception as e:
+        return {'error': f"Verification failed: {str(e)}"}
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 @app.route('/api/import/verify/<job_id>', methods=['POST'])
 @admin_required
