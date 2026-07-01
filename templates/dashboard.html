@@ -28,7 +28,7 @@
         </div>
     </div>
 
-    <!-- KPI Cards – now 5 columns -->
+    <!-- KPI Cards – 5 columns -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
         <div class="bg-white rounded-xl shadow-md p-4">
             <p class="text-gray-500 text-sm">Total Sales</p>
@@ -52,28 +52,22 @@
         </div>
     </div>
 
-    <!-- Top Products & Low Stock Lists (side by side, each scrollable) -->
+    <!-- Top Products & Low Stock Lists -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <!-- Top Products -->
         <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
             <h2 class="text-xl font-semibold mb-3">🏆 Top Products</h2>
-            <div id="topProductsList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2">
-                <!-- dynamic content -->
-            </div>
+            <div id="topProductsList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2"></div>
             <p class="text-xs text-gray-400 mt-2">* Based on total quantity sold for selected period</p>
         </div>
-        <!-- Low Stock Items -->
         <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
             <h2 class="text-xl font-semibold mb-3">⚠️ Low Stock Items</h2>
-            <div id="lowStockList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2">
-                <!-- dynamic content -->
-            </div>
+            <div id="lowStockList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2"></div>
         </div>
     </div>
 
-    <!-- Pie Chart & Sales History -->
+    <!-- Pie Chart & Sales History (with Calendar) -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <!-- Pie Chart: Product Distribution -->
+        <!-- Pie Chart -->
         <div class="bg-white rounded-xl shadow-md p-4">
             <h2 class="text-xl font-semibold mb-3">🥧 Product Distribution</h2>
             <div id="pieChartContainer">
@@ -81,17 +75,37 @@
             </div>
             <div id="pieChartOfflineMsg" class="text-gray-500 text-center hidden">Offline – pie chart unavailable</div>
         </div>
-        <!-- Sales History (scrollable) -->
+        <!-- Sales History with Calendar -->
         <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
             <div class="flex justify-between items-center mb-3">
                 <h2 class="text-xl font-semibold">📊 Sales History</h2>
                 <div class="flex items-center gap-2">
-                    <input type="date" id="historyDate" class="border border-gray-300 rounded-lg px-3 py-1 text-sm">
-                    <button id="applyHistoryDateBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">View</button>
-                    <button id="refreshHistoryBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-1 rounded-lg text-sm">Today</button>
+                    <button id="todayHistoryBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-1 rounded-lg text-sm">Today</button>
                 </div>
             </div>
-            <div id="salesHistoryList" class="max-h-96 overflow-y-auto space-y-2 pr-2">
+            <!-- Calendar -->
+            <div id="calendarContainer" class="mb-4">
+                <div class="flex justify-between items-center mb-2">
+                    <button id="prevMonthBtn" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-sm">&larr;</button>
+                    <span id="calendarMonthYear" class="font-semibold"></span>
+                    <button id="nextMonthBtn" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-sm">&rarr;</button>
+                </div>
+                <table class="w-full text-center border-collapse">
+                    <thead>
+                        <tr>
+                            <th class="text-xs text-gray-500 py-1">Su</th>
+                            <th class="text-xs text-gray-500 py-1">Mo</th>
+                            <th class="text-xs text-gray-500 py-1">Tu</th>
+                            <th class="text-xs text-gray-500 py-1">We</th>
+                            <th class="text-xs text-gray-500 py-1">Th</th>
+                            <th class="text-xs text-gray-500 py-1">Fr</th>
+                            <th class="text-xs text-gray-500 py-1">Sa</th>
+                        </tr>
+                    </thead>
+                    <tbody id="calendarBody"></tbody>
+                </table>
+            </div>
+            <div id="salesHistoryList" class="flex-1 max-h-72 overflow-y-auto space-y-2 pr-2">
                 <!-- dynamic content -->
             </div>
         </div>
@@ -106,7 +120,11 @@
     let endDate = null;
     let startTime = null;
     let endTime = null;
-    let historyDate = null;
+    let selectedDate = null;          // date from calendar (YYYY-MM-DD)
+
+    // ----- Calendar state -----
+    let calendarYear = new Date().getFullYear();
+    let calendarMonth = new Date().getMonth(); // 0‑based
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -162,7 +180,6 @@
     const CACHE_KEY_HISTORY = 'dashboard_sales_history';
     const CACHE_KEY_TIMESTAMP = 'dashboard_last_fetch';
 
-    // Save data to localStorage with timestamp
     function cacheData(key, data) {
         try {
             localStorage.setItem(key, JSON.stringify(data));
@@ -170,19 +187,113 @@
         } catch (e) {}
     }
 
-    // Load cached data (returns null if not found or expired)
     function loadCache(key, maxAgeMinutes = 60) {
         try {
             const raw = localStorage.getItem(key);
             if (!raw) return null;
             const ts = parseInt(localStorage.getItem(CACHE_KEY_TIMESTAMP) || '0');
             const ageMinutes = (Date.now() - ts) / (1000 * 60);
-            if (ageMinutes > maxAgeMinutes) return null; // cache too old
+            if (ageMinutes > maxAgeMinutes) return null;
             return JSON.parse(raw);
         } catch (e) { return null; }
     }
 
-    // Fetch all dashboard data based on date/time range
+    // ----- Calendar rendering -----
+    function renderCalendar(year, month) {
+        const monthNames = ['January','February','March','April','May','June',
+                            'July','August','September','October','November','December'];
+        document.getElementById('calendarMonthYear').innerText = `${monthNames[month]} ${year}`;
+
+        const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+        let html = '<tr>';
+        for (let i = 0; i < firstDay; i++) {
+            html += '<td></td>';
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateObj = new Date(year, month, d);
+            const dateStr = dateObj.toISOString().split('T')[0];
+            const isSelected = (selectedDate === dateStr);
+            const isToday = (dateStr === new Date().toISOString().split('T')[0]);
+            let cls = 'p-1 rounded cursor-pointer hover:bg-blue-100 ';
+            if (isSelected) cls += 'bg-blue-500 text-white hover:bg-blue-600 ';
+            else if (isToday) cls += 'bg-gray-200 font-bold ';
+            html += `<td class="${cls}" data-date="${dateStr}">${d}</td>`;
+            if ((firstDay + d) % 7 === 0) {
+                html += '</tr><tr>';
+            }
+        }
+        // Close the last row
+        html += '</tr>';
+        document.getElementById('calendarBody').innerHTML = html;
+
+        // Attach click events to day cells
+        document.querySelectorAll('#calendarBody td[data-date]').forEach(td => {
+            td.addEventListener('click', function() {
+                const newDate = this.dataset.date;
+                // Set main filter to this single day
+                startDate = newDate;
+                endDate = newDate;
+                startTime = '';
+                endTime = '';
+                selectedDate = newDate;
+                // Update the date inputs to reflect the selection
+                document.getElementById('startDate').value = newDate;
+                document.getElementById('endDate').value = newDate;
+                document.getElementById('startTime').value = '';
+                document.getElementById('endTime').value = '';
+                // Reload dashboard with this date
+                loadDashboard();
+                // Re-render calendar to highlight
+                renderCalendar(calendarYear, calendarMonth);
+            });
+        });
+    }
+
+    // Navigation for calendar
+    function prevMonth() {
+        if (calendarMonth === 0) {
+            calendarMonth = 11;
+            calendarYear--;
+        } else {
+            calendarMonth--;
+        }
+        renderCalendar(calendarYear, calendarMonth);
+    }
+    function nextMonth() {
+        if (calendarMonth === 11) {
+            calendarMonth = 0;
+            calendarYear++;
+        } else {
+            calendarMonth++;
+        }
+        renderCalendar(calendarYear, calendarMonth);
+    }
+    document.getElementById('prevMonthBtn').addEventListener('click', prevMonth);
+    document.getElementById('nextMonthBtn').addEventListener('click', nextMonth);
+
+    // "Today" button for history (sets dashboard to today)
+    document.getElementById('todayHistoryBtn').addEventListener('click', function() {
+        const today = new Date().toISOString().split('T')[0];
+        startDate = today;
+        endDate = today;
+        startTime = '';
+        endTime = '';
+        selectedDate = today;
+        document.getElementById('startDate').value = today;
+        document.getElementById('endDate').value = today;
+        document.getElementById('startTime').value = '';
+        document.getElementById('endTime').value = '';
+        // Adjust calendar to current month
+        const now = new Date();
+        calendarYear = now.getFullYear();
+        calendarMonth = now.getMonth();
+        renderCalendar(calendarYear, calendarMonth);
+        loadDashboard();
+    });
+
+    // ----- Main dashboard load -----
     async function loadDashboard() {
         try {
             updateOfflineBanner();
@@ -196,7 +307,6 @@
                 summaryUrl += '?' + params.join('&');
             }
 
-            // Try to fetch summary
             let summary = null;
             let summaryError = false;
             try {
@@ -209,16 +319,15 @@
                 summaryError = true;
                 summary = loadCache(CACHE_KEY_SUMMARY);
                 if (!summary) {
-                    // No cache – show empty
                     summary = { sales: 0, profit: 0, total_products: 0, total_batches: 0, low_stock_count: 0, low_stock_products: [] };
                 }
             }
 
-            // Update KPI cards
+            // Update KPIs
             document.getElementById('salesValue').innerText = formatMoney(summary.sales);
             document.getElementById('profitValue').innerText = formatMoney(summary.profit);
             document.getElementById('productsValue').innerText = summary.total_products || 0;
-            document.getElementById('batchesValue').innerText = summary.total_batches || 0;   // new
+            document.getElementById('batchesValue').innerText = summary.total_batches || 0;
             document.getElementById('lowStockValue').innerText = summary.low_stock_count || 0;
 
             // Low stock list
@@ -236,7 +345,7 @@
                 lowStockContainer.innerHTML = '<div class="text-gray-400">No low stock items.</div>';
             }
 
-            // Low stock alert (only once, only if online and newly fetched)
+            // Low stock alert
             if (!summaryError && !lowStockShown && summary.low_stock_count > 0) {
                 let productList = summary.low_stock_products.slice(0, 10).map(item => `• ${item[0]} (${item[1]}) - ${item[3]} left`).join('\n');
                 if (summary.low_stock_products.length > 10) {
@@ -285,13 +394,12 @@
                 topContainer.innerHTML = '<div class="text-gray-400">No sales data for this period.</div>';
             }
 
-            // Update pie chart
+            // Pie chart
             if (pieChart) pieChart.destroy();
             const ctx = document.getElementById('pieChart');
             const container = document.getElementById('pieChartContainer');
             const offlineMsg = document.getElementById('pieChartOfflineMsg');
             if (topProducts.length > 0 && !topError) {
-                // Online – show chart
                 container.classList.remove('hidden');
                 offlineMsg.classList.add('hidden');
                 let labels = topProducts.map(p => `${p.name.substring(0, 15)}${p.name.length > 15 ? '...' : ''}`);
@@ -315,27 +423,37 @@
                     });
                 }
             } else {
-                // Offline or no data – hide chart and show message
                 container.classList.add('hidden');
                 offlineMsg.classList.remove('hidden');
-                // If we have cached top products, we could still show chart, but we'll keep it simple
             }
 
-            // Load sales history (if history date is set)
-            await loadSalesHistory();
+            // Sales History – now using the same range as the main dashboard
+            await loadSalesHistory(range);
 
         } catch (err) {
             console.error('Error loading dashboard:', err);
         }
     }
 
-    // Load sales history for selected date
-    async function loadSalesHistory() {
+    // Load sales history with the provided date range
+    async function loadSalesHistory(range) {
         try {
             let url = '/api/dashboard/sales_history';
-            if (historyDate) {
-                url += `?date=${historyDate}`;
+            const params = [];
+            if (range.start_datetime) {
+                params.push(`start_datetime=${encodeURIComponent(range.start_datetime)}`);
             }
+            if (range.end_datetime) {
+                params.push(`end_datetime=${encodeURIComponent(range.end_datetime)}`);
+            }
+            // If no range is provided, we fallback to today (or we could pass date=selectedDate)
+            if (params.length === 0 && selectedDate) {
+                params.push(`date=${selectedDate}`);
+            }
+            if (params.length > 0) {
+                url += '?' + params.join('&');
+            }
+
             let history = [];
             let historyError = false;
             try {
@@ -370,14 +488,13 @@
                     historyContainer.appendChild(div);
                 });
                 if (historyError) {
-                    // show small offline note
                     const note = document.createElement('div');
                     note.className = 'text-xs text-gray-400 mt-2';
                     note.innerText = '⚠️ Data may be outdated (offline)';
                     historyContainer.appendChild(note);
                 }
             } else {
-                historyContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📅 No sales history found for this date.</div>';
+                historyContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📅 No sales history found for this period.</div>';
             }
         } catch (err) {
             console.error('Error loading sales history:', err);
@@ -395,22 +512,38 @@
         return colors;
     }
 
-    // Apply filter
+    // Apply filter from date/time pickers
     function applyFilter() {
-        startDate = document.getElementById('startDate').value;
-        endDate = document.getElementById('endDate').value;
-        startTime = document.getElementById('startTime').value;
-        endTime = document.getElementById('endTime').value;
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        const st = document.getElementById('startTime').value;
+        const et = document.getElementById('endTime').value;
         
-        if (!startDate && !endDate) {
+        if (!start && !end) {
             alert('Please select at least a start date or end date');
             return;
         }
-        
+        startDate = start || null;
+        endDate = end || null;
+        startTime = st || null;
+        endTime = et || null;
+        // If a single date is selected, update selectedDate for calendar highlight
+        if (startDate && startDate === endDate) {
+            selectedDate = startDate;
+        } else {
+            selectedDate = null; // clear highlight for ranges
+        }
+        // Update calendar to reflect the selected month (if a date is set)
+        if (startDate) {
+            const d = new Date(startDate);
+            calendarYear = d.getFullYear();
+            calendarMonth = d.getMonth();
+            renderCalendar(calendarYear, calendarMonth);
+        }
         loadDashboard();
     }
-    
-    // Refresh to current date
+
+    // Refresh to current date (today)
     function refreshToCurrent() {
         const today = new Date().toISOString().split('T')[0];
         document.getElementById('startDate').value = today;
@@ -421,41 +554,35 @@
         endDate = today;
         startTime = '00:00';
         endTime = '23:59';
+        selectedDate = today;
+        // Update calendar
+        const now = new Date();
+        calendarYear = now.getFullYear();
+        calendarMonth = now.getMonth();
+        renderCalendar(calendarYear, calendarMonth);
         loadDashboard();
     }
-    
-    // Apply history date filter
-    function applyHistoryDate() {
-        historyDate = document.getElementById('historyDate').value;
-        loadSalesHistory();
-    }
-    
-    // Refresh history to today
-    function refreshHistoryToToday() {
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('historyDate').value = today;
-        historyDate = today;
-        loadSalesHistory();
-    }
-    
+
     // Event listeners
     document.getElementById('applyFilterBtn').addEventListener('click', applyFilter);
-    document.getElementById('applyHistoryDateBtn').addEventListener('click', applyHistoryDate);
-    document.getElementById('refreshHistoryBtn').addEventListener('click', refreshHistoryToToday);
-    
+
     // Set default date range to today
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('startDate').value = today;
     document.getElementById('endDate').value = today;
     document.getElementById('startTime').value = '00:00';
     document.getElementById('endTime').value = '23:59';
-    document.getElementById('historyDate').value = today;
     startDate = today;
     endDate = today;
     startTime = '00:00';
     endTime = '23:59';
-    historyDate = today;
-    
+    selectedDate = today;
+    // Initialize calendar to current month
+    const now = new Date();
+    calendarYear = now.getFullYear();
+    calendarMonth = now.getMonth();
+    renderCalendar(calendarYear, calendarMonth);
+
     // Initial load
     loadDashboard();
 </script>

@@ -226,6 +226,14 @@
                             <strong>✅ Import successful!</strong><br>
                             ${message || `Imported ${imported} records.`}
                         </div>`;
+                        // ---- ADD VERIFY BUTTON ----
+                        html += `<div class="mt-4">
+                            <button id="verifyPurchaseBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                                🔍 Verify Import
+                            </button>
+                            <span id="verifyStatus" class="text-sm ml-2"></span>
+                        </div>
+                        <div id="verifyResult" class="mt-4 hidden"></div>`;
                     } else if (status === 'cancelled') {
                         html += `<div class="bg-gray-100 border border-gray-400 text-gray-700 px-4 py-3 rounded">
                             <strong>⛔ Import cancelled by user.</strong><br>
@@ -285,6 +293,17 @@
 
                     resultDiv.innerHTML = html;
 
+                    // ---- Attach verify button event ----
+                    const verifyBtn = document.getElementById('verifyPurchaseBtn');
+                    if (verifyBtn) {
+                        verifyBtn.addEventListener('click', function() {
+                            // Get the file input and job ID
+                            const fileInput = document.getElementById(fileInputId); // We need fileInputId from outer scope
+                            // We'll pass fileInputId via the function call
+                            verifyImport(jobId, fileInputId, targetRadioName, verifyBtn);
+                        });
+                    }
+
                     // Remove job ID from storage when done
                     const storageKey = (type === 'purchase') ? 'purchaseJobId' : 'salesJobId';
                     sessionStorage.removeItem(storageKey);
@@ -314,6 +333,73 @@
         poll();
         // Set up interval
         window[`${type}PollInterval`] = setInterval(poll, 1500);
+    }
+
+    // ---- Verify Import function ----
+    async function verifyImport(jobId, fileInputId, targetRadioName, button) {
+        const fileInput = document.getElementById(fileInputId);
+        if (!fileInput.files.length) {
+            alert('Please select the same Excel file that was imported.');
+            return;
+        }
+        const file = fileInput.files[0];
+        const targetRadio = document.querySelector(`input[name="${targetRadioName}"]:checked`);
+        const targetCategory = targetRadio ? targetRadio.value : 'Accessory';
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('target_category', targetCategory);
+
+        const verifyStatus = document.getElementById('verifyStatus');
+        if (!verifyStatus) return;
+        verifyStatus.innerText = 'Verifying...';
+        const verifyResultDiv = document.getElementById('verifyResult');
+        if (!verifyResultDiv) return;
+        verifyResultDiv.classList.add('hidden');
+        verifyResultDiv.innerHTML = '';
+
+        button.disabled = true;
+
+        try {
+            const res = await fetch(`/api/import/verify/${jobId}`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Verification failed');
+            }
+            const result = data.result;
+            verifyStatus.innerText = '✅ Verification complete.';
+            // Build report
+            let html = `<div class="mt-4 p-4 border rounded-lg bg-gray-50">`;
+            html += `<h4 class="font-bold">Verification Report</h4>`;
+            html += `<p class="text-sm">${result.message}</p>`;
+            html += `<div class="mt-2 text-sm">`;
+            html += `<span class="text-green-600">✅ Matched: ${result.matched}</span> | `;
+            html += `<span class="text-red-600">❌ Mismatches: ${result.mismatches ? result.mismatches.length : 0}</span> | `;
+            html += `<span class="text-yellow-600">⚠️ Skipped: ${result.skipped ? result.skipped.length : 0}</span>`;
+            html += `</div>`;
+            if (result.mismatches && result.mismatches.length > 0) {
+                html += `<div class="mt-2 max-h-60 overflow-y-auto border rounded p-2">`;
+                html += `<table class="min-w-full text-xs"><thead class="bg-gray-100"><tr><th>Row</th><th>Reason</th><th>Expected</th><th>Actual</th></tr></thead><tbody>`;
+                result.mismatches.forEach(m => {
+                    const exp = m.expected ? `Qty:${m.expected.qty}, Cost:${m.expected.cost.toFixed(2)}, Sell:${m.expected.selling.toFixed(2)}, Disc:${m.expected.discount.toFixed(2)}` : 'N/A';
+                    const act = m.actual ? `Stock:${m.actual.stock}, Cost:${m.actual.cost.toFixed(2)}, Sell:${m.actual.selling.toFixed(2)}, Disc:${m.actual.discount.toFixed(2)}` : 'N/A';
+                    html += `<tr><td>${m.row}</td><td>${m.reason}</td><td>${exp}</td><td>${act}</td></tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+            if (result.skipped && result.skipped.length > 0) {
+                html += `<div class="mt-2"><strong>Skipped rows:</strong> ${result.skipped.map(s => `Row ${s.row} (${s.reason})`).join(', ')}</div>`;
+            }
+            html += `</div>`;
+            verifyResultDiv.innerHTML = html;
+            verifyResultDiv.classList.remove('hidden');
+        } catch (err) {
+            verifyStatus.innerText = '❌ Verification error: ' + err.message;
+        } finally {
+            button.disabled = false;
+        }
     }
 
     // ---- Helper function to set up the import form with sessionStorage support ----
