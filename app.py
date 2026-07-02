@@ -63,7 +63,6 @@ from services.product_service import get_deleted_products, restore_archive
 
 # ---------- DATABASE CONNECTION ----------
 from database.db import get_connection
-# We'll also need DATABASE_URL – if not exported, read from env
 try:
     from database.db import DATABASE_URL
 except ImportError:
@@ -93,7 +92,6 @@ def parse_date_cell(value):
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        # Excel date serial number
         try:
             return datetime(1899, 12, 30) + timedelta(days=float(value))
         except:
@@ -106,13 +104,11 @@ def parse_date_cell(value):
         s = value.strip()
         if not s:
             return None
-        # Try dateutil first if available
         if HAS_DATEUTIL:
             try:
                 return date_parser.parse(s)
             except:
                 pass
-        # Try common formats manually
         for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d',
                     '%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S', '%m/%d/%Y %H:%M:%S',
                     '%d-%m-%Y %H:%M:%S', '%Y/%m/%d %H:%M:%S'):
@@ -120,9 +116,7 @@ def parse_date_cell(value):
                 return datetime.strptime(s, fmt)
             except:
                 continue
-        # If still failing, try to strip time and parse date part
         try:
-            # Remove time part if present
             date_part = s.split(' ')[0]
             for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
                 try:
@@ -143,9 +137,8 @@ LICENSE_FILE = os.path.join(BASE_DIR, "license.json")
 TRIAL_DAYS = 30
 MASTER_KEY = "OXSMART-1234-KEY"
 
-# ===================== IMPORT JOB TRACKING (DATABASE VERSION) =====================
+# ===================== IMPORT JOB TRACKING =====================
 def init_import_jobs_table():
-    """Create the import_jobs table if it does not exist."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -159,18 +152,15 @@ def init_import_jobs_table():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # In case the table already existed with result as TEXT, alter it to JSONB
     try:
         cursor.execute("ALTER TABLE import_jobs ALTER COLUMN result TYPE JSONB USING result::jsonb")
     except Exception as e:
-        # Column might not exist or already JSONB – ignore
         pass
     conn.commit()
     conn.close()
     print("✅ import_jobs table ensured.")
 
 def update_job_progress(job_id, **kwargs):
-    """Update job progress in the database."""
     conn = get_connection()
     cursor = conn.cursor()
     set_parts = []
@@ -192,10 +182,9 @@ def update_job_progress(job_id, **kwargs):
     conn.commit()
     conn.close()
 
-# Call table creation on startup
 init_import_jobs_table()
 
-# ---------- (license functions remain unchanged) ----------
+# ---------- LICENSE FUNCTIONS ----------
 def load_license_data():
     try:
         if os.path.exists(LICENSE_FILE):
@@ -271,7 +260,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# ---------------------- ADMIN REQUIRED DECORATOR ----------------------
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -356,7 +344,6 @@ def today_sales_screen():
 def archive():
     return render_template("archive.html")
 
-# ---------------------- ADMIN PAGE ----------------------
 @app.route("/admin/users")
 @admin_required
 def admin_users():
@@ -504,7 +491,6 @@ def api_admin_update_role(user_id):
         return jsonify({'success': True})
     else:
         return jsonify({'success': False, 'error': 'Update failed'}), 400
-
 
 # ===================== DASHBOARD API =====================
 @app.route('/api/dashboard/summary', methods=['GET'])
@@ -881,7 +867,6 @@ def api_sales_complete():
     payment_method = data.get('payment_method', 'cash')
     cheque_number = data.get('cheque_number')
     
-    # --- NEW: get the current user's ID from session ---
     user_id = session.get('user_id')
     
     try:
@@ -891,7 +876,7 @@ def api_sales_complete():
             selected_batches,
             payment_method,
             cheque_number,
-            user_id=user_id   # pass user_id
+            user_id=user_id
         )
         
         receipt_cart = []
@@ -1056,7 +1041,6 @@ def api_today_sales():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # --- MODIFIED: added u.username to SELECT and joined users ---
     select_clause = """
         SELECT 
             sales.id, 
@@ -1076,26 +1060,23 @@ def api_today_sales():
             sales.profit as net_profit,
             COALESCE(sales.payment_method, 'cash') as payment_method,
             sales.cheque_number,
-            u.username   -- include username
+            u.username
     """
     from_clause = """
         FROM sales
         JOIN sales_items ON sales.id = sales_items.sale_id
         JOIN products ON products.id = sales_items.product_id
         LEFT JOIN purchase_batches ON purchase_batches.id = sales_items.batch_id
-        LEFT JOIN users u ON sales.user_id = u.id   -- join users table
+        LEFT JOIN users u ON sales.user_id = u.id
     """
     
     where_conditions = ["sales.reversed = 0"]
     params = []
     
-    # ---- DATE FILTERING ----
     if start_date and end_date:
-        # Custom date range takes precedence
         where_conditions.append("sales.date::date BETWEEN %s AND %s")
         params.extend([start_date, end_date])
     else:
-        # Use period parameter
         if period == 'daily':
             where_conditions.append("sales.date::date = CURRENT_DATE")
         elif period == 'weekly':
@@ -1139,7 +1120,7 @@ def api_today_sales():
                 'net_profit': float(r[14]),
                 'payment_method': r[15] if len(r) > 15 else 'cash',
                 'cheque_number': r[16] if len(r) > 16 else None,
-                'username': r[17] if len(r) > 17 else 'Unknown'   # include username
+                'username': r[17] if len(r) > 17 else 'Unknown'
             })
         return jsonify(sales_data)
     except Exception as e:
@@ -1668,7 +1649,6 @@ def api_archive():
             combined = [item for item in combined if item['action'] == status_filter]
             print(f"📊 Filtered to {len(combined)} items with status '{status_filter}'")
         
-        # ----------------- FIXED sort_key with proper indentation -----------------
         def sort_key(item):
             if item['action'] == 'ACTIVE':
                 return (datetime.max.replace(tzinfo=timezone.utc), item['name'])
@@ -1736,10 +1716,9 @@ def import_inventory_page():
     return render_template('import_inventory.html')
 
 # ---------- CANCEL FLAGS (in-memory) ----------
-cancel_flags = {}   # job_id -> True if cancellation requested
+cancel_flags = {}
 
-# ----- INVENTORY IMPORT (background thread) with single transaction -----
-# FULLY UPDATED: correct column mapping, selling price computation, category from file, replace mode per category
+# ========== FIXED INVENTORY IMPORT ==========
 def run_inventory_import(job_id, file_stream, target_category, mode='append'):
     conn = None
     try:
@@ -1773,7 +1752,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 header_map['quantity'] = idx
             elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                 header_map['cost_price'] = idx
-            elif cell_lower in ['amount', 'total cost']:        # <-- CHANGED: 'amount' maps to total cost
+            elif cell_lower in ['amount', 'total cost']:
                 header_map['total_cost'] = idx
             elif cell_lower in ['selling price', 'price', 'unit price']:
                 header_map['selling_price'] = idx
@@ -1846,14 +1825,11 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     total_cost = 0
                     warning_rows.append(f"Row {row_idx}: Invalid total cost, set to 0")
             else:
-                # If no total_cost column, compute from cost_price * quantity
                 total_cost = cost_price * quantity
 
-            # If total_cost is still zero but we have cost_price and quantity, compute it
             if total_cost == 0 and cost_price > 0 and quantity > 0:
                 total_cost = cost_price * quantity
 
-            # Cost per unit (for purchases table)
             cost_per_unit = total_cost / quantity if quantity > 0 else 0
 
             # Selling price – either from column or computed with markup
@@ -1868,9 +1844,8 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     selling_price = 0
                     warning_rows.append(f"Row {row_idx}: Invalid selling price, set to 0")
             else:
-                # No selling price column – compute from cost with markup (30% by default)
                 if quantity > 0 and total_cost > 0:
-                    markup = 1.3  # 30% profit – you can change this or make configurable
+                    markup = 1.3
                     selling_price = cost_per_unit * markup
                 else:
                     selling_price = 0
@@ -1978,8 +1953,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
 
         # ---- Process rows ----
         for idx, item in enumerate(rows_to_process, start=1):
-            # For replace mode, we already deleted all products of the categories, so we always insert.
-            # For append, we check for existing product in the same category.
             if mode == 'replace':
                 cursor.execute("""
                     INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
@@ -1988,17 +1961,25 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 """, (item['name'], item['brand'], item['cost_price'], item['selling_price'], 0, item['category']))
                 product_id = cursor.fetchone()[0]
             else:
+                # FIX: Match by name + brand ONLY – ignore category
                 cursor.execute("""
-                    SELECT p.id, p.cost_price, p.selling_price
+                    SELECT p.id, p.cost_price, p.selling_price, p.category
                     FROM products p
                     LEFT JOIN deleted_products dp ON dp.product_id = p.id AND dp.action = 'PERMANENTLY DELETED' AND dp.source = 'product'
-                    WHERE p.name = %s AND p.brand = %s AND p.category = %s AND dp.id IS NULL
-                """, (item['name'], item['brand'], item['category']))
+                    WHERE p.name = %s AND p.brand = %s AND dp.id IS NULL
+                """, (item['name'], item['brand']))
                 product = cursor.fetchone()
 
                 if product:
-                    product_id, existing_cost, existing_selling = product
-                    # Update product details if changed
+                    product_id, existing_cost, existing_selling, existing_category = product
+                    # Update category if different
+                    if existing_category != item['category']:
+                        cursor.execute("""
+                            UPDATE products
+                            SET category = %s
+                            WHERE id = %s
+                        """, (item['category'], product_id))
+                    # Update cost and selling price if changed
                     if (existing_cost != item['cost_price'] or existing_selling != item['selling_price']):
                         cursor.execute("""
                             UPDATE products
@@ -2014,7 +1995,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     product_id = cursor.fetchone()[0]
 
             # ---- Insert into purchases table ----
-            total = item['total_cost'] - item['discount']   # total cost minus discount
+            total = item['total_cost'] - item['discount']
             cursor.execute("""
                 INSERT INTO purchases
                 (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date)
@@ -2043,7 +2024,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 if cancel_flags.get(job_id):
                     raise Exception("CANCELLED_BY_USER")
 
-        # ----- COMMIT AND VERIFY -----
         conn.commit()
         cancel_flags.pop(job_id, None)
 
@@ -2078,8 +2058,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             conn.close()
         cancel_flags.pop(job_id, None)
 
-# ----- SALES IMPORT (background thread) with single transaction and user tracking -----
-# ---------- FIXED: date parsing and profit calculation ----------
+# ========== FIXED SALES IMPORT ==========
 def run_sales_import(job_id, file_stream, target_category, mode='append', user_id=None):
     try:
         wb = load_workbook(file_stream, data_only=True)
@@ -2172,14 +2151,12 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
 
             discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
 
-            # ---- Improved date parsing ----
             sale_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 parsed = parse_date_cell(row[header_map['date']])
                 if parsed:
                     sale_date = parsed
                 else:
-                    # fallback to current date if parsing fails
                     sale_date = datetime.now()
                     error_rows.append(f"Row {row_idx}: Could not parse date, using current date.")
             else:
@@ -2230,16 +2207,14 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
         conn.autocommit = False
         cursor = conn.cursor()
 
-        # --- REPLACE MODE: delete existing sales for this category ---
-        if mode == 'replace':
-            # Delete sales_items and sales for products in this category
+        # --- REPLACE MODE: delete existing sales for the category (if target_category != 'All') ---
+        if mode == 'replace' and target_category != 'All':
             cursor.execute("""
                 DELETE FROM sales_items
                 WHERE product_id IN (
                     SELECT id FROM products WHERE category = %s
                 )
             """, (target_category,))
-            # Delete sales that no longer have any items
             cursor.execute("""
                 DELETE FROM sales
                 WHERE id NOT IN (SELECT sale_id FROM sales_items)
@@ -2247,7 +2222,7 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
 
         # ---- Process rows ----
         for idx, entry in enumerate(rows_to_process, start=1):
-            # Find product
+            # Find product by name only (ignore category)
             cursor.execute(
                 "SELECT id, category FROM products WHERE name = %s",
                 (entry['item'],)
@@ -2257,14 +2232,15 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
                 overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
                 continue
             product_id, product_category = product
-            if product_category != target_category:
+
+            # If target_category is not 'All', enforce category match
+            if target_category != 'All' and product_category != target_category:
                 overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
                 continue
 
             subtotal = entry['qty'] * entry['rate']
             total = subtotal - entry['discount']
 
-            # Insert sale record with the parsed date and user_id
             cursor.execute("""
                 INSERT INTO sales (date, subtotal, discount, total, profit, reversed, payment_method, user_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -2287,33 +2263,27 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
                 continue
 
             batch_id, cost_price, selling_price = batch_info
-            # Override selling price with the rate from the import
             selling_price = entry['rate']
             item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
 
-            # Insert sales item
             cursor.execute("""
                 INSERT INTO sales_items
                 (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit))
 
-            # Update batch remaining
             cursor.execute("""
                 UPDATE purchase_batches
                 SET remaining_quantity = remaining_quantity - %s
                 WHERE id = %s
             """, (entry['qty'], batch_id))
 
-            # Update product stock
             cursor.execute("""
                 UPDATE products
                 SET stock = stock - %s
                 WHERE id = %s
             """, (entry['qty'], product_id))
 
-            # --- FIX: Update sale's profit to the net profit ---
-            # Net profit = item_profit (already after discount) for this single item sale
             cursor.execute("""
                 UPDATE sales
                 SET profit = %s
@@ -2377,7 +2347,6 @@ def api_import_inventory():
 
     job_id = str(uuid.uuid4())
 
-    # Insert initial job record
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -2396,7 +2365,7 @@ def api_import_inventory():
 
     return jsonify({'success': True, 'job_id': job_id})
 
-# ----- SALES IMPORT ENDPOINT (with user tracking) -----
+# ----- SALES IMPORT ENDPOINT -----
 @app.route('/api/sales/import', methods=['POST'])
 @admin_required
 def api_import_sales():
@@ -2410,8 +2379,9 @@ def api_import_sales():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'File type not allowed'}), 400
 
-    target_category = request.form.get('target_category', 'Accessory')
-    if target_category not in ['Accessory', 'Screen']:
+    # Allow 'All' to import sales for any product category
+    target_category = request.form.get('target_category', 'All')
+    if target_category not in ['Accessory', 'Screen', 'All']:
         return jsonify({'success': False, 'error': 'Invalid target category'}), 400
 
     mode = request.form.get('mode', 'append')
@@ -2423,7 +2393,6 @@ def api_import_sales():
 
     job_id = str(uuid.uuid4())
 
-    # Insert initial job record
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -2433,12 +2402,11 @@ def api_import_sales():
     conn.commit()
     conn.close()
 
-    # --- NEW: get current user ID from session ---
     user_id = session.get('user_id')
 
     thread = threading.Thread(
         target=run_sales_import,
-        args=(job_id, file_stream, target_category, mode, user_id)   # pass user_id
+        args=(job_id, file_stream, target_category, mode, user_id)
     )
     thread.daemon = True
     thread.start()
@@ -2461,7 +2429,6 @@ def api_import_progress(job_id):
     if not row:
         return jsonify({'success': False, 'error': 'Job not found'}), 404
 
-    # Parse result if it's a JSON string (postgres returns JSONB as dict or list)
     result_data = row[4]
     if result_data and isinstance(result_data, str):
         try:
@@ -2511,7 +2478,6 @@ def api_import_failed_report(job_id):
         return jsonify({'success': False, 'error': 'Job not found'}), 404
 
     result = row[0]
-    # Ensure it's a dict
     if isinstance(result, str):
         try:
             result = json.loads(result)
@@ -2522,7 +2488,6 @@ def api_import_failed_report(job_id):
         return jsonify({'success': False, 'error': 'No skipped rows to report'}), 400
 
     skipped = result['skipped']
-    # Generate PDF
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     styles = getSampleStyleSheet()
@@ -2533,7 +2498,6 @@ def api_import_failed_report(job_id):
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
     elements.append(Spacer(1, 12))
 
-    # Table header
     table_data = [["Row", "Name/Item", "Qty", "Rate", "Reason"]]
     for s in skipped:
         table_data.append([
@@ -2562,14 +2526,8 @@ def api_import_failed_report(job_id):
                      download_name=f"failed_import_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
-# ===================== IMPORT VERIFICATION (real‑time comparison) =====================
-# FIXED: Use direct psycopg2 connection (not pool) to avoid "cursor already closed"
+# ===================== IMPORT VERIFICATION =====================
 def verify_import(job_id, file_stream, target_category):
-    """
-    Parse the Excel file and compare each row against the current database state.
-    Uses a direct connection to avoid pool exhaustion issues.
-    Returns a dict with summary and mismatch details.
-    """
     if not DATABASE_URL:
         return {'error': 'DATABASE_URL not configured'}
 
@@ -2579,7 +2537,6 @@ def verify_import(job_id, file_stream, target_category):
     except Exception as e:
         return {'error': f"Unable to read workbook: {str(e)}"}
 
-    # --- Header detection (reuse from run_inventory_import) ---
     header_row_idx = None
     header_row = None
     for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
@@ -2619,13 +2576,11 @@ def verify_import(job_id, file_stream, target_category):
     matched = 0
     total_rows = 0
 
-    # Use a direct connection (not the pool) to avoid "cursor already closed" errors
     conn = None
     cursor = None
     try:
         import time
-        time.sleep(0.2)  # tiny delay to let the pool settle
-
+        time.sleep(0.2)
         conn = psycopg2.connect(DATABASE_URL, sslmode='require')
         cursor = conn.cursor()
 
@@ -2639,7 +2594,6 @@ def verify_import(job_id, file_stream, target_category):
                 skipped.append({'row': row_idx, 'reason': 'Product name is empty'})
                 continue
 
-            # Parse numeric values (with error handling)
             try:
                 quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
             except:
@@ -2652,7 +2606,6 @@ def verify_import(job_id, file_stream, target_category):
                 total_cost = float(row[header_map['total_cost']]) if header_map.get('total_cost') is not None and row[header_map['total_cost']] is not None else 0
             except:
                 total_cost = 0
-            # If no total_cost, compute from cost_price * quantity
             if total_cost == 0 and cost_price > 0 and quantity > 0:
                 total_cost = cost_price * quantity
             selling_price = total_cost / quantity if quantity > 0 else 0
@@ -2661,7 +2614,6 @@ def verify_import(job_id, file_stream, target_category):
             except:
                 discount = 0
 
-            # Query database – use a new cursor for each row (or reuse; either is fine)
             cursor.execute("""
                 SELECT p.id, p.stock, p.cost_price, p.selling_price, p.discount
                 FROM products p
@@ -2685,7 +2637,6 @@ def verify_import(job_id, file_stream, target_category):
 
             product_id, db_stock, db_cost, db_selling, db_discount = product
 
-            # Compare fields (allow small floating point tolerance)
             def compare_float(a, b, tolerance=0.001):
                 return abs(a - b) <= tolerance
 
@@ -2727,10 +2678,6 @@ def verify_import(job_id, file_stream, target_category):
 @app.route('/api/import/verify/<job_id>', methods=['POST'])
 @admin_required
 def api_import_verify(job_id):
-    """
-    Verify the import by comparing the uploaded Excel file against the database.
-    Expects a file upload with key 'file'.
-    """
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file uploaded'}), 400
 
