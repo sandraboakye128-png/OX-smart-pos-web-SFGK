@@ -1739,6 +1739,7 @@ def import_inventory_page():
 cancel_flags = {}   # job_id -> True if cancellation requested
 
 # ----- INVENTORY IMPORT (background thread) with single transaction -----
+# FULLY UPDATED: correct column mapping, selling price computation, category from file, replace mode per category
 def run_inventory_import(job_id, file_stream, target_category, mode='append'):
     conn = None
     try:
@@ -1748,7 +1749,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         update_job_progress(job_id, status='error', errors=[f"Unable to read workbook: {str(e)}"])
         return
 
-    # --- Header detection (unchanged) ---
+    # --- Header detection (enhanced) ---
     header_row_idx = None
     header_row = None
     for i, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True)):
@@ -1772,12 +1773,16 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 header_map['quantity'] = idx
             elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                 header_map['cost_price'] = idx
-            elif cell_lower in ['amount', 'selling price', 'price']:
-                header_map['total_selling'] = idx
+            elif cell_lower in ['amount', 'total cost']:        # <-- CHANGED: 'amount' maps to total cost
+                header_map['total_cost'] = idx
+            elif cell_lower in ['selling price', 'price', 'unit price']:
+                header_map['selling_price'] = idx
             elif cell_lower in ['date', 'purchase date']:
                 header_map['date'] = idx
             elif cell_lower in ['discount']:
                 header_map['discount'] = idx
+            elif cell_lower in ['category']:
+                header_map['category'] = idx
 
     required = ['name']
     missing = [f for f in required if f not in header_map]
@@ -1801,12 +1806,13 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                         'name': None,
                         'qty': row[header_map.get('quantity')] if header_map.get('quantity') is not None else None,
                         'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None,
-                        'amount': row[header_map.get('total_selling')] if header_map.get('total_selling') is not None else None
+                        'amount': row[header_map.get('total_cost')] if header_map.get('total_cost') is not None else None
                     },
                     'reason': 'Product name is empty (row skipped)'
                 })
                 continue
 
+            # Quantity
             try:
                 quantity = float(row[header_map['quantity']]) if header_map.get('quantity') is not None and row[header_map['quantity']] is not None else 0
                 if quantity < 0:
@@ -1816,26 +1822,60 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 quantity = 0
                 warning_rows.append(f"Row {row_idx}: Invalid quantity, set to 0")
 
-            try:
-                cost_price = float(row[header_map['cost_price']]) if header_map.get('cost_price') is not None and row[header_map['cost_price']] is not None else 0
-                if cost_price < 0:
+            # Cost price per unit (optional)
+            cost_price = 0
+            if 'cost_price' in header_map and row[header_map['cost_price']] is not None:
+                try:
+                    cost_price = float(row[header_map['cost_price']])
+                    if cost_price < 0:
+                        cost_price = 0
+                        warning_rows.append(f"Row {row_idx}: Cost price was negative, set to 0")
+                except:
                     cost_price = 0
-                    warning_rows.append(f"Row {row_idx}: Cost price was negative, set to 0")
-            except:
-                cost_price = 0
-                warning_rows.append(f"Row {row_idx}: Invalid cost price, set to 0")
+                    warning_rows.append(f"Row {row_idx}: Invalid cost price, set to 0")
 
-            try:
-                total_selling = float(row[header_map['total_selling']]) if header_map.get('total_selling') is not None and row[header_map['total_selling']] is not None else 0
-                if total_selling < 0:
-                    total_selling = 0
-                    warning_rows.append(f"Row {row_idx}: Amount was negative, set to 0")
-            except:
-                total_selling = 0
-                warning_rows.append(f"Row {row_idx}: Invalid Amount, set to 0")
+            # Total cost (amount) – if present, use it, else compute from cost_price * qty
+            total_cost = 0
+            if 'total_cost' in header_map and row[header_map['total_cost']] is not None:
+                try:
+                    total_cost = float(row[header_map['total_cost']])
+                    if total_cost < 0:
+                        total_cost = 0
+                        warning_rows.append(f"Row {row_idx}: Total cost was negative, set to 0")
+                except:
+                    total_cost = 0
+                    warning_rows.append(f"Row {row_idx}: Invalid total cost, set to 0")
+            else:
+                # If no total_cost column, compute from cost_price * quantity
+                total_cost = cost_price * quantity
 
-            selling_price_per_unit = total_selling / quantity if quantity > 0 else 0
+            # If total_cost is still zero but we have cost_price and quantity, compute it
+            if total_cost == 0 and cost_price > 0 and quantity > 0:
+                total_cost = cost_price * quantity
 
+            # Cost per unit (for purchases table)
+            cost_per_unit = total_cost / quantity if quantity > 0 else 0
+
+            # Selling price – either from column or computed with markup
+            selling_price = 0
+            if 'selling_price' in header_map and row[header_map['selling_price']] is not None:
+                try:
+                    selling_price = float(row[header_map['selling_price']])
+                    if selling_price < 0:
+                        selling_price = 0
+                        warning_rows.append(f"Row {row_idx}: Selling price was negative, set to 0")
+                except:
+                    selling_price = 0
+                    warning_rows.append(f"Row {row_idx}: Invalid selling price, set to 0")
+            else:
+                # No selling price column – compute from cost with markup (30% by default)
+                if quantity > 0 and total_cost > 0:
+                    markup = 1.3  # 30% profit – you can change this or make configurable
+                    selling_price = cost_per_unit * markup
+                else:
+                    selling_price = 0
+
+            # Discount
             try:
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
                 if discount < 0:
@@ -1843,6 +1883,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             except:
                 discount = 0
 
+            # Date
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 try:
@@ -1863,16 +1904,24 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             else:
                 purchase_date = datetime.now()
 
+            # Category – from file if present, otherwise fallback to target_category
+            category = target_category
+            if 'category' in header_map and row[header_map['category']] is not None:
+                cat_val = str(row[header_map['category']]).strip()
+                if cat_val:
+                    category = cat_val
+
             rows_to_process.append({
                 'row_idx': row_idx,
                 'name': name,
                 'brand': '',
                 'quantity': int(quantity),
-                'cost_price': cost_price,
-                'selling_price': selling_price_per_unit,
+                'cost_price': cost_per_unit,
+                'selling_price': selling_price,
                 'discount': discount,
-                'category': target_category,
-                'purchase_date': purchase_date
+                'category': category,
+                'purchase_date': purchase_date,
+                'total_cost': total_cost
             })
         except Exception as e:
             skipped_rows.append({
@@ -1881,7 +1930,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     'name': row[header_map.get('name')] if header_map.get('name') is not None else None,
                     'qty': row[header_map.get('quantity')] if header_map.get('quantity') is not None else None,
                     'rate': row[header_map.get('cost_price')] if header_map.get('cost_price') is not None else None,
-                    'amount': row[header_map.get('total_selling')] if header_map.get('total_selling') is not None else None
+                    'amount': row[header_map.get('total_cost')] if header_map.get('total_cost') is not None else None
                 },
                 'reason': f'Fatal error: {str(e)}'
             })
@@ -1912,36 +1961,26 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         conn.autocommit = False
         cursor = conn.cursor()
 
-        # --- REPLACE MODE: delete ALL products, purchases, and batches for this category ---
+        # --- REPLACE MODE: delete products for each category found in the file ---
         if mode == 'replace':
-            # Delete purchase_batches for products in this category
-            cursor.execute("""
-                DELETE FROM purchase_batches
-                WHERE product_id IN (
-                    SELECT id FROM products WHERE category = %s
-                )
-            """, (target_category,))
-            # Delete purchases for this category
-            cursor.execute("""
-                DELETE FROM purchases
-                WHERE category = %s
-            """, (target_category,))
-            # Delete products of this category (this removes them entirely)
-            cursor.execute("""
-                DELETE FROM products
-                WHERE category = %s
-            """, (target_category,))
-            # Reset sequences to the current max id to avoid duplicate key errors
+            categories_in_file = set(item['category'] for item in rows_to_process)
+            for cat in categories_in_file:
+                cursor.execute("""
+                    DELETE FROM purchase_batches
+                    WHERE product_id IN (SELECT id FROM products WHERE category = %s)
+                """, (cat,))
+                cursor.execute("DELETE FROM purchases WHERE category = %s", (cat,))
+                cursor.execute("DELETE FROM products WHERE category = %s", (cat,))
+            # Reset sequences
             cursor.execute("SELECT setval('products_id_seq', (SELECT COALESCE(MAX(id), 1) FROM products))")
             cursor.execute("SELECT setval('purchases_id_seq', (SELECT COALESCE(MAX(id), 1) FROM purchases))")
             cursor.execute("SELECT setval('purchase_batches_id_seq', (SELECT COALESCE(MAX(id), 1) FROM purchase_batches))")
 
         # ---- Process rows ----
         for idx, item in enumerate(rows_to_process, start=1):
-            # For replace mode, no products of this category exist, so we always insert.
-            # For append mode, check for existing product in the same category.
+            # For replace mode, we already deleted all products of the categories, so we always insert.
+            # For append, we check for existing product in the same category.
             if mode == 'replace':
-                # Insert new product
                 cursor.execute("""
                     INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
                     VALUES (%s, %s, %s, %s, %s, %s)
@@ -1949,7 +1988,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 """, (item['name'], item['brand'], item['cost_price'], item['selling_price'], 0, item['category']))
                 product_id = cursor.fetchone()[0]
             else:
-                # Append mode: find existing product in the same category
                 cursor.execute("""
                     SELECT p.id, p.cost_price, p.selling_price
                     FROM products p
@@ -1968,7 +2006,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                             WHERE id = %s
                         """, (item['cost_price'], item['selling_price'], product_id))
                 else:
-                    # Insert new product
                     cursor.execute("""
                         INSERT INTO products (name, brand, cost_price, selling_price, stock, category)
                         VALUES (%s, %s, %s, %s, %s, %s)
@@ -1977,7 +2014,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     product_id = cursor.fetchone()[0]
 
             # ---- Insert into purchases table ----
-            total = (item['cost_price'] * item['quantity']) - item['discount']
+            total = item['total_cost'] - item['discount']   # total cost minus discount
             cursor.execute("""
                 INSERT INTO purchases
                 (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date)
@@ -2006,14 +2043,13 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 if cancel_flags.get(job_id):
                     raise Exception("CANCELLED_BY_USER")
 
-        # ----- COMMIT AND VERIFY (AUTOMATIC) -----
+        # ----- COMMIT AND VERIFY -----
         conn.commit()
         cancel_flags.pop(job_id, None)
 
-        # ---- AUTOMATIC VERIFICATION ----
         verification = None
         try:
-            file_stream.seek(0)   # rewind the file stream for verification
+            file_stream.seek(0)
             verification = verify_import(job_id, file_stream, target_category)
         except Exception as v_err:
             verification = {'error': str(v_err)}
@@ -2024,7 +2060,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                                 'skipped': skipped_rows,
                                 'warnings': warning_rows,
                                 'message': f'Imported {imported_count} records, {len(skipped_rows)} rows skipped, {len(warning_rows)} warnings',
-                                'verification': verification   # <-- now included
+                                'verification': verification
                             })
 
     except Exception as e:
@@ -2566,8 +2602,10 @@ def verify_import(job_id, file_stream, target_category):
                 header_map['quantity'] = idx
             elif cell_lower in ['rate', 'cost', 'cost price', 'unit cost']:
                 header_map['cost_price'] = idx
-            elif cell_lower in ['amount', 'selling price', 'price']:
-                header_map['total_selling'] = idx
+            elif cell_lower in ['amount', 'total cost']:
+                header_map['total_cost'] = idx
+            elif cell_lower in ['selling price', 'price', 'unit price']:
+                header_map['selling_price'] = idx
             elif cell_lower in ['discount']:
                 header_map['discount'] = idx
 
@@ -2611,10 +2649,13 @@ def verify_import(job_id, file_stream, target_category):
             except:
                 cost_price = 0
             try:
-                total_selling = float(row[header_map['total_selling']]) if header_map.get('total_selling') is not None and row[header_map['total_selling']] is not None else 0
+                total_cost = float(row[header_map['total_cost']]) if header_map.get('total_cost') is not None and row[header_map['total_cost']] is not None else 0
             except:
-                total_selling = 0
-            selling_price = total_selling / quantity if quantity > 0 else 0
+                total_cost = 0
+            # If no total_cost, compute from cost_price * quantity
+            if total_cost == 0 and cost_price > 0 and quantity > 0:
+                total_cost = cost_price * quantity
+            selling_price = total_cost / quantity if quantity > 0 else 0
             try:
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
             except:
