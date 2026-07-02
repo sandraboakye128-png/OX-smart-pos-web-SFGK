@@ -13,23 +13,29 @@
             <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
             <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
         </div>
-        <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
+        <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄
+            Refresh</button>
     </div>
 
     <!-- Search Bar -->
     <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search screen product, brand, or user..." 
-               class="w-full border border-gray-300 rounded-lg px-4 py-2">
+        <input type="text" id="searchInput" placeholder="🔍 Search screen product, brand, or user..."
+            class="w-full border border-gray-300 rounded-lg px-4 py-2">
         <p class="text-xs text-gray-500 mt-1">🔎 Type to filter screen sales records by product, brand, or user</p>
     </div>
 
     <!-- Period Filter Buttons -->
     <div class="flex flex-wrap gap-2 mb-4">
-        <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
-        <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
-        <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
-        <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
-        <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
+        <button data-period="daily"
+            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
+        <button data-period="weekly"
+            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
+        <button data-period="monthly"
+            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
+        <button data-period="yearly"
+            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
+        <button data-period="all"
+            class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
     </div>
 
     <!-- Date Range Filter -->
@@ -43,8 +49,10 @@
                 <label class="block text-sm font-medium text-gray-700">To Date</label>
                 <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
             </div>
-            <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
-            <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
+            <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom
+                Range</button>
+            <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️
+                Print / Save PDF</button>
         </div>
     </div>
 
@@ -55,7 +63,8 @@
 </div>
 
 <!-- ========== SUMMARY BAR – fixed at the bottom ========== -->
-<div id="summaryBar" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-3 text-center font-bold shadow-lg z-50">
+<div id="summaryBar"
+    class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-3 text-center font-bold shadow-lg z-50">
     <!-- totals will appear here -->
 </div>
 
@@ -69,21 +78,25 @@
         <div id="reverseItemList" class="p-4 space-y-3"></div>
         <div class="sticky bottom-0 bg-white p-4 border-t flex justify-between">
             <div>
-                <button onclick="selectAllReverseItems()" class="bg-blue-500 text-white px-3 py-1 rounded mr-2">Select All</button>
-                <button onclick="deselectAllReverseItems()" class="bg-orange-500 text-white px-3 py-1 rounded">Deselect All</button>
+                <button onclick="selectAllReverseItems()" class="bg-blue-500 text-white px-3 py-1 rounded mr-2">Select
+                    All</button>
+                <button onclick="deselectAllReverseItems()" class="bg-orange-500 text-white px-3 py-1 rounded">Deselect
+                    All</button>
             </div>
             <div>
-                <button id="confirmReverseBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Reverse Selected</button>
-                <button onclick="closeReverseModal()" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded ml-2">Cancel</button>
+                <button id="confirmReverseBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Reverse
+                    Selected</button>
+                <button onclick="closeReverseModal()"
+                    class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded ml-2">Cancel</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
         console.log("DOM fully loaded - initializing screen today sales page");
-        
+
         let currentSalesData = [];
         let currentPeriod = 'daily';
         let currentStartDate = null;
@@ -109,7 +122,7 @@
         function cacheData(key, data) {
             try {
                 localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
-            } catch(e) {}
+            } catch (e) { }
         }
         function getCachedData(key, maxAgeMinutes = 60) {
             try {
@@ -119,7 +132,7 @@
                 const ageMinutes = (Date.now() - parsed.timestamp) / (1000 * 60);
                 if (ageMinutes > maxAgeMinutes) return null;
                 return parsed.data;
-            } catch(e) { return null; }
+            } catch (e) { return null; }
         }
 
         function getCacheKey() {
@@ -137,7 +150,7 @@
 
         function escapeHtml(str) {
             if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
+            return str.replace(/[&<>]/g, function (m) {
                 if (m === '&') return '&amp;';
                 if (m === '<') return '&lt;';
                 if (m === '>') return '&gt;';
@@ -161,7 +174,7 @@
         async function loadSalesData() {
             updateOfflineBanner();
             console.log("Loading screen sales data...");
-            
+
             let url = '';
             if (currentStartDate && currentEndDate) {
                 url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}&category=Screen`;
@@ -176,7 +189,7 @@
             } else {
                 url = '/api/today_sales?period=daily&category=Screen';
             }
-            
+
             console.log("Fetching from URL:", url);
             let data = [];
             let fromCache = false;
@@ -204,7 +217,7 @@
             currentSalesData = data;
             applySearchAndRender();
             if (fromCache) {
-                document.getElementById('salesList').innerHTML += 
+                document.getElementById('salesList').innerHTML +=
                     '<div class="text-xs text-gray-500 text-center mt-2">⚠️ Data may be outdated (offline)</div>';
             }
         }
@@ -214,8 +227,8 @@
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             let filtered = currentSalesData;
             if (searchTerm) {
-                filtered = currentSalesData.filter(sale => 
-                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) || 
+                filtered = currentSalesData.filter(sale =>
+                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) ||
                     (sale.brand && sale.brand.toLowerCase().includes(searchTerm)) ||
                     (sale.username && sale.username.toLowerCase().includes(searchTerm))
                 );
@@ -224,12 +237,12 @@
         }
 
         // ---------- Reverse modal functions ----------
-        window.openReverseModal = function(saleId, saleItems) {
+        window.openReverseModal = function (saleId, saleItems) {
             currentReverseSaleId = saleId;
             const container = document.getElementById('reverseItemList');
             container.innerHTML = '';
             currentReverseItems = [];
-            
+
             saleItems.forEach((item, idx) => {
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'border rounded-lg p-3 flex items-start space-x-3';
@@ -256,25 +269,25 @@
                 container.appendChild(itemDiv);
                 currentReverseItems.push({ checkbox: cb, itemData: item });
             });
-            
+
             document.getElementById('reverseModalTitle').innerHTML = `Reverse Items from Sale #${saleId}`;
             document.getElementById('reverseModal').classList.remove('hidden');
         };
-        
-        window.closeReverseModal = function() {
+
+        window.closeReverseModal = function () {
             document.getElementById('reverseModal').classList.add('hidden');
             currentReverseSaleId = null;
             currentReverseItems = [];
         };
-        
-        window.selectAllReverseItems = function() {
+
+        window.selectAllReverseItems = function () {
             currentReverseItems.forEach(i => i.checkbox.checked = true);
         };
-        
-        window.deselectAllReverseItems = function() {
+
+        window.deselectAllReverseItems = function () {
             currentReverseItems.forEach(i => i.checkbox.checked = false);
         };
-        
+
         async function confirmReverseSelected() {
             if (!navigator.onLine) {
                 alert('Reversing sales requires internet. Please connect and try again.');
@@ -285,9 +298,9 @@
                 alert('Please select at least one item to reverse.');
                 return;
             }
-            
+
             const itemsToReverse = selected.map(i => JSON.parse(i.checkbox.dataset.item));
-            
+
             try {
                 const response = await fetch('/api/sales/reverse_items', {
                     method: 'POST',
@@ -339,7 +352,7 @@
             let html = '';
             for (const [saleId, saleGroup] of saleMap) {
                 const paymentBadge = getPaymentBadge(saleGroup.payment_method, saleGroup.cheque_number);
-                
+
                 const itemsHtml = saleGroup.items.map(item => {
                     const statusText = item.is_deleted_batch ? '⚠️ (Batch Deleted - History Only)' : '';
                     return `
@@ -392,14 +405,14 @@
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
             let cashTotal = 0, momoTotal = 0, chequeTotal = 0;
-            
+
             for (const sale of sales) {
                 if (!seenSales.has(sale.sale_id)) {
                     totalSales += sale.total || 0;
                     totalDiscount += sale.discount || 0;
                     totalProfit += sale.net_profit || 0;
                     seenSales.add(sale.sale_id);
-                    
+
                     if (sale.payment_method === 'cash') {
                         cashTotal += sale.total || 0;
                     } else if (sale.payment_method === 'momo') {
@@ -410,14 +423,14 @@
                 }
                 totalItems += sale.quantity || 0;
             }
-            
+
             const totalSalesCount = seenSales.size;  // <-- total number of unique sales
-            
+
             let periodText = '';
             if (currentStartDate && currentEndDate) {
                 periodText = `📅 ${currentStartDate} to ${currentEndDate}`;
             } else {
-                switch(currentPeriod) {
+                switch (currentPeriod) {
                     case 'daily': periodText = '📅 Today'; break;
                     case 'weekly': periodText = '📅 This Week'; break;
                     case 'monthly': periodText = '📅 This Month'; break;
@@ -426,8 +439,8 @@
                     default: periodText = '📅 Today';
                 }
             }
-            
-            document.getElementById('summaryBar').innerHTML = 
+
+            document.getElementById('summaryBar').innerHTML =
                 `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
                 <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
                 <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
@@ -448,7 +461,7 @@
             if (currentStartDate && currentEndDate) {
                 periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
             } else {
-                switch(currentPeriod) {
+                switch (currentPeriod) {
                     case 'daily': periodText = 'Today'; break;
                     case 'weekly': periodText = 'This Week'; break;
                     case 'monthly': periodText = 'This Month'; break;
@@ -471,7 +484,7 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `Screen_SalesReport_${new Date().toISOString().slice(0,19)}.pdf`;
+                    a.download = `Screen_SalesReport_${new Date().toISOString().slice(0, 19)}.pdf`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
@@ -489,7 +502,7 @@
         document.getElementById('searchInput').addEventListener('input', () => applySearchAndRender());
         document.getElementById('pdfBtn').addEventListener('click', exportPDF);
         document.getElementById('confirmReverseBtn').addEventListener('click', confirmReverseSelected);
-        
+
         document.getElementById('applyDateBtn').addEventListener('click', () => {
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
@@ -515,7 +528,7 @@
         });
 
         // ---------- Auto-refresh on reconnect ----------
-        window.addEventListener('online', function() {
+        window.addEventListener('online', function () {
             loadSalesData();
         });
 

@@ -1,21 +1,24 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="p-6 pb-24"> <!-- pb-24 makes room for the fixed summary bar -->
+<div class="p-6 pb-24"> <!-- pb-24 leaves room for the fixed summary bar -->
     <!-- Offline banner -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached sales data (accessories). Data will refresh when you reconnect.
+        ⚠️ You are offline – showing cached sales data (Accessories & Phones). Data will refresh when you reconnect.
     </div>
 
-    <!-- Header -->
+    <!-- Header with category indicator -->
     <div class="flex justify-between items-center mb-6">
-        <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
+        <div class="flex items-center gap-2">
+            <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
+            <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories &amp; Phones</span>
+        </div>
         <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
     </div>
 
     <!-- Search Bar -->
     <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search product, brand, or user..." 
+        <input type="text" id="searchInput" placeholder="🔍 Search product, brand, or user..."
                class="w-full border border-gray-300 rounded-lg px-4 py-2">
         <p class="text-xs text-gray-500 mt-1">🔎 Type to filter sales records by product, brand, or user</p>
     </div>
@@ -45,7 +48,7 @@
         </div>
     </div>
 
-    <!-- Sales List (cards) – scrollable -->
+    <!-- Sales List (cards) – scrollable area -->
     <div id="salesList" class="space-y-4">
         <div class="text-center text-gray-400 py-8">Loading sales data...</div>
     </div>
@@ -78,9 +81,9 @@
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log("DOM fully loaded - initializing today sales page (accessories only)");
-        
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log("DOM loaded – initializing Today Sales (Accessories & Phones)");
+
         let currentSalesData = [];
         let currentPeriod = 'daily';
         let currentStartDate = null;
@@ -102,11 +105,11 @@
         window.addEventListener('online', updateOfflineBanner);
         window.addEventListener('offline', updateOfflineBanner);
 
-        // ---------- Caching helpers (separate cache for accessories) ----------
+        // ---------- Caching helpers (distinct cache key for non‑screen) ----------
         function cacheData(key, data) {
             try {
                 localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
-            } catch(e) {}
+            } catch (e) {}
         }
         function getCachedData(key, maxAgeMinutes = 60) {
             try {
@@ -116,15 +119,14 @@
                 const ageMinutes = (Date.now() - parsed.timestamp) / (1000 * 60);
                 if (ageMinutes > maxAgeMinutes) return null;
                 return parsed.data;
-            } catch(e) { return null; }
+            } catch (e) { return null; }
         }
 
         function getCacheKey() {
-            // Distinct key for accessories (exclude screens)
             if (currentStartDate && currentEndDate) {
-                return `sales_data_accessories_custom_${currentStartDate}_${currentEndDate}`;
+                return `sales_data_nonscreen_custom_${currentStartDate}_${currentEndDate}`;
             } else {
-                return `sales_data_accessories_period_${currentPeriod}`;
+                return `sales_data_nonscreen_period_${currentPeriod}`;
             }
         }
 
@@ -135,7 +137,7 @@
 
         function escapeHtml(str) {
             if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
+            return str.replace(/[&<>]/g, function (m) {
                 if (m === '&') return '&amp;';
                 if (m === '<') return '&lt;';
                 if (m === '>') return '&gt;';
@@ -155,11 +157,11 @@
             }
         }
 
-        // ---------- Fetch sales data with offline fallback (EXCLUDE SCREENS) ----------
+        // ---------- Fetch sales data with offline fallback (EXCLUDE screens) ----------
         async function loadSalesData() {
             updateOfflineBanner();
-            console.log("Loading sales data (accessories only)...");
-            
+            console.log("Loading non‑screen sales data...");
+
             let url = '';
             if (currentStartDate && currentEndDate) {
                 url = `/api/today_sales?start_date=${currentStartDate}&end_date=${currentEndDate}&exclude_category=Screen`;
@@ -174,7 +176,7 @@
             } else {
                 url = '/api/today_sales?period=daily&exclude_category=Screen';
             }
-            
+
             console.log("Fetching from URL:", url);
             let data = [];
             let fromCache = false;
@@ -189,7 +191,7 @@
                 cacheData(getCacheKey(), data);
                 console.log("Received data:", data.length, "records");
             } catch (error) {
-                console.warn("Offline – using cached accessory sales data");
+                console.warn("Offline – using cached non‑screen sales data");
                 fromCache = true;
                 const cached = getCachedData(getCacheKey());
                 if (cached) {
@@ -202,7 +204,7 @@
             currentSalesData = data;
             applySearchAndRender();
             if (fromCache) {
-                document.getElementById('salesList').innerHTML += 
+                document.getElementById('salesList').innerHTML +=
                     '<div class="text-xs text-gray-500 text-center mt-2">⚠️ Data may be outdated (offline)</div>';
             }
         }
@@ -212,8 +214,8 @@
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             let filtered = currentSalesData;
             if (searchTerm) {
-                filtered = currentSalesData.filter(sale => 
-                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) || 
+                filtered = currentSalesData.filter(sale =>
+                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) ||
                     (sale.brand && sale.brand.toLowerCase().includes(searchTerm)) ||
                     (sale.username && sale.username.toLowerCase().includes(searchTerm))
                 );
@@ -222,12 +224,12 @@
         }
 
         // ---------- Reverse modal functions ----------
-        window.openReverseModal = function(saleId, saleItems) {
+        window.openReverseModal = function (saleId, saleItems) {
             currentReverseSaleId = saleId;
             const container = document.getElementById('reverseItemList');
             container.innerHTML = '';
             currentReverseItems = [];
-            
+
             saleItems.forEach((item, idx) => {
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'border rounded-lg p-3 flex items-start space-x-3';
@@ -254,25 +256,25 @@
                 container.appendChild(itemDiv);
                 currentReverseItems.push({ checkbox: cb, itemData: item });
             });
-            
+
             document.getElementById('reverseModalTitle').innerHTML = `Reverse Items from Sale #${saleId}`;
             document.getElementById('reverseModal').classList.remove('hidden');
         };
-        
-        window.closeReverseModal = function() {
+
+        window.closeReverseModal = function () {
             document.getElementById('reverseModal').classList.add('hidden');
             currentReverseSaleId = null;
             currentReverseItems = [];
         };
-        
-        window.selectAllReverseItems = function() {
+
+        window.selectAllReverseItems = function () {
             currentReverseItems.forEach(i => i.checkbox.checked = true);
         };
-        
-        window.deselectAllReverseItems = function() {
+
+        window.deselectAllReverseItems = function () {
             currentReverseItems.forEach(i => i.checkbox.checked = false);
         };
-        
+
         async function confirmReverseSelected() {
             if (!navigator.onLine) {
                 alert('Reversing sales requires internet. Please connect and try again.');
@@ -283,9 +285,9 @@
                 alert('Please select at least one item to reverse.');
                 return;
             }
-            
+
             const itemsToReverse = selected.map(i => JSON.parse(i.checkbox.dataset.item));
-            
+
             try {
                 const response = await fetch('/api/sales/reverse_items', {
                     method: 'POST',
@@ -312,7 +314,7 @@
         function renderSales(sales) {
             const container = document.getElementById('salesList');
             if (!sales || sales.length === 0) {
-                container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded for this period.</div>';
+                container.innerHTML = '<div class="text-center text-gray-400 py-8">No sales recorded for this period (Accessories & Phones).</div>';
                 updateSummary([]);
                 return;
             }
@@ -337,7 +339,7 @@
             let html = '';
             for (const [saleId, saleGroup] of saleMap) {
                 const paymentBadge = getPaymentBadge(saleGroup.payment_method, saleGroup.cheque_number);
-                
+
                 const itemsHtml = saleGroup.items.map(item => {
                     const statusText = item.is_deleted_batch ? '⚠️ (Batch Deleted - History Only)' : '';
                     return `
@@ -390,14 +392,14 @@
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
             let cashTotal = 0, momoTotal = 0, chequeTotal = 0;
-            
+
             for (const sale of sales) {
                 if (!seenSales.has(sale.sale_id)) {
                     totalSales += sale.total || 0;
                     totalDiscount += sale.discount || 0;
                     totalProfit += sale.net_profit || 0;
                     seenSales.add(sale.sale_id);
-                    
+
                     if (sale.payment_method === 'cash') {
                         cashTotal += sale.total || 0;
                     } else if (sale.payment_method === 'momo') {
@@ -408,14 +410,14 @@
                 }
                 totalItems += sale.quantity || 0;
             }
-            
-            const totalSalesCount = seenSales.size;  // <-- total number of unique sales
-            
+
+            const totalSalesCount = seenSales.size;  // total number of unique sales
+
             let periodText = '';
             if (currentStartDate && currentEndDate) {
                 periodText = `📅 ${currentStartDate} to ${currentEndDate}`;
             } else {
-                switch(currentPeriod) {
+                switch (currentPeriod) {
                     case 'daily': periodText = '📅 Today'; break;
                     case 'weekly': periodText = '📅 This Week'; break;
                     case 'monthly': periodText = '📅 This Month'; break;
@@ -424,8 +426,8 @@
                     default: periodText = '📅 Today';
                 }
             }
-            
-            document.getElementById('summaryBar').innerHTML = 
+
+            document.getElementById('summaryBar').innerHTML =
                 `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
                 <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
                 <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
@@ -446,7 +448,7 @@
             if (currentStartDate && currentEndDate) {
                 periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
             } else {
-                switch(currentPeriod) {
+                switch (currentPeriod) {
                     case 'daily': periodText = 'Today'; break;
                     case 'weekly': periodText = 'This Week'; break;
                     case 'monthly': periodText = 'This Month'; break;
@@ -461,7 +463,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sales_data: currentSalesData,
-                        period_text: periodText + ' (Accessories)'
+                        period_text: periodText + ' (Accessories & Phones)'
                     })
                 });
                 if (response.ok) {
@@ -469,7 +471,7 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `SalesReport_Accessories_${new Date().toISOString().slice(0,19)}.pdf`;
+                    a.download = `TodaySales_AccessoriesPhones_${new Date().toISOString().slice(0, 19)}.pdf`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
@@ -487,7 +489,7 @@
         document.getElementById('searchInput').addEventListener('input', () => applySearchAndRender());
         document.getElementById('pdfBtn').addEventListener('click', exportPDF);
         document.getElementById('confirmReverseBtn').addEventListener('click', confirmReverseSelected);
-        
+
         document.getElementById('applyDateBtn').addEventListener('click', () => {
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
@@ -513,7 +515,7 @@
         });
 
         // ---------- Auto-refresh on reconnect ----------
-        window.addEventListener('online', function() {
+        window.addEventListener('online', function () {
             loadSalesData();
         });
 

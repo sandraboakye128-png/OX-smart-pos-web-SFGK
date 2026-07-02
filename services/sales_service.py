@@ -29,6 +29,7 @@ def get_products_for_sale():
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        # Removed LIMIT 1000 – now returns ALL products with stock > 0
         cursor.execute("""
             SELECT p.id, p.name, p.brand, p.selling_price, p.stock, p.category
             FROM products p
@@ -40,7 +41,6 @@ def get_products_for_sale():
                 AND dp.source = 'product'
             )
             ORDER BY p.name ASC
-            LIMIT 1000
         """)
         rows = cursor.fetchall()
         return [
