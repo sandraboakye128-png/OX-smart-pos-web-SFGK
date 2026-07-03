@@ -2319,7 +2319,8 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
 
             discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
 
-                    sale_date = None
+            # ========== DATE PARSING WITH AUTO-CORRECTION ==========
+            sale_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 parsed = parse_date_cell(row[header_map['date']])
                 if parsed:
@@ -2337,8 +2338,8 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
                     sale_date = datetime.now()
                     error_rows.append(f"Row {row_idx}: Could not parse date, using current date.")
             else:
-                sale_date = datetime.now()    
-        
+                sale_date = datetime.now()
+
             rows_to_process.append({
                 'row_idx': row_idx,
                 'item': item,
