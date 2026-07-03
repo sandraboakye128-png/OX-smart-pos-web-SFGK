@@ -2127,6 +2127,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         cancel_flags.pop(job_id, None)
 
 # ========== FIXED SALES IMPORT ==========
+# ========== FIXED SALES IMPORT (WITH IMPROVED PRODUCT MATCHING) ==========
 def run_sales_import(job_id, file_stream, target_category, mode='append', user_id=None):
     try:
         wb = load_workbook(file_stream, data_only=True)
@@ -2290,16 +2291,67 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
 
         # ---- Process rows ----
         for idx, entry in enumerate(rows_to_process, start=1):
-            # Find product by name only (ignore category)
+            # ✅ IMPROVED: Find product by exact match first, then try partial match
+            product = None
+            product_id = None
+            product_category = None
+            
+            # Step 1: Try exact match
             cursor.execute(
                 "SELECT id, category FROM products WHERE name = %s",
                 (entry['item'],)
             )
             product = cursor.fetchone()
+            
+            # Step 2: If no exact match, try partial match (case-insensitive)
             if not product:
-                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found")
+                # Clean the search term: remove numbers at the end, normalize spaces
+                search_term = entry['item'].strip()
+                # Try to find products that contain this term
+                cursor.execute("""
+                    SELECT id, category, name 
+                    FROM products 
+                    WHERE LOWER(name) LIKE LOWER(%s)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM deleted_products dp 
+                        WHERE dp.product_id = products.id 
+                        AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                        AND dp.source = 'product'
+                    )
+                    LIMIT 1
+                """, (f'%{search_term}%',))
+                product = cursor.fetchone()
+                
+                if product:
+                    overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' matched to '{product[2]}' (partial match)")
+            
+            # Step 3: If still no match, try removing common suffixes
+            if not product:
+                # Try removing "1", "2" etc. from the end (for batch variations)
+                import re
+                cleaned_name = re.sub(r'\s+\d+$', '', entry['item'])
+                if cleaned_name != entry['item']:
+                    cursor.execute("""
+                        SELECT id, category, name 
+                        FROM products 
+                        WHERE LOWER(name) LIKE LOWER(%s)
+                        AND NOT EXISTS (
+                            SELECT 1 FROM deleted_products dp 
+                            WHERE dp.product_id = products.id 
+                            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                            AND dp.source = 'product'
+                        )
+                        LIMIT 1
+                    """, (f'%{cleaned_name}%',))
+                    product = cursor.fetchone()
+                    if product:
+                        overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' matched to '{product[2]}' (cleaned match)")
+
+            if not product:
+                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found in database")
                 continue
-            product_id, product_category = product
+                
+            product_id, product_category = product[0], product[1]
 
             # If target_category is not 'All', enforce category match
             if target_category != 'All' and product_category != target_category:
@@ -2387,7 +2439,6 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
         if conn:
             conn.close()
         cancel_flags.pop(job_id, None)
-
 # ----- INVENTORY IMPORT ENDPOINT -----
 @app.route('/api/inventory/import', methods=['POST'])
 @admin_required
@@ -2682,10 +2733,11 @@ def verify_import(job_id, file_stream, target_category):
             except:
                 discount = 0
 
+            # ✅ FIXED: Removed "AND p.brand = ''" condition
             cursor.execute("""
                 SELECT p.id, p.stock, p.cost_price, p.selling_price, p.discount
                 FROM products p
-                WHERE p.name = %s AND p.brand = '' AND p.category = %s
+                WHERE p.name = %s AND p.category = %s
                 AND NOT EXISTS (
                     SELECT 1 FROM deleted_products dp
                     WHERE dp.product_id = p.id
