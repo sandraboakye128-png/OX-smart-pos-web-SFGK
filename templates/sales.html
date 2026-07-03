@@ -198,7 +198,7 @@
         } catch(e) { return null; }
     }
 
-    const PRODUCTS_CACHE_KEY = 'sales_products_cache_accessories'; // changed to avoid conflict
+    const PRODUCTS_CACHE_KEY = 'sales_products_cache_accessories';
     const LICENSE_CACHE_KEY = 'sales_license_cache';
 
     // ---------- Load License Status ----------
@@ -229,7 +229,7 @@
         }
     }
 
-    // ---------- License Modal (unchanged) ----------
+    // ---------- License Modal ----------
     function showLicenseModal(allowCancel = true) {
         return new Promise(async (resolve) => {
             const modal = document.getElementById('licenseModal');
@@ -353,7 +353,7 @@
         let fromCache = false;
 
         try {
-            // EXCLUDE Screen category
+            // EXCLUDE Screen category - backend now returns grouped products
             const res = await fetch('/api/sales/products?exclude_category=Screen');
             if (!res.ok) throw new Error();
             prods = await res.json();
@@ -365,7 +365,26 @@
             if (cached) prods = cached;
         }
 
-        products = prods;
+        // ✅ Backend already groups by name+brand, but we keep a safety fallback
+        // in case the API returns ungrouped data (backward compatibility)
+        const grouped = {};
+        prods.forEach(p => {
+            const key = `${p.name}|${p.brand}`;
+            if (!grouped[key]) {
+                grouped[key] = {
+                    ...p,
+                    stock: 0,
+                    batches: p.batches || []
+                };
+            }
+            grouped[key].stock += p.stock || 0;
+            if (p.batches && p.batches.length > 0) {
+                grouped[key].batches = grouped[key].batches.concat(p.batches);
+            }
+        });
+        
+        products = Object.values(grouped);
+        
         if (products.length === 0) {
             document.getElementById('productList').innerHTML = '';
             noProductsBanner.classList.remove('hidden');
@@ -378,6 +397,7 @@
         }
     }
 
+    // ✅ Renders grouped products with batch count
     function renderProductList(prods) {
         const container = document.getElementById('productList');
         if (!prods.length) {
@@ -387,8 +407,11 @@
         container.innerHTML = '';
         prods.forEach(p => {
             const btn = document.createElement('button');
-            btn.className = 'w-full text-left px-3 py-2 hover:bg-gray-100 rounded-lg';
-            btn.innerText = `${p.name} (${p.brand}) - Stock: ${p.stock}`;
+            btn.className = 'w-full text-left px-3 py-2 hover:bg-gray-100 rounded-lg border-b';
+            const batchCount = p.batches ? p.batches.length : 0;
+            const batchLabel = batchCount > 0 ? ` (${batchCount} batches)` : '';
+            btn.innerText = `${p.name} (${p.brand}) - Stock: ${p.stock}${batchLabel}`;
+            btn.title = `Click to select ${p.name}`;
             btn.onclick = () => selectProduct(p);
             container.appendChild(btn);
         });
@@ -399,20 +422,27 @@
     }
     window.refreshProducts = refreshProducts;
 
+    // ✅ Shows batch count in selection info
     function selectProduct(product) {
         currentProduct = product;
-        document.getElementById('selectedProductInfo').innerHTML = `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)}`;
+        const batchCount = product.batches ? product.batches.length : 0;
+        document.getElementById('selectedProductInfo').innerHTML = 
+            `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)} - Stock: ${product.stock} (${batchCount} batches)`;
         document.getElementById('quantity').value = '';
         document.getElementById('discount').value = '';
     }
 
+    // ---------- Search ----------
     document.getElementById('searchProduct').addEventListener('input', function(e) {
         const keyword = e.target.value.toLowerCase();
-        const filtered = products.filter(p => p.name.toLowerCase().includes(keyword) || p.brand.toLowerCase().includes(keyword));
+        const filtered = products.filter(p => 
+            p.name.toLowerCase().includes(keyword) || 
+            p.brand.toLowerCase().includes(keyword)
+        );
         renderProductList(filtered);
     });
 
-    // ---------- Batch Selector (unchanged) ----------
+    // ---------- Batch Selector ----------
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;

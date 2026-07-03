@@ -133,18 +133,19 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
     return profit
 
 
-# ----------------- TOTAL PRODUCTS (ONLY products with active batches/stock > 0) -----------------
+# ----------------- TOTAL PRODUCTS (ALL unique products, including stock 0) -----------------
 def get_total_products():
+    """
+    Count ALL unique products (grouped by name + brand) 
+    including those with stock = 0.
+    Excludes permanently deleted products.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT COUNT(DISTINCT p.id)
+        SELECT COUNT(DISTINCT CONCAT(p.name, '|', p.brand)) as unique_products
         FROM products p
-        WHERE EXISTS (
-            SELECT 1 FROM purchase_batches pb 
-            WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
-        )
-        AND NOT EXISTS (
+        WHERE NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
             AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')

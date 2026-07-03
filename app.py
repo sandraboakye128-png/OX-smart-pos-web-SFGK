@@ -839,17 +839,45 @@ def api_delete_batch(batch_id):
         return jsonify({'success': False, 'error': str(e)}), 400
 
 # ===================== SALES API =====================
+# ===================== SALES API =====================
 @app.route('/api/sales/products', methods=['GET'])
 @login_required
 def api_sales_products():
     category = request.args.get('category')
     exclude_category = request.args.get('exclude_category')
     products = get_products_for_sale()
+    
+    # Filter by category
     if category:
         products = [p for p in products if p.get('category') == category]
     if exclude_category:
         products = [p for p in products if p.get('category') != exclude_category]
-    return jsonify(products)
+    
+    # ✅ GROUP products by name + brand to show one entry per product
+    grouped = {}
+    for p in products:
+        key = (p['name'], p['brand'])
+        if key not in grouped:
+            grouped[key] = {
+                'id': p['id'],
+                'name': p['name'],
+                'brand': p['brand'],
+                'category': p.get('category', ''),
+                'cost_price': p.get('cost_price', 0),
+                'selling_price': p.get('selling_price', 0),
+                'discount': p.get('discount', 0),
+                'stock': 0,
+                'batches': []
+            }
+        # Sum stock across all batches
+        grouped[key]['stock'] += p.get('stock', 0)
+        # Keep track of batches for selection
+        if 'batches' in p and p['batches']:
+            grouped[key]['batches'].extend(p['batches'])
+    
+    # Convert back to list
+    result = list(grouped.values())
+    return jsonify(result)
 
 @app.route('/api/sales/batches/<int:product_id>', methods=['GET'])
 @login_required
@@ -1718,7 +1746,7 @@ def import_inventory_page():
 # ---------- CANCEL FLAGS (in-memory) ----------
 cancel_flags = {}
 
-# ========== FIXED INVENTORY IMPORT ==========
+# ========== FIXED INVENTORY IMPORT (WITH ENHANCED DATE PARSING) ==========
 def run_inventory_import(job_id, file_stream, target_category, mode='append'):
     conn = None
     try:
@@ -1858,24 +1886,64 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             except:
                 discount = 0
 
-            # Date
+            # ========== ENHANCED DATE PARSING ==========
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
+                date_value = row[header_map['date']]
                 try:
-                    if isinstance(row[header_map['date']], (int, float)):
-                        purchase_date = datetime(1899, 12, 30) + timedelta(days=row[header_map['date']])
+                    # Case 1: Excel serial number (float or int like 44927)
+                    if isinstance(date_value, (int, float)):
+                        # Excel serial date: starts from 1900-01-01, but Excel incorrectly treats 1900 as leap year
+                        # So we use 1899-12-30 as base
+                        purchase_date = datetime(1899, 12, 30) + timedelta(days=float(date_value))
+                        # Verify it's a reasonable date (between 2000 and 2050)
+                        if purchase_date.year < 2000 or purchase_date.year > 2050:
+                            warning_rows.append(f"Row {row_idx}: Excel date {date_value} converted to {purchase_date.strftime('%Y-%m-%d')}, which seems unusual")
                     else:
-                        date_str = str(row[header_map['date']]).strip()
-                        for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%d/%m/%y', '%Y-%m-%d', '%m/%d/%Y'):
+                        # Case 2: String date - try multiple formats
+                        date_str = str(date_value).strip()
+                        
+                        # Expanded list of date formats to try
+                        date_formats = [
+                            '%d/%m/%Y',      # 28/01/2023
+                            '%d/%m/%y',      # 28/01/23
+                            '%d-%m-%Y',      # 28-01-2023
+                            '%d-%m-%y',      # 28-01-23
+                            '%Y-%m-%d',      # 2023-01-28
+                            '%Y/%m/%d',      # 2023/01/28
+                            '%m/%d/%Y',      # 01/28/2023 (US format)
+                            '%m/%d/%y',      # 01/28/23 (US format)
+                            '%d.%m.%Y',      # 28.01.2023
+                            '%d.%m.%y',      # 28.01.23
+                            '%b %d, %Y',     # Jan 28, 2023
+                            '%B %d, %Y',     # January 28, 2023
+                            '%d %b %Y',      # 28 Jan 2023
+                            '%d %B %Y',      # 28 January 2023
+                            '%Y%m%d',        # 20230128
+                        ]
+                        
+                        # Try parsing with each format
+                        for fmt in date_formats:
                             try:
                                 purchase_date = datetime.strptime(date_str, fmt)
                                 break
-                            except:
+                            except ValueError:
                                 continue
+                        
+                        # If still None, try dateutil parser as fallback (if available)
+                        if purchase_date is None and HAS_DATEUTIL:
+                            try:
+                                purchase_date = date_parser.parse(date_str)
+                            except:
+                                pass
+                        
+                        # If still None, use current date and log warning
                         if purchase_date is None:
                             purchase_date = datetime.now()
-                except:
+                            warning_rows.append(f"Row {row_idx}: Could not parse date '{date_str}', using current date")
+                except Exception as e:
                     purchase_date = datetime.now()
+                    warning_rows.append(f"Row {row_idx}: Date parsing error: {str(e)}, using current date")
             else:
                 purchase_date = datetime.now()
 

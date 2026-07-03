@@ -4,13 +4,13 @@
 <div class="p-6">
     <!-- Offline banner -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached screen products. Sales will be saved and synced when you reconnect.
+        ⚠️ You are offline – showing cached screens. Sales will be saved and synced when you reconnect.
     </div>
 
-    <!-- No screen products banner -->
+    <!-- No screens banner -->
     <div id="noProductsBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
-        <strong>⚠️ No screen products found.</strong><br>
-        Please ensure your inventory imports are correctly categorised as <strong>Screens</strong>.
+        <strong>⚠️ No screens found.</strong><br>
+        Please ensure your inventory imports are correctly categorised as <strong>Screens</strong> (not Accessories).
         <br><br>
         <a href="/inventory/import" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded inline-block">
             📥 Go to Import Page
@@ -27,10 +27,10 @@
             <div class="bg-white rounded-xl shadow-md p-4">
                 <div class="flex items-center gap-2 mb-2">
                     <h2 class="text-xl font-bold text-indigo-600">🛒 Sales Terminal</h2>
-                    <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
+                    <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens</span>
                 </div>
                 
-                <input type="text" id="searchProduct" placeholder="🔍 Search screen product..." 
+                <input type="text" id="searchProduct" placeholder="🔍 Search screen..." 
                        class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3">
                 
                 <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4"></div>
@@ -146,7 +146,7 @@
 </div>
 
 <script>
-    // ---------- Sales JS (Screen version) ----------
+    // ---------- Sales JS (Screens only – excludes Accessories) ----------
     let products = [];
     let currentProduct = null;
     let cart = [];
@@ -169,6 +169,7 @@
         return '₵' + amount.toFixed(2);
     }
 
+    // ---------- Offline banner ----------
     function updateOfflineBanner() {
         const banner = document.getElementById('offlineBanner');
         if (!navigator.onLine) {
@@ -180,6 +181,7 @@
     window.addEventListener('online', updateOfflineBanner);
     window.addEventListener('offline', updateOfflineBanner);
 
+    // ---------- Caching helpers ----------
     function cacheData(key, data) {
         try {
             localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
@@ -196,9 +198,10 @@
         } catch(e) { return null; }
     }
 
-    const PRODUCTS_CACHE_KEY = 'sales_products_cache_screen';
+    const PRODUCTS_CACHE_KEY = 'sales_products_cache_screens';
     const LICENSE_CACHE_KEY = 'sales_license_cache';
 
+    // ---------- Load License Status ----------
     async function loadLicenseStatus() {
         try {
             const res = await fetch('/api/license/status');
@@ -340,7 +343,7 @@
         return `${minutes.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
     }
 
-    // ---------- Load Products (only Screen category) ----------
+    // ---------- Load Products (Screen only) ----------
     async function loadProducts() {
         updateOfflineBanner();
         const noProductsBanner = document.getElementById('noProductsBanner');
@@ -350,41 +353,64 @@
         let fromCache = false;
 
         try {
+            // ✅ Fetch ONLY Screen category
             const res = await fetch('/api/sales/products?category=Screen');
             if (!res.ok) throw new Error();
             prods = await res.json();
             cacheData(PRODUCTS_CACHE_KEY, prods);
         } catch (err) {
-            console.warn('Offline – using cached screen products');
+            console.warn('Offline – using cached screens');
             fromCache = true;
             const cached = getCachedData(PRODUCTS_CACHE_KEY);
             if (cached) prods = cached;
         }
 
-        products = prods;
+        // ✅ Group by name+brand for clean display
+        const grouped = {};
+        prods.forEach(p => {
+            const key = `${p.name}|${p.brand}`;
+            if (!grouped[key]) {
+                grouped[key] = {
+                    ...p,
+                    stock: 0,
+                    batches: p.batches || []
+                };
+            }
+            grouped[key].stock += p.stock || 0;
+            if (p.batches && p.batches.length > 0) {
+                grouped[key].batches = grouped[key].batches.concat(p.batches);
+            }
+        });
+        
+        products = Object.values(grouped);
+        
         if (products.length === 0) {
             document.getElementById('productList').innerHTML = '';
             noProductsBanner.classList.remove('hidden');
             if (fromCache) {
                 document.getElementById('productList').innerHTML = 
-                    '<div class="text-gray-500 p-2">No cached screen products – connect to refresh</div>';
+                    '<div class="text-gray-500 p-2">No cached screens – connect to refresh</div>';
             }
         } else {
             renderProductList(products);
         }
     }
 
+    // ✅ Renders grouped products with batch count
     function renderProductList(prods) {
         const container = document.getElementById('productList');
         if (!prods.length) {
-            container.innerHTML = '<div class="text-gray-400 p-2">No screen products available</div>';
+            container.innerHTML = '<div class="text-gray-400 p-2">No screens available</div>';
             return;
         }
         container.innerHTML = '';
         prods.forEach(p => {
             const btn = document.createElement('button');
-            btn.className = 'w-full text-left px-3 py-2 hover:bg-gray-100 rounded-lg';
-            btn.innerText = `${p.name} (${p.brand}) - Stock: ${p.stock}`;
+            btn.className = 'w-full text-left px-3 py-2 hover:bg-gray-100 rounded-lg border-b';
+            const batchCount = p.batches ? p.batches.length : 0;
+            const batchLabel = batchCount > 0 ? ` (${batchCount} batches)` : '';
+            btn.innerText = `${p.name} (${p.brand}) - Stock: ${p.stock}${batchLabel}`;
+            btn.title = `Click to select ${p.name}`;
             btn.onclick = () => selectProduct(p);
             container.appendChild(btn);
         });
@@ -395,20 +421,27 @@
     }
     window.refreshProducts = refreshProducts;
 
+    // ✅ Shows batch count in selection info
     function selectProduct(product) {
         currentProduct = product;
-        document.getElementById('selectedProductInfo').innerHTML = `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)}`;
+        const batchCount = product.batches ? product.batches.length : 0;
+        document.getElementById('selectedProductInfo').innerHTML = 
+            `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)} - Stock: ${product.stock} (${batchCount} batches)`;
         document.getElementById('quantity').value = '';
         document.getElementById('discount').value = '';
     }
 
+    // ---------- Search ----------
     document.getElementById('searchProduct').addEventListener('input', function(e) {
         const keyword = e.target.value.toLowerCase();
-        const filtered = products.filter(p => p.name.toLowerCase().includes(keyword) || p.brand.toLowerCase().includes(keyword));
+        const filtered = products.filter(p => 
+            p.name.toLowerCase().includes(keyword) || 
+            p.brand.toLowerCase().includes(keyword)
+        );
         renderProductList(filtered);
     });
 
-    // ---------- Batch Selector (unchanged) ----------
+    // ---------- Batch Selector ----------
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
