@@ -88,43 +88,108 @@ def parse_date_cell(value):
     """
     Try to parse a date from an Excel cell.
     Returns a datetime object or None if parsing fails.
+    Handles Excel serial numbers, DD/MM/YYYY, MM/DD/YYYY, and other formats.
     """
     if value is None:
         return None
+    
+    # Case 1: Excel serial number (float or int like 44927)
     if isinstance(value, (int, float)):
         try:
-            return datetime(1899, 12, 30) + timedelta(days=float(value))
+            # Excel serial date: starts from 1900-01-01, but Excel incorrectly treats 1900 as leap year
+            # So we use 1899-12-30 as base
+            dt = datetime(1899, 12, 30) + timedelta(days=float(value))
+            # Verify it's a reasonable date (between 2000 and 2050)
+            if dt.year < 2000 or dt.year > 2050:
+                # If it's outside reasonable range, try to interpret as DD/MM/YYYY text
+                # Some Excel cells might be stored as numbers but actually are dates
+                pass
+            return dt
         except:
             return None
+    
+    # Case 2: Already a datetime object
     if isinstance(value, datetime):
         return value
+    
+    # Case 3: Already a date object
     if isinstance(value, date):
         return datetime.combine(value, datetime.min.time())
+    
+    # Case 4: String value
     if isinstance(value, str):
         s = value.strip()
         if not s:
             return None
+        
+        # 🚨 CRITICAL: Try DD/MM/YYYY FIRST (most common in your data)
+        # This prevents the system from misinterpreting 21/5/2026 as MM/DD/YYYY
+        date_formats = [
+            # Day-first formats (most common in your Excel)
+            '%d/%m/%Y',      # 28/01/2023
+            '%d/%m/%y',      # 28/01/23
+            '%d-%m-%Y',      # 28-01-2023
+            '%d-%m-%y',      # 28-01-23
+            '%d.%m.%Y',      # 28.01.2023
+            '%d.%m.%y',      # 28.01.23
+            '%d %b %Y',      # 28 Jan 2023
+            '%d %B %Y',      # 28 January 2023
+            '%d/%m/%Y %H:%M:%S',  # 28/01/2023 14:30:00
+            '%d-%m-%Y %H:%M:%S',  # 28-01-2023 14:30:00
+            
+            # Month-first formats (US style - less common in your data)
+            '%m/%d/%Y',      # 01/28/2023
+            '%m/%d/%y',      # 01/28/23
+            '%m-%d-%Y',      # 01-28-2023
+            '%m-%d-%y',      # 01-28-23
+            
+            # Year-first formats
+            '%Y-%m-%d',      # 2023-01-28
+            '%Y/%m/%d',      # 2023/01/28
+            '%Y%m%d',        # 20230128
+            
+            # Month name formats
+            '%b %d, %Y',     # Jan 28, 2023
+            '%B %d, %Y',     # January 28, 2023
+        ]
+        
+        # Try each format
+        for fmt in date_formats:
+            try:
+                dt = datetime.strptime(s, fmt)
+                # Validate the date is reasonable (between 2000 and 2050)
+                if dt.year >= 2000 and dt.year <= 2050:
+                    return dt
+            except ValueError:
+                continue
+        
+        # Try dateutil parser as fallback (if available)
         if HAS_DATEUTIL:
             try:
-                return date_parser.parse(s)
+                # Force day-first parsing
+                dt = date_parser.parse(s, dayfirst=True, fuzzy=False)
+                if dt.year >= 2000 and dt.year <= 2050:
+                    return dt
             except:
                 pass
-        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d',
-                    '%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S', '%m/%d/%Y %H:%M:%S',
-                    '%d-%m-%Y %H:%M:%S', '%Y/%m/%d %H:%M:%S'):
-            try:
-                return datetime.strptime(s, fmt)
-            except:
-                continue
+        
+        # Last resort: try to parse just the date part (ignore time)
         try:
             date_part = s.split(' ')[0]
-            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+            for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d']:
                 try:
-                    return datetime.strptime(date_part, fmt)
+                    dt = datetime.strptime(date_part, fmt)
+                    if dt.year >= 2000 and dt.year <= 2050:
+                        return dt
                 except:
                     continue
         except:
             pass
+        
+        # If all parsing fails, return None (will be handled by caller)
+        return None
+    
+    # If we can't parse it, return None
     return None
 
 app = Flask(__name__)
@@ -1885,62 +1950,21 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     discount = 0
             except:
                 discount = 0
-
-            # ========== ENHANCED DATE PARSING ==========
+             # ========== ENHANCED DATE PARSING ==========
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 date_value = row[header_map['date']]
                 try:
-                    # Case 1: Excel serial number (float or int like 44927)
-                    if isinstance(date_value, (int, float)):
-                        # Excel serial date: starts from 1900-01-01, but Excel incorrectly treats 1900 as leap year
-                        # So we use 1899-12-30 as base
-                        purchase_date = datetime(1899, 12, 30) + timedelta(days=float(date_value))
-                        # Verify it's a reasonable date (between 2000 and 2050)
-                        if purchase_date.year < 2000 or purchase_date.year > 2050:
-                            warning_rows.append(f"Row {row_idx}: Excel date {date_value} converted to {purchase_date.strftime('%Y-%m-%d')}, which seems unusual")
-                    else:
-                        # Case 2: String date - try multiple formats
-                        date_str = str(date_value).strip()
-                        
-                        # Expanded list of date formats to try
-                        date_formats = [
-                            '%d/%m/%Y',      # 28/01/2023
-                            '%d/%m/%y',      # 28/01/23
-                            '%d-%m-%Y',      # 28-01-2023
-                            '%d-%m-%y',      # 28-01-23
-                            '%Y-%m-%d',      # 2023-01-28
-                            '%Y/%m/%d',      # 2023/01/28
-                            '%m/%d/%Y',      # 01/28/2023 (US format)
-                            '%m/%d/%y',      # 01/28/23 (US format)
-                            '%d.%m.%Y',      # 28.01.2023
-                            '%d.%m.%y',      # 28.01.23
-                            '%b %d, %Y',     # Jan 28, 2023
-                            '%B %d, %Y',     # January 28, 2023
-                            '%d %b %Y',      # 28 Jan 2023
-                            '%d %B %Y',      # 28 January 2023
-                            '%Y%m%d',        # 20230128
-                        ]
-                        
-                        # Try parsing with each format
-                        for fmt in date_formats:
-                            try:
-                                purchase_date = datetime.strptime(date_str, fmt)
-                                break
-                            except ValueError:
-                                continue
-                        
-                        # If still None, try dateutil parser as fallback (if available)
-                        if purchase_date is None and HAS_DATEUTIL:
-                            try:
-                                purchase_date = date_parser.parse(date_str)
-                            except:
-                                pass
-                        
-                        # If still None, use current date and log warning
-                        if purchase_date is None:
-                            purchase_date = datetime.now()
-                            warning_rows.append(f"Row {row_idx}: Could not parse date '{date_str}', using current date")
+                    # Use the improved parse_date_cell function
+                    purchase_date = parse_date_cell(date_value)
+                    
+                    # If parse_date_cell returned None or invalid date, fallback to current date
+                    if purchase_date is None:
+                        purchase_date = datetime.now()
+                        warning_rows.append(f"Row {row_idx}: Could not parse date '{date_value}', using current date")
+                    # Check if date is in the future (more than 1 day ahead)
+                    elif purchase_date > datetime.now() + timedelta(days=1):
+                        warning_rows.append(f"Row {row_idx}: Date '{purchase_date.strftime('%Y-%m-%d')}' is in the future, this may indicate incorrect parsing")
                 except Exception as e:
                     purchase_date = datetime.now()
                     warning_rows.append(f"Row {row_idx}: Date parsing error: {str(e)}, using current date")
@@ -2124,6 +2148,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         cancel_flags.pop(job_id, None)
 # ========== FIXED SALES IMPORT ==========
 # ========== FIXED SALES IMPORT (WITH IMPROVED PRODUCT MATCHING) ==========
+# ========== FIXED SALES IMPORT (WITH IMPROVED PRODUCT MATCHING & STOCK HANDLING) ==========
 def run_sales_import(job_id, file_stream, target_category, mode='append', user_id=None):
     try:
         wb = load_workbook(file_stream, data_only=True)
@@ -2287,23 +2312,22 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
 
         # ---- Process rows ----
         for idx, entry in enumerate(rows_to_process, start=1):
-            # ✅ IMPROVED: Find product by exact match first, then try partial match
+            # Find product by exact match first, then try partial match
             product = None
             product_id = None
             product_category = None
+            product_name = None
             
             # Step 1: Try exact match
             cursor.execute(
-                "SELECT id, category FROM products WHERE name = %s",
+                "SELECT id, category, name FROM products WHERE name = %s",
                 (entry['item'],)
             )
             product = cursor.fetchone()
             
             # Step 2: If no exact match, try partial match (case-insensitive)
             if not product:
-                # Clean the search term: remove numbers at the end, normalize spaces
                 search_term = entry['item'].strip()
-                # Try to find products that contain this term
                 cursor.execute("""
                     SELECT id, category, name 
                     FROM products 
@@ -2323,7 +2347,6 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
             
             # Step 3: If still no match, try removing common suffixes
             if not product:
-                # Try removing "1", "2" etc. from the end (for batch variations)
                 import re
                 cleaned_name = re.sub(r'\s+\d+$', '', entry['item'])
                 if cleaned_name != entry['item']:
@@ -2347,11 +2370,18 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
                 overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' not found in database")
                 continue
                 
-            product_id, product_category = product[0], product[1]
+            product_id, product_category, product_name = product[0], product[1], product[2]
 
-            # If target_category is not 'All', enforce category match
-            if target_category != 'All' and product_category != target_category:
-                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != '{target_category}'")
+            # ✅ FIXED: Only skip "Accessory" category when importing to "Screens"
+            # Allow "Others" category to be imported
+            if target_category == 'Screen' and product_category == 'Accessory':
+                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' is in 'Accessory' category - skipping (only Screens/Others allowed)")
+                continue
+            
+            # If target_category is 'All', import everything
+            # If target_category is 'Accessory', only import Accessory
+            if target_category == 'Accessory' and product_category != 'Accessory':
+                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' category '{product_category}' != 'Accessory' - skipping")
                 continue
 
             subtotal = entry['qty'] * entry['rate']
@@ -2364,47 +2394,101 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
             """, (entry['sale_date'], subtotal, entry['discount'], total, 0, 0, 'cash', user_id))
             sale_id = cursor.fetchone()[0]
 
-            # Find a batch with enough stock (FIFO)
+            # ✅ FIXED: Try to find a batch with stock, but if none, record the sale without reducing stock
             cursor.execute("""
-                SELECT id, cost_price, selling_price
+                SELECT id, cost_price, selling_price, remaining_quantity
                 FROM purchase_batches
-                WHERE product_id = %s AND remaining_quantity >= %s
+                WHERE product_id = %s AND remaining_quantity > 0
                 ORDER BY date ASC
                 LIMIT 1
-            """, (product_id, entry['qty']))
+            """, (product_id,))
             batch_info = cursor.fetchone()
-            if not batch_info:
-                overall_errors.append(f"Row {entry['row_idx']}: Insufficient stock for '{entry['item']}' (need {entry['qty']})")
-                cursor.execute("DELETE FROM sales WHERE id = %s", (sale_id,))
-                continue
-
-            batch_id, cost_price, selling_price = batch_info
-            selling_price = entry['rate']
-            item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
-
-            cursor.execute("""
-                INSERT INTO sales_items
-                (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit))
-
-            cursor.execute("""
-                UPDATE purchase_batches
-                SET remaining_quantity = remaining_quantity - %s
-                WHERE id = %s
-            """, (entry['qty'], batch_id))
-
-            cursor.execute("""
-                UPDATE products
-                SET stock = stock - %s
-                WHERE id = %s
-            """, (entry['qty'], product_id))
-
-            cursor.execute("""
-                UPDATE sales
-                SET profit = %s
-                WHERE id = %s
-            """, (item_profit, sale_id))
+            
+            if batch_info:
+                batch_id, cost_price, selling_price, remaining_qty = batch_info
+                
+                # Check if there's enough stock
+                if remaining_qty >= entry['qty']:
+                    # Normal sale with stock deduction
+                    selling_price = entry['rate']
+                    item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
+                    
+                    cursor.execute("""
+                        INSERT INTO sales_items
+                        (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (sale_id, product_id, batch_id, entry['qty'], selling_price, cost_price, item_profit))
+                    
+                    cursor.execute("""
+                        UPDATE purchase_batches
+                        SET remaining_quantity = remaining_quantity - %s
+                        WHERE id = %s
+                    """, (entry['qty'], batch_id))
+                    
+                    cursor.execute("""
+                        UPDATE products
+                        SET stock = stock - %s
+                        WHERE id = %s
+                    """, (entry['qty'], product_id))
+                    
+                    cursor.execute("""
+                        UPDATE sales
+                        SET profit = %s
+                        WHERE id = %s
+                    """, (item_profit, sale_id))
+                    
+                else:
+                    # ✅ PARTIAL STOCK: Sell what's available, record the rest as a sale without stock deduction
+                    # Use available stock
+                    available = remaining_qty
+                    selling_price = entry['rate']
+                    cost_price = float(cost_price) if cost_price else 0
+                    item_profit = (selling_price - cost_price) * available - (entry['discount'] * (available / entry['qty']))
+                    
+                    cursor.execute("""
+                        INSERT INTO sales_items
+                        (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (sale_id, product_id, batch_id, available, selling_price, cost_price, item_profit))
+                    
+                    cursor.execute("""
+                        UPDATE purchase_batches
+                        SET remaining_quantity = 0
+                        WHERE id = %s
+                    """, (batch_id,))
+                    
+                    cursor.execute("""
+                        UPDATE products
+                        SET stock = stock - %s
+                        WHERE id = %s
+                    """, (available, product_id))
+                    
+                    cursor.execute("""
+                        UPDATE sales
+                        SET profit = %s
+                        WHERE id = %s
+                    """, (item_profit, sale_id))
+                    
+                    overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' had only {available} stock (needed {entry['qty']}) - sold {available}, rest recorded without stock")
+            else:
+                # ✅ NO STOCK: Record the sale without any stock deduction
+                cost_price = 0
+                selling_price = entry['rate']
+                item_profit = (selling_price - cost_price) * entry['qty'] - entry['discount']
+                
+                cursor.execute("""
+                    INSERT INTO sales_items
+                    (sale_id, product_id, batch_id, quantity, selling_price, cost_price, profit)
+                    VALUES (%s, %s, NULL, %s, %s, %s, %s)
+                """, (sale_id, product_id, entry['qty'], selling_price, cost_price, item_profit))
+                
+                cursor.execute("""
+                    UPDATE sales
+                    SET profit = %s
+                    WHERE id = %s
+                """, (item_profit, sale_id))
+                
+                overall_errors.append(f"Row {entry['row_idx']}: Product '{entry['item']}' has 0 stock - recorded sale without stock deduction")
 
             imported_count += 1
             if imported_count % 100 == 0:
