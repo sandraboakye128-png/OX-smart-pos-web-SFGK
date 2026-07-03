@@ -1746,6 +1746,7 @@ def import_inventory_page():
 # ---------- CANCEL FLAGS (in-memory) ----------
 cancel_flags = {}
 
+
 # ========== FIXED INVENTORY IMPORT (WITH ENHANCED DATE PARSING) ==========
 def run_inventory_import(job_id, file_stream, target_category, mode='append'):
     conn = None
@@ -1788,8 +1789,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 header_map['date'] = idx
             elif cell_lower in ['discount']:
                 header_map['discount'] = idx
-            elif cell_lower in ['category']:
-                header_map['category'] = idx
+            # Note: We intentionally don't map 'category' column - we always use target_category
 
     required = ['name']
     missing = [f for f in required if f not in header_map]
@@ -1947,12 +1947,9 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
             else:
                 purchase_date = datetime.now()
 
-            # Category – from file if present, otherwise fallback to target_category
+            # ✅ FIXED: ALWAYS use target_category, ignore category column from file
+            # The user's selection in the UI is the source of truth
             category = target_category
-            if 'category' in header_map and row[header_map['category']] is not None:
-                cat_val = str(row[header_map['category']]).strip()
-                if cat_val:
-                    category = cat_val
 
             rows_to_process.append({
                 'row_idx': row_idx,
@@ -2125,7 +2122,6 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
         if conn:
             conn.close()
         cancel_flags.pop(job_id, None)
-
 # ========== FIXED SALES IMPORT ==========
 # ========== FIXED SALES IMPORT (WITH IMPROVED PRODUCT MATCHING) ==========
 def run_sales_import(job_id, file_stream, target_category, mode='append', user_id=None):
