@@ -950,6 +950,77 @@ def api_sales_batches(product_id):
     batches = get_batches_for_product(product_id)
     return jsonify(batches)
 
+# ✅ ========== ADD THIS NEW ENDPOINT HERE ==========
+@app.route('/api/sales/batches/by_name', methods=['GET'])
+@login_required
+def api_sales_batches_by_name():
+    name = request.args.get('name')
+    brand = request.args.get('brand', '')  # Brand is optional
+    
+    if not name:
+        return jsonify([])
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # If brand is provided, match both name and brand
+    # If brand is empty, match only name
+    if brand:
+        cursor.execute("""
+            SELECT pb.id, pb.product_id, pb.quantity, pb.remaining_quantity, 
+                   pb.cost_price, pb.selling_price, pb.discount, pb.date,
+                   p.name, p.brand
+            FROM purchase_batches pb
+            JOIN products p ON p.id = pb.product_id
+            WHERE p.name = %s AND p.brand = %s
+            AND pb.remaining_quantity > 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                AND dp.source = 'product'
+            )
+            ORDER BY pb.date ASC
+        """, (name, brand))
+    else:
+        cursor.execute("""
+            SELECT pb.id, pb.product_id, pb.quantity, pb.remaining_quantity, 
+                   pb.cost_price, pb.selling_price, pb.discount, pb.date,
+                   p.name, p.brand
+            FROM purchase_batches pb
+            JOIN products p ON p.id = pb.product_id
+            WHERE p.name = %s
+            AND pb.remaining_quantity > 0
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                AND dp.source = 'product'
+            )
+            ORDER BY pb.date ASC
+        """, (name,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    result = []
+    for r in rows:
+        result.append({
+            'batch_id': r[0],
+            'product_id': r[1],
+            'batch_quantity': r[2],
+            'remaining_quantity': r[3],
+            'cost_price': float(r[4]),
+            'selling_price': float(r[5]),
+            'discount': float(r[6]),
+            'date': r[7].isoformat() if r[7] else None,
+            'product_name': r[8],
+            'product_brand': r[9]
+        })
+    
+    return jsonify(result)
+
+
 @app.route('/api/sales/complete', methods=['POST'])
 @login_required
 def api_sales_complete():
@@ -1943,14 +2014,16 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 else:
                     selling_price = 0
 
-            # Discount
+                        # Discount
+                     # Discount
             try:
                 discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0
                 if discount < 0:
                     discount = 0
             except:
                 discount = 0
-             # ========== ENHANCED DATE PARSING ==========
+
+            # ========== ENHANCED DATE PARSING WITH AUTO-CORRECTION ==========
             purchase_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 date_value = row[header_map['date']]
@@ -1962,9 +2035,14 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                     if purchase_date is None:
                         purchase_date = datetime.now()
                         warning_rows.append(f"Row {row_idx}: Could not parse date '{date_value}', using current date")
-                    # Check if date is in the future (more than 1 day ahead)
+                    # Auto-correct future dates (more than 1 day ahead)
                     elif purchase_date > datetime.now() + timedelta(days=1):
-                        warning_rows.append(f"Row {row_idx}: Date '{purchase_date.strftime('%Y-%m-%d')}' is in the future, this may indicate incorrect parsing")
+                        warning_rows.append(f"Row {row_idx}: Date '{purchase_date.strftime('%Y-%m-%d')}' is in the future (original: '{date_value}') - AUTO-CORRECTED to today")
+                        purchase_date = datetime.now()
+                    # Auto-correct dates before year 2000
+                    elif purchase_date.year < 2000:
+                        warning_rows.append(f"Row {row_idx}: Date '{purchase_date.strftime('%Y-%m-%d')}' is before year 2000 (original: '{date_value}') - AUTO-CORRECTED to today")
+                        purchase_date = datetime.now()
                 except Exception as e:
                     purchase_date = datetime.now()
                     warning_rows.append(f"Row {row_idx}: Date parsing error: {str(e)}, using current date")
@@ -1986,7 +2064,7 @@ def run_inventory_import(job_id, file_stream, target_category, mode='append'):
                 'category': category,
                 'purchase_date': purchase_date,
                 'total_cost': total_cost
-            })
+            })   
         except Exception as e:
             skipped_rows.append({
                 'row': row_idx,
@@ -2241,17 +2319,26 @@ def run_sales_import(job_id, file_stream, target_category, mode='append', user_i
 
             discount = float(row[header_map.get('discount')]) if header_map.get('discount') is not None and row[header_map['discount']] is not None else 0.0
 
-            sale_date = None
+                    sale_date = None
             if 'date' in header_map and row[header_map['date']] is not None:
                 parsed = parse_date_cell(row[header_map['date']])
                 if parsed:
-                    sale_date = parsed
+                    # Auto-correct future dates (more than 1 day ahead)
+                    if parsed > datetime.now() + timedelta(days=1):
+                        error_rows.append(f"Row {row_idx}: Date '{parsed.strftime('%Y-%m-%d')}' is in the future - AUTO-CORRECTED to today")
+                        sale_date = datetime.now()
+                    # Auto-correct dates before year 2000
+                    elif parsed.year < 2000:
+                        error_rows.append(f"Row {row_idx}: Date '{parsed.strftime('%Y-%m-%d')}' is before year 2000 - AUTO-CORRECTED to today")
+                        sale_date = datetime.now()
+                    else:
+                        sale_date = parsed
                 else:
                     sale_date = datetime.now()
                     error_rows.append(f"Row {row_idx}: Could not parse date, using current date.")
             else:
-                sale_date = datetime.now()
-
+                sale_date = datetime.now()    
+        
             rows_to_process.append({
                 'row_idx': row_idx,
                 'item': item,

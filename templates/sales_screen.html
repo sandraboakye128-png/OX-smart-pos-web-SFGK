@@ -441,56 +441,118 @@
         renderProductList(filtered);
     });
 
-    // ---------- Batch Selector ----------
+    // ========== 🆕 UPDATED BATCH SELECTOR - FETCHES ALL BATCHES BY NAME ==========
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
-        const batchCacheKey = `batches_${product.id}`;
         let batches = [];
 
+        // Create a cache key based on product name and brand
+        const cacheKey = `batches_${product.name}_${product.brand}`;
+
         try {
-            const res = await fetch(`/api/sales/batches/${product.id}`);
-            if (!res.ok) throw new Error();
+            // ✅ USE THE NEW by_name ENDPOINT - fetches ALL batches for this product name
+            const url = `/api/sales/batches/by_name?name=${encodeURIComponent(product.name)}&brand=${encodeURIComponent(product.brand)}`;
+            console.log("🔍 Fetching all batches for screen:", product.name, "from:", url);
+            
+            const res = await fetch(url);
+            if (!res.ok) {
+                console.warn(`HTTP error! status: ${res.status}`);
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
             batches = await res.json();
-            cacheData(batchCacheKey, batches);
+            console.log(`📦 Found ${batches.length} total batches for "${product.name}"`);
+            
+            if (batches.length > 0) {
+                cacheData(cacheKey, batches);
+            }
         } catch (err) {
-            console.warn('Offline – using cached batches for product', product.id);
-            const cached = getCachedData(batchCacheKey);
-            if (cached) batches = cached;
+            console.warn('Error fetching batches by name, trying fallback:', err);
+            
+            // Fallback 1: Try the old method (by product ID)
+            try {
+                console.log("🔄 Fallback: trying by product ID:", product.id);
+                const res = await fetch(`/api/sales/batches/${product.id}`);
+                if (res.ok) {
+                    batches = await res.json();
+                    console.log(`📦 Fallback found ${batches.length} batches`);
+                }
+            } catch (fallbackErr) {
+                console.warn('Fallback also failed:', fallbackErr);
+            }
+            
+            // Fallback 2: Try from the product's cached batches (from product list)
+            if (batches.length === 0 && product.batches && product.batches.length > 0) {
+                console.log("🔄 Using batches from product object:", product.batches.length);
+                batches = product.batches;
+            }
+            
+            // Fallback 3: Try from local cache
+            if (batches.length === 0) {
+                const cached = getCachedData(cacheKey);
+                if (cached && cached.length > 0) {
+                    console.log("🔄 Using cached batches:", cached.length);
+                    batches = cached;
+                }
+            }
         }
 
+        // Filter only batches with remaining stock
         currentBatches = batches.filter(b => b.remaining_quantity > 0);
+        console.log(`📊 ${currentBatches.length} batches with stock available (out of ${batches.length} total)`);
+        
         if (currentBatches.length === 0) {
-            alert('No available batches for this product.');
+            alert(`No available stock for ${product.name}. Please restock this product.`);
             return false;
         }
 
+        // Build the batch selection UI
         const container = document.getElementById('batchList');
         container.innerHTML = '';
         batchSelection = [];
+        
+        // Header row
         const header = document.createElement('div');
-        header.className = 'grid grid-cols-6 gap-2 bg-gray-100 p-2 font-bold sticky top-0';
+        header.className = 'grid grid-cols-6 gap-2 bg-gray-100 p-2 font-bold sticky top-0 border-b-2 border-gray-300';
         header.innerHTML = `<div>Select</div><div>Batch ID</div><div>Stock</div><div>Selling Price</div><div>Cost Price</div><div>Qty to Sell</div>`;
         container.appendChild(header);
+        
+        // Calculate total available stock
+        let totalAvailableStock = 0;
         for (const batch of currentBatches) {
+            totalAvailableStock += batch.remaining_quantity;
+            
             const row = document.createElement('div');
-            row.className = 'grid grid-cols-6 gap-2 items-center border-b py-2';
+            row.className = 'grid grid-cols-6 gap-2 items-center border-b py-2 hover:bg-gray-50';
+            
             const cb = document.createElement('input');
             cb.type = 'checkbox';
-            cb.className = 'w-5 h-5';
+            cb.className = 'w-5 h-5 cursor-pointer';
+            
             const batchIdSpan = document.createElement('span');
             batchIdSpan.innerText = batch.batch_id;
+            batchIdSpan.className = 'text-sm';
+            
             const stockSpan = document.createElement('span');
             stockSpan.innerText = batch.remaining_quantity;
+            stockSpan.className = 'font-medium';
+            
             const priceSpan = document.createElement('span');
             priceSpan.innerText = `₵${batch.selling_price.toFixed(2)}`;
+            priceSpan.className = 'text-green-600';
+            
             const costSpan = document.createElement('span');
             costSpan.innerText = `₵${batch.cost_price.toFixed(2)}`;
+            costSpan.className = 'text-gray-500 text-sm';
+            
             const qtyInput = document.createElement('input');
             qtyInput.type = 'number';
-            qtyInput.className = 'border rounded px-1 py-1 w-20';
+            qtyInput.className = 'border rounded px-1 py-1 w-20 text-center';
             qtyInput.value = '0';
+            qtyInput.min = 0;
+            qtyInput.max = batch.remaining_quantity;
             qtyInput.disabled = true;
+            
             row.appendChild(cb);
             row.appendChild(batchIdSpan);
             row.appendChild(stockSpan);
@@ -498,22 +560,60 @@
             row.appendChild(costSpan);
             row.appendChild(qtyInput);
             container.appendChild(row);
-            batchSelection.push({ batch, checkbox: cb, qtyInput, batchId: batch.batch_id });
+            
+            batchSelection.push({ 
+                batch, 
+                checkbox: cb, 
+                qtyInput, 
+                batchId: batch.batch_id 
+            });
+            
+            // Event listeners
             cb.addEventListener('change', () => {
                 qtyInput.disabled = !cb.checked;
-                if (cb.checked && qtyInput.value === '0') qtyInput.value = '1';
-                else if (!cb.checked) qtyInput.value = '0';
+                if (cb.checked && qtyInput.value === '0') {
+                    qtyInput.value = '1';
+                } else if (!cb.checked) {
+                    qtyInput.value = '0';
+                }
                 updateBatchTotals();
             });
+            
             qtyInput.addEventListener('input', updateBatchTotals);
+            qtyInput.addEventListener('blur', function() {
+                let val = parseInt(this.value) || 0;
+                const maxStock = parseInt(this.max) || 0;
+                if (val > maxStock) {
+                    this.value = maxStock;
+                    val = maxStock;
+                } else if (val < 0) {
+                    this.value = 0;
+                }
+                updateBatchTotals();
+            });
         }
+        
+        // Show total available stock info
+        const infoRow = document.createElement('div');
+        infoRow.className = 'grid grid-cols-6 gap-2 bg-blue-50 p-2 mt-2 rounded';
+        infoRow.innerHTML = `
+            <div class="col-span-6 text-sm text-blue-700">
+                📦 Total available stock: <strong>${totalAvailableStock}</strong> units across ${currentBatches.length} batches
+                ${neededQty > totalAvailableStock ? `<span class="text-red-600 ml-2">⚠️ Needed ${neededQty} units, only ${totalAvailableStock} available</span>` : ''}
+            </div>
+        `;
+        container.appendChild(infoRow);
+        
         function updateBatchTotals() {
             let assigned = 0;
             batchSelection.forEach(sel => {
                 if (sel.checkbox.checked) {
                     let val = parseInt(sel.qtyInput.value) || 0;
                     const maxStock = sel.batch.remaining_quantity;
-                    if (val > maxStock) { sel.qtyInput.value = maxStock; val = maxStock; }
+                    if (val > maxStock) { 
+                        sel.qtyInput.value = maxStock; 
+                        val = maxStock; 
+                    }
                     assigned += val;
                 }
             });
@@ -521,23 +621,43 @@
             const remaining = neededQty - assigned;
             document.getElementById('remainingQty').innerText = `Remaining: ${remaining}`;
             const remSpan = document.getElementById('remainingQty');
-            if (remaining < 0) remSpan.classList.add('text-red-600');
-            else remSpan.classList.remove('text-red-600');
-            if (remaining === 0) remSpan.classList.add('text-green-600');
-            else remSpan.classList.remove('text-green-600');
+            if (remaining < 0) {
+                remSpan.classList.add('text-red-600');
+                remSpan.classList.remove('text-green-600');
+            } else {
+                remSpan.classList.remove('text-red-600');
+                if (remaining === 0) {
+                    remSpan.classList.add('text-green-600');
+                } else {
+                    remSpan.classList.remove('text-green-600');
+                }
+            }
         }
-        document.getElementById('batchModalTitle').innerHTML = `Select batches for ${product.name} (need ${qty} units)`;
+        
+        document.getElementById('batchModalTitle').innerHTML = 
+            `Select batches for <strong>${product.name}</strong> (need ${qty} units, ${totalAvailableStock} available)`;
         document.getElementById('assignedQty').innerText = 'Assigned: 0';
         document.getElementById('remainingQty').innerText = `Remaining: ${neededQty}`;
         document.getElementById('batchModal').classList.remove('hidden');
+        
         return true;
     }
 
     window.selectAllBatches = function() {
+        let remaining = neededQty;
         batchSelection.forEach(sel => {
+            if (remaining <= 0) {
+                sel.checkbox.checked = false;
+                sel.qtyInput.disabled = true;
+                sel.qtyInput.value = '0';
+                return;
+            }
             sel.checkbox.checked = true;
             sel.qtyInput.disabled = false;
-            if (sel.qtyInput.value === '0') sel.qtyInput.value = '1';
+            const maxAvailable = sel.batch.remaining_quantity;
+            const toAssign = Math.min(maxAvailable, remaining);
+            sel.qtyInput.value = toAssign;
+            remaining -= toAssign;
         });
         updateBatchTotals();
     };
@@ -557,7 +677,10 @@
             if (sel.checkbox.checked) {
                 let val = parseInt(sel.qtyInput.value) || 0;
                 const maxStock = sel.batch.remaining_quantity;
-                if (val > maxStock) { sel.qtyInput.value = maxStock; val = maxStock; }
+                if (val > maxStock) { 
+                    sel.qtyInput.value = maxStock; 
+                    val = maxStock; 
+                }
                 assigned += val;
             }
         });
@@ -565,10 +688,17 @@
         const remaining = neededQty - assigned;
         document.getElementById('remainingQty').innerText = `Remaining: ${remaining}`;
         const remSpan = document.getElementById('remainingQty');
-        if (remaining < 0) remSpan.classList.add('text-red-600');
-        else remSpan.classList.remove('text-red-600');
-        if (remaining === 0) remSpan.classList.add('text-green-600');
-        else remSpan.classList.remove('text-green-600');
+        if (remaining < 0) {
+            remSpan.classList.add('text-red-600');
+            remSpan.classList.remove('text-green-600');
+        } else {
+            remSpan.classList.remove('text-red-600');
+            if (remaining === 0) {
+                remSpan.classList.add('text-green-600');
+            } else {
+                remSpan.classList.remove('text-green-600');
+            }
+        }
     }
 
     window.closeBatchModal = function() {
