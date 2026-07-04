@@ -201,6 +201,37 @@
     const PRODUCTS_CACHE_KEY = 'sales_products_cache_accessories';
     const LICENSE_CACHE_KEY = 'sales_license_cache';
 
+    // ---------- Clear Offline Data ----------
+    function clearOfflineData() {
+        const keys = [
+            'pending_sales',
+            'offline_sales', 
+            'sales_products_cache_accessories',
+            'sales_license_cache',
+            PRODUCTS_CACHE_KEY,
+            LICENSE_CACHE_KEY
+        ];
+        keys.forEach(key => {
+            try {
+                localStorage.removeItem(key);
+                console.log('🗑️ Cleared:', key);
+            } catch(e) {}
+        });
+        // Also clear any batch caches
+        const allKeys = Object.keys(localStorage);
+        allKeys.forEach(key => {
+            if (key.startsWith('batches_')) {
+                localStorage.removeItem(key);
+                console.log('🗑️ Cleared batch cache:', key);
+            }
+        });
+        document.getElementById('receiptPreview').innerHTML = '';
+        document.getElementById('printReceiptBtn').disabled = true;
+        alert('✅ Offline data cleared. Please refresh the page.');
+        location.reload();
+    }
+    window.clearOfflineData = clearOfflineData;
+
     // ---------- Load License Status ----------
     async function loadLicenseStatus() {
         try {
@@ -353,7 +384,6 @@
         let fromCache = false;
 
         try {
-            // EXCLUDE Screen category - backend now returns grouped products
             const res = await fetch('/api/sales/products?exclude_category=Screen');
             if (!res.ok) throw new Error();
             prods = await res.json();
@@ -365,8 +395,6 @@
             if (cached) prods = cached;
         }
 
-        // ✅ Backend already groups by name+brand, but we keep a safety fallback
-        // in case the API returns ungrouped data (backward compatibility)
         const grouped = {};
         prods.forEach(p => {
             const key = `${p.name}|${p.brand}`;
@@ -442,68 +470,86 @@
         renderProductList(filtered);
     });
 
-    // ========== 🆕 UPDATED BATCH SELECTOR - FETCHES ALL BATCHES BY NAME ==========
+    // ========== 🆕 UPDATED BATCH SELECTOR WITH FALLBACKS ==========
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
         let batches = [];
 
+        console.log('🔍 Opening batch selector for:', product.name);
+        console.log('📦 Product stock:', product.stock);
+        console.log('📦 Product has batches?', product.batches ? product.batches.length : 0);
+
         // Create a cache key based on product name and brand
         const cacheKey = `batches_${product.name}_${product.brand}`;
 
-        try {
-            // ✅ USE THE NEW by_name ENDPOINT - fetches ALL batches for this product name
-            const url = `/api/sales/batches/by_name?name=${encodeURIComponent(product.name)}&brand=${encodeURIComponent(product.brand)}`;
-            console.log("🔍 Fetching all batches for:", product.name, "from:", url);
-            
-            const res = await fetch(url);
-            if (!res.ok) {
-                console.warn(`HTTP error! status: ${res.status}`);
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            batches = await res.json();
-            console.log(`📦 Found ${batches.length} total batches for "${product.name}"`);
-            
-            if (batches.length > 0) {
-                cacheData(cacheKey, batches);
-            }
-        } catch (err) {
-            console.warn('Error fetching batches by name, trying fallback:', err);
-            
-            // Fallback 1: Try the old method (by product ID)
+        // ✅ FIRST: Try using batches already in product object
+        if (product.batches && product.batches.length > 0) {
+            console.log('📦 Using batches from product object:', product.batches.length);
+            batches = product.batches;
+        } else {
+            // ✅ SECOND: Try fetching by name
             try {
-                console.log("🔄 Fallback: trying by product ID:", product.id);
-                const res = await fetch(`/api/sales/batches/${product.id}`);
+                const url = `/api/sales/batches/by_name?name=${encodeURIComponent(product.name)}&brand=${encodeURIComponent(product.brand)}`;
+                console.log('🔍 Fetching from:', url);
+                const res = await fetch(url);
                 if (res.ok) {
                     batches = await res.json();
-                    console.log(`📦 Fallback found ${batches.length} batches`);
+                    console.log('📦 Fetched batches:', batches.length);
+                    if (batches.length > 0) {
+                        cacheData(cacheKey, batches);
+                    }
+                } else {
+                    console.warn('⚠️ API returned error:', res.status);
                 }
-            } catch (fallbackErr) {
-                console.warn('Fallback also failed:', fallbackErr);
+            } catch (err) {
+                console.warn('⚠️ Error fetching batches:', err);
             }
             
-            // Fallback 2: Try from the product's cached batches (from product list)
-            if (batches.length === 0 && product.batches && product.batches.length > 0) {
-                console.log("🔄 Using batches from product object:", product.batches.length);
-                batches = product.batches;
+            // ✅ THIRD: Try by product ID (fallback)
+            if (batches.length === 0 && product.id) {
+                try {
+                    const res = await fetch(`/api/sales/batches/${product.id}`);
+                    if (res.ok) {
+                        batches = await res.json();
+                        console.log('📦 Fetched by product ID:', batches.length);
+                    }
+                } catch (err) {
+                    console.warn('⚠️ Error fetching by ID:', err);
+                }
             }
             
-            // Fallback 3: Try from local cache
+            // ✅ FOURTH: Try from local cache
             if (batches.length === 0) {
                 const cached = getCachedData(cacheKey);
                 if (cached && cached.length > 0) {
-                    console.log("🔄 Using cached batches:", cached.length);
+                    console.log('📦 Using cached batches:', cached.length);
                     batches = cached;
                 }
             }
         }
 
         // Filter only batches with remaining stock
-        currentBatches = batches.filter(b => b.remaining_quantity > 0);
-        console.log(`📊 ${currentBatches.length} batches with stock available (out of ${batches.length} total)`);
-        
+        let filteredBatches = batches.filter(b => b.remaining_quantity > 0);
+        console.log(`📊 ${filteredBatches.length} batches with stock available`);
+
+        // ✅ FIFTH: If no batches but product has stock, create a fallback batch
+        if (filteredBatches.length === 0 && product.stock > 0) {
+            console.warn('⚠️ No batches found, creating fallback batch from product stock');
+            filteredBatches = [{
+                batch_id: product.id || 'fallback',
+                remaining_quantity: product.stock,
+                selling_price: product.selling_price,
+                cost_price: product.cost_price || 0,
+                batch_quantity: product.stock,
+                is_fallback: true
+            }];
+        }
+
+        currentBatches = filteredBatches;
+
         if (currentBatches.length === 0) {
-            alert(`No available stock for ${product.name}. Please restock this product.`);
+            alert(`❌ No available stock for ${product.name}. Please check inventory.`);
             return false;
         }
 
@@ -518,10 +564,12 @@
         header.innerHTML = `<div>Select</div><div>Batch ID</div><div>Stock</div><div>Selling Price</div><div>Cost Price</div><div>Qty to Sell</div>`;
         container.appendChild(header);
         
-        // Calculate total available stock
         let totalAvailableStock = 0;
+        let isFallback = false;
+        
         for (const batch of currentBatches) {
             totalAvailableStock += batch.remaining_quantity;
+            if (batch.is_fallback) isFallback = true;
             
             const row = document.createElement('div');
             row.className = 'grid grid-cols-6 gap-2 items-center border-b py-2 hover:bg-gray-50';
@@ -531,8 +579,11 @@
             cb.className = 'w-5 h-5 cursor-pointer';
             
             const batchIdSpan = document.createElement('span');
-            batchIdSpan.innerText = batch.batch_id;
+            batchIdSpan.innerText = batch.is_fallback ? '⚠️ FALLBACK' : batch.batch_id;
             batchIdSpan.className = 'text-sm';
+            if (batch.is_fallback) {
+                batchIdSpan.classList.add('text-orange-600', 'font-bold');
+            }
             
             const stockSpan = document.createElement('span');
             stockSpan.innerText = batch.remaining_quantity;
@@ -569,7 +620,6 @@
                 batchId: batch.batch_id 
             });
             
-            // Event listeners
             cb.addEventListener('change', () => {
                 qtyInput.disabled = !cb.checked;
                 if (cb.checked && qtyInput.value === '0') {
@@ -594,13 +644,15 @@
             });
         }
         
-        // Show total available stock info
+        // Show total available stock info with warning if fallback
         const infoRow = document.createElement('div');
-        infoRow.className = 'grid grid-cols-6 gap-2 bg-blue-50 p-2 mt-2 rounded';
+        infoRow.className = `grid grid-cols-6 gap-2 ${isFallback ? 'bg-orange-50' : 'bg-blue-50'} p-2 mt-2 rounded`;
         infoRow.innerHTML = `
-            <div class="col-span-6 text-sm text-blue-700">
-                📦 Total available stock: <strong>${totalAvailableStock}</strong> units across ${currentBatches.length} batches
+            <div class="col-span-6 text-sm ${isFallback ? 'text-orange-700' : 'text-blue-700'}">
+                ${isFallback ? '⚠️ ' : '📦 '}
+                Total available stock: <strong>${totalAvailableStock}</strong> units across ${currentBatches.length} batches
                 ${neededQty > totalAvailableStock ? `<span class="text-red-600 ml-2">⚠️ Needed ${neededQty} units, only ${totalAvailableStock} available</span>` : ''}
+                ${isFallback ? `<br><span class="text-xs text-orange-500">⚠️ FALLBACK BATCH: This product has stock but no specific batch. Selling from this will not deduct from a real batch.</span>` : ''}
             </div>
         `;
         container.appendChild(infoRow);
@@ -708,6 +760,7 @@
         neededQty = 0;
     };
 
+    // ========== 🔧 FIXED: confirmBatchSelection with correct cost calculation ==========
     window.confirmBatchSelection = function() {
         let assigned = 0;
         let selected = [];
@@ -716,7 +769,12 @@
                 let qty = parseInt(sel.qtyInput.value) || 0;
                 if (qty > 0) {
                     assigned += qty;
-                    selected.push({ batch_id: sel.batchId, qty, batch: sel.batch });
+                    selected.push({ 
+                        batch_id: sel.batchId, 
+                        qty: qty, 
+                        batch: sel.batch,
+                        is_fallback: sel.batch.is_fallback || false
+                    });
                 }
             }
         }
@@ -728,17 +786,39 @@
             alert('Please select at least one batch.');
             return;
         }
+        
+        // Check if using fallback batch
+        const hasFallback = selected.some(s => s.is_fallback);
+        if (hasFallback) {
+            if (!confirm('⚠️ This product has stock but no specific batch. Selling from fallback will NOT deduct from real inventory. Continue?')) {
+                return;
+            }
+        }
+        
         const discount = parseFloat(document.getElementById('discount').value) || 0;
         let subtotal = 0;
-        for (const s of selected) subtotal += s.qty * s.batch.selling_price;
+        let totalCost = 0;
+        for (const s of selected) {
+            subtotal += s.qty * s.batch.selling_price;
+            totalCost += s.qty * (s.batch.cost_price || 0);
+        }
         const finalTotal = Math.max(subtotal - discount, 0);
+        
+        // ✅ CRITICAL FIX: Create a product copy with the CORRECT cost price from batches
+        const productWithCorrectCost = {
+            ...currentProductForBatch,
+            cost_price: totalCost / neededQty  // Average cost per unit from batches
+        };
+        
         cart.push({
-            product: currentProductForBatch,
+            product: productWithCorrectCost,  // ✅ Use corrected product
             qty: neededQty,
             discount,
             selectedBatches: selected,
             subtotal,
-            final: finalTotal
+            final: finalTotal,
+            isFallback: hasFallback,
+            totalCost: totalCost
         });
         updateCart();
         closeBatchModal();
@@ -760,10 +840,13 @@
             grandTotal += item.final;
             const card = document.createElement('div');
             card.className = 'border rounded-lg p-3 bg-gray-50';
+            const fallbackWarning = item.isFallback ? 
+                '<span class="text-orange-500 text-xs font-bold ml-2">⚠️ FALLBACK</span>' : '';
             card.innerHTML = `
                 <div class="flex justify-between items-start">
                     <div>
                         <strong>${item.product.name} (${item.product.brand})</strong>
+                        ${fallbackWarning}
                         <div class="text-sm text-gray-600">Qty: ${item.qty} | Discount: ${formatMoney(item.discount)}</div>
                         <div class="text-xs text-gray-500">Batches:</div>
                         <div class="text-xs">${item.selectedBatches.map(b => `Batch #${b.batch_id}: ${b.qty} @ ${formatMoney(b.batch.selling_price)}`).join('<br>')}</div>
@@ -886,7 +969,8 @@
             });
             
             if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
+                const errorData = await res.json();
+                throw new Error(errorData.error || `HTTP error! status: ${res.status}`);
             }
             
             const data = await res.json();
@@ -906,33 +990,36 @@
         } catch (error) {
             console.warn('Network error, saving sale offline:', error);
             
-            if (typeof savePendingSale === 'function') {
-                savePendingSale(payload);
+            // Only save offline if actually offline
+            if (!navigator.onLine) {
+                if (typeof savePendingSale === 'function') {
+                    savePendingSale(payload);
+                }
+                if (typeof updatePendingBadge === 'function') {
+                    updatePendingBadge();
+                }
+                
+                cart = [];
+                updateCart();
+                
+                document.getElementById('receiptPreview').innerHTML = `
+                    <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
+                        <strong>⚠️ Offline Sale Saved</strong><br>
+                        This sale has been saved locally and will be synced when you reconnect.
+                        <br><br>
+                        <strong>Total:</strong> ${formatMoney(payload.cart_items.reduce((sum, item) => sum + item.qty * item.product.selling_price, 0))}
+                        <br>
+                        <strong>Items:</strong> ${payload.cart_items.length}
+                        <br><br>
+                        <span class="text-xs">Sale ID: pending (${new Date().toLocaleString()})</span>
+                    </div>
+                `;
+                
+                alert('You are offline. Sale saved locally and will be synced later.');
             } else {
-                console.warn('savePendingSale not available; sale not saved offline.');
+                // Online but error occurred
+                alert('❌ Sale failed: ' + error.message);
             }
-            
-            if (typeof updatePendingBadge === 'function') {
-                updatePendingBadge();
-            }
-            
-            cart = [];
-            updateCart();
-            
-            document.getElementById('receiptPreview').innerHTML = `
-                <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 p-3 rounded">
-                    <strong>⚠️ Offline Sale Saved</strong><br>
-                    This sale has been saved locally and will be synced when you reconnect.
-                    <br><br>
-                    <strong>Total:</strong> ${formatMoney(payload.cart_items.reduce((sum, item) => sum + item.qty * item.product.selling_price, 0))}
-                    <br>
-                    <strong>Items:</strong> ${payload.cart_items.length}
-                    <br><br>
-                    <span class="text-xs">Sale ID: pending (${new Date().toLocaleString()})</span>
-                </div>
-            `;
-            
-            alert('You are offline. Sale saved locally and will be synced later.');
         }
         
         pendingSaleCallback = null;
@@ -945,6 +1032,14 @@
         if (cart.length === 0) {
             alert('Cart is empty.');
             return;
+        }
+        
+        // Check if there are fallback batches in cart
+        const hasFallback = cart.some(item => item.isFallback);
+        if (hasFallback) {
+            if (!confirm('⚠️ One or more items in your cart are using FALLBACK batches (no real inventory batch exists).\n\nThis means the sale will be recorded but stock will NOT be deducted from inventory.\n\nContinue?')) {
+                return;
+            }
         }
         
         pendingSaleCallback = {
@@ -1049,6 +1144,17 @@
     window.addEventListener('online', function() {
         loadProducts();
         loadLicenseStatus();
+        // Check for pending sales
+        const pendingSales = localStorage.getItem('pending_sales');
+        if (pendingSales) {
+            console.log('📤 Found pending sales to sync');
+            document.getElementById('receiptPreview').innerHTML = `
+                <div class="bg-blue-100 border border-blue-400 text-blue-700 p-3 rounded">
+                    <strong>🔄 Syncing pending sales...</strong><br>
+                    You have pending offline sales. They will be synced automatically.
+                </div>
+            `;
+        }
     });
 
     // ---------- Initialization ----------
@@ -1057,6 +1163,12 @@
         loadLicenseStatus();
         if (typeof updatePendingBadge === 'function') updatePendingBadge();
         setDefaultDateTime();
+        
+        // Check for pending sales on load
+        const pendingSales = localStorage.getItem('pending_sales');
+        if (pendingSales) {
+            console.log('📤 Found pending sales on load');
+        }
     });
 </script>
 {% endblock %}

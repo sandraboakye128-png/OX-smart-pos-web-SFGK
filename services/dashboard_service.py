@@ -133,12 +133,13 @@ def get_today_profit(selected_date=None, start_datetime=None, end_datetime=None)
     return profit
 
 
-# ----------------- TOTAL PRODUCTS (ALL unique products, including stock 0) -----------------
+# ----------------- TOTAL PRODUCTS (ALL unique products, including stock 0 and without batches) -----------------
 def get_total_products():
     """
     Count ALL unique products (grouped by name + brand) 
-    including those with stock = 0.
+    including those with stock = 0 and those without any batches.
     Excludes permanently deleted products.
+    FIXED: Previously excluded products without batches, causing incorrect count.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -181,11 +182,12 @@ def get_total_batches():
     return count
 
 
-# ----------------- LOW STOCK PRODUCTS (including zero stock) -----------------
+# ----------------- LOW STOCK PRODUCTS (including zero stock and products without batches) -----------------
 def get_low_stock_products(threshold=10):
     """
     Return products with stock <= threshold (including 0).
-    Includes products that have at least one batch (active or depleted).
+    FIXED: Now includes ALL products with low stock, even those without batches.
+    Previously required products to have at least one batch, which excluded some products.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -194,10 +196,6 @@ def get_low_stock_products(threshold=10):
         FROM products p
         WHERE p.stock <= %s
         AND p.stock >= 0
-        AND EXISTS (
-            SELECT 1 FROM purchase_batches pb 
-            WHERE pb.product_id = p.id
-        )
         AND NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
             WHERE dp.product_id = p.id 
@@ -315,3 +313,113 @@ def get_sales_history(selected_date=None, start_datetime=None, end_datetime=None
     rows = cursor.fetchall()
     conn.close()
     return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+
+# ----------------- DASHBOARD SUMMARY (Combines all data for the dashboard) -----------------
+def get_dashboard_summary(start_datetime=None, end_datetime=None):
+    """
+    Get all dashboard summary data in one call.
+    Returns sales, profit, total_products, total_batches, low_stock_count, and low_stock_products.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get sales and profit
+    if start_datetime and end_datetime:
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0) as total_sales,
+                COALESCE(SUM(s.profit), 0) as total_profit
+            FROM sales s
+            WHERE s.date BETWEEN %s AND %s
+            AND s.reversed = 0
+            AND EXISTS (
+                SELECT 1 FROM sales_items si
+                JOIN products p ON p.id = si.product_id
+                WHERE si.sale_id = s.id
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+            )
+        """, (start_datetime, end_datetime))
+    else:
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(s.total), 0) as total_sales,
+                COALESCE(SUM(s.profit), 0) as total_profit
+            FROM sales s
+            WHERE s.date::date = CURRENT_DATE
+            AND s.reversed = 0
+            AND EXISTS (
+                SELECT 1 FROM sales_items si
+                JOIN products p ON p.id = si.product_id
+                WHERE si.sale_id = s.id
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+            )
+        """)
+    
+    sales_data = cursor.fetchone()
+    total_sales = sales_data[0] or 0
+    total_profit = sales_data[1] or 0
+    
+    # Get total products (ALL products, including those without batches)
+    cursor.execute("""
+        SELECT COUNT(DISTINCT CONCAT(p.name, '|', p.brand)) as unique_products
+        FROM products p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM deleted_products dp 
+            WHERE dp.product_id = p.id 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+            AND dp.source = 'product'
+        )
+    """)
+    total_products = cursor.fetchone()[0] or 0
+    
+    # Get total batches
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM purchase_batches pb
+        JOIN products p ON p.id = pb.product_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM deleted_products dp 
+            WHERE dp.product_id = p.id 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+            AND dp.source = 'product'
+        )
+    """)
+    total_batches = cursor.fetchone()[0] or 0
+    
+    # Get low stock products (ALL products with stock <= 10, including those without batches)
+    cursor.execute("""
+        SELECT p.name, p.brand, p.category, p.stock
+        FROM products p
+        WHERE p.stock <= 10
+        AND p.stock >= 0
+        AND NOT EXISTS (
+            SELECT 1 FROM deleted_products dp 
+            WHERE dp.product_id = p.id 
+            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+            AND dp.source = 'product'
+        )
+        ORDER BY p.stock ASC
+    """)
+    low_stock_products = cursor.fetchall()
+    
+    conn.close()
+    
+    return {
+        'sales': total_sales,
+        'profit': total_profit,
+        'total_products': total_products,
+        'total_batches': total_batches,
+        'low_stock_count': len(low_stock_products),
+        'low_stock_products': low_stock_products
+    }
