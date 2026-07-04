@@ -139,12 +139,12 @@ def get_total_products():
     Count ALL unique products (grouped by name + brand) 
     including those with stock = 0 and those without any batches.
     Excludes permanently deleted products.
-    FIXED: Previously excluded products without batches, causing incorrect count.
+    FIXED: Uses COUNT(*) instead of COUNT(DISTINCT CONCAT) to get accurate product count.
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT COUNT(DISTINCT CONCAT(p.name, '|', p.brand)) as unique_products
+        SELECT COUNT(*) as total_products
         FROM products p
         WHERE NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
@@ -153,7 +153,7 @@ def get_total_products():
             AND dp.source = 'product'
         )
     """)
-    total = cursor.fetchone()[0]
+    total = cursor.fetchone()[0] or 0
     conn.close()
     return total
 
@@ -177,7 +177,7 @@ def get_total_batches():
             AND dp.source = 'product'
         )
     """)
-    count = cursor.fetchone()[0]
+    count = cursor.fetchone()[0] or 0
     conn.close()
     return count
 
@@ -187,7 +187,6 @@ def get_low_stock_products(threshold=10):
     """
     Return products with stock <= threshold (including 0).
     FIXED: Now includes ALL products with low stock, even those without batches.
-    Previously required products to have at least one batch, which excluded some products.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -203,6 +202,7 @@ def get_low_stock_products(threshold=10):
             AND dp.source = 'product'
         )
         ORDER BY p.stock ASC
+        LIMIT 1000
     """, (threshold,))
     products = cursor.fetchall()
     conn.close()
@@ -320,6 +320,7 @@ def get_dashboard_summary(start_datetime=None, end_datetime=None):
     """
     Get all dashboard summary data in one call.
     Returns sales, profit, total_products, total_batches, low_stock_count, and low_stock_products.
+    FIXED: Uses COUNT(*) for total_products instead of COUNT(DISTINCT CONCAT)
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -371,8 +372,9 @@ def get_dashboard_summary(start_datetime=None, end_datetime=None):
     total_profit = sales_data[1] or 0
     
     # Get total products (ALL products, including those without batches)
+    # FIXED: Use COUNT(*) for accurate product count
     cursor.execute("""
-        SELECT COUNT(DISTINCT CONCAT(p.name, '|', p.brand)) as unique_products
+        SELECT COUNT(*) as total_products
         FROM products p
         WHERE NOT EXISTS (
             SELECT 1 FROM deleted_products dp 
@@ -410,6 +412,7 @@ def get_dashboard_summary(start_datetime=None, end_datetime=None):
             AND dp.source = 'product'
         )
         ORDER BY p.stock ASC
+        LIMIT 1000
     """)
     low_stock_products = cursor.fetchall()
     

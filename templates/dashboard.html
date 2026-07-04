@@ -158,24 +158,30 @@
     updateClock();
 
     // Get formatted datetime range for API
+    // FIXED: Now handles date-only selections with full day range
     function getDateTimeRange() {
         let startDateTime = null;
         let endDateTime = null;
         
         if (startDate) {
-            startDateTime = startDate;
             if (startTime) {
                 startDateTime = `${startDate} ${startTime}:00`;
+            } else {
+                // When only date is selected, use start of day (00:00:00)
+                startDateTime = `${startDate} 00:00:00`;
             }
         }
         
         if (endDate) {
-            endDateTime = endDate;
             if (endTime) {
                 endDateTime = `${endDate} ${endTime}:00`;
+            } else {
+                // When only date is selected, use end of day (23:59:59)
+                endDateTime = `${endDate} 23:59:59`;
             }
         }
         
+        console.log('📅 Date range:', { start_datetime: startDateTime, end_datetime: endDateTime });
         return { start_datetime: startDateTime, end_datetime: endDateTime };
     }
 
@@ -266,23 +272,29 @@
         document.getElementById('calendarBody').innerHTML = html;
 
         // Attach click events to day cells
+        // FIXED: Now properly handles date selection and reloads dashboard
         document.querySelectorAll('#calendarBody td[data-date]').forEach(td => {
             td.addEventListener('click', function() {
                 const newDate = this.dataset.date;
+                console.log('📅 Calendar date selected:', newDate);
+                
                 // Set main filter to this single day
                 startDate = newDate;
                 endDate = newDate;
                 startTime = '';
                 endTime = '';
                 selectedDate = newDate;
+                
                 // Update the date inputs to reflect the selection
                 document.getElementById('startDate').value = newDate;
                 document.getElementById('endDate').value = newDate;
                 document.getElementById('startTime').value = '';
                 document.getElementById('endTime').value = '';
+                
                 // Reload dashboard with this date
                 loadDashboard();
-                // Re-render calendar to highlight
+                
+                // Re-render calendar to highlight the selected date
                 renderCalendar(calendarYear, calendarMonth);
             });
         });
@@ -575,26 +587,6 @@
         loadDashboard();
     }
 
-    // Refresh to current date (today)
-    function refreshToCurrent() {
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('startDate').value = today;
-        document.getElementById('endDate').value = today;
-        document.getElementById('startTime').value = '00:00';
-        document.getElementById('endTime').value = '23:59';
-        startDate = today;
-        endDate = today;
-        startTime = '00:00';
-        endTime = '23:59';
-        selectedDate = today;
-        // Update calendar
-        const now = new Date();
-        calendarYear = now.getFullYear();
-        calendarMonth = now.getMonth();
-        renderCalendar(calendarYear, calendarMonth);
-        loadDashboard();
-    }
-
     // Event listeners
     document.getElementById('applyFilterBtn').addEventListener('click', applyFilter);
 
@@ -614,7 +606,7 @@
         renderLowStockList(filtered);
     });
 
-    // Set default date range to today
+    // Set default date range to today (full day)
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('startDate').value = today;
     document.getElementById('endDate').value = today;
@@ -625,6 +617,7 @@
     startTime = '00:00';
     endTime = '23:59';
     selectedDate = today;
+    
     // Initialize calendar to current month
     const now = new Date();
     calendarYear = now.getFullYear();

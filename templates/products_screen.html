@@ -38,6 +38,19 @@
             <h3 class="text-xl font-bold" id="modalTitle">Batches</h3>
             <button onclick="closeBatchModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
         </div>
+        <!-- Batch Search Bar -->
+        <div class="p-4 border-b bg-gray-50">
+            <div class="flex items-center gap-3">
+                <div class="flex-1">
+                    <input type="text" id="batchSearchInput" placeholder="🔍 Search batch by ID..." 
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="batchCountDisplay" class="text-sm text-gray-600 font-medium"></span>
+                    <button onclick="clearBatchSearch()" class="text-gray-400 hover:text-gray-600 text-sm hidden" id="clearBatchSearchBtn">✕ Clear</button>
+                </div>
+            </div>
+        </div>
         <div id="batchList" class="p-4 space-y-3"></div>
         <div class="sticky bottom-0 bg-white p-4 border-t flex justify-between">
             <div>
@@ -89,6 +102,7 @@
     let currentProductIdForDelete = null;
     let currentBatchSelections = [];
     let currentBatchModalProductName = "";
+    let currentBatches = []; // Store all batches for filtering
 
     // Helper: escape HTML
     function escapeHtml(str) {
@@ -200,19 +214,37 @@
         }).join('');
     }
 
-    // ----- Batch Management (updated to show total batches in modal title) -----
-    let currentBatches = [];
+    // ----- Batch Management with Search -----
     function viewBatches(productId, productName, batches) {
         currentBatches = batches;
         currentBatchModalProductName = productName;
         const totalBatches = batches.length;
-        document.getElementById('modalTitle').innerHTML = `Batches for ${productName} (${totalBatches} batch${totalBatches !== 1 ? 'es' : ''})`;
+        document.getElementById('modalTitle').innerHTML = `Batches for ${productName}`;
+        
+        // Reset search
+        document.getElementById('batchSearchInput').value = '';
+        document.getElementById('clearBatchSearchBtn').classList.add('hidden');
+        
+        // Render all batches
+        renderBatchList(batches);
+        updateBatchCount(batches.length, totalBatches);
+        
+        document.getElementById('batchModal').classList.remove('hidden');
+    }
+
+    function renderBatchList(batches) {
         const container = document.getElementById('batchList');
         container.innerHTML = '';
         currentBatchSelections = [];
+        
+        if (!batches || batches.length === 0) {
+            container.innerHTML = '<div class="text-center text-gray-400 py-8">No batches match your search.</div>';
+            return;
+        }
+        
         batches.forEach((batch, idx) => {
             const div = document.createElement('div');
-            div.className = 'border rounded-lg p-3 flex items-start space-x-3';
+            div.className = 'border rounded-lg p-3 flex items-start space-x-3 hover:bg-gray-50';
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.className = 'mt-1';
@@ -222,20 +254,70 @@
             const info = document.createElement('div');
             info.className = 'flex-1 text-sm';
             info.innerHTML = `
-                <strong>Batch #${batch.batch_id}</strong><br>
-                Qty: ${batch.quantity} | Remaining: ${batch.remaining_quantity}<br>
-                Cost: ₵${batch.cost_price.toFixed(2)} | Selling: ₵${batch.selling_price.toFixed(2)} | Discount: ₵${batch.discount.toFixed(2)}<br>
-                Date: ${new Date(batch.date).toLocaleString()}
+                <div class="flex justify-between items-start">
+                    <div>
+                        <strong class="text-indigo-600">Batch #${batch.batch_id}</strong>
+                        <span class="text-xs text-gray-400 ml-2">${new Date(batch.date).toLocaleString()}</span>
+                    </div>
+                    <span class="text-xs font-semibold ${batch.remaining_quantity > 0 ? 'text-green-600' : 'text-red-600'}">
+                        ${batch.remaining_quantity > 0 ? '● In Stock' : '● Depleted'}
+                    </span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-1 text-xs">
+                    <span>Qty: <strong>${batch.quantity}</strong></span>
+                    <span>Remaining: <strong>${batch.remaining_quantity}</strong></span>
+                    <span>Cost: ₵${batch.cost_price.toFixed(2)}</span>
+                    <span>Selling: ₵${batch.selling_price.toFixed(2)}</span>
+                </div>
+                ${batch.discount > 0 ? `<div class="text-xs text-gray-500 mt-1">Discount: ₵${batch.discount.toFixed(2)}</div>` : ''}
             `;
             div.appendChild(info);
             container.appendChild(div);
             currentBatchSelections.push({ cb, batchId: batch.batch_id, batch });
         });
-        document.getElementById('batchModal').classList.remove('hidden');
+    }
+
+    function updateBatchCount(shown, total) {
+        const countDisplay = document.getElementById('batchCountDisplay');
+        if (shown === total) {
+            countDisplay.textContent = `${total} batch${total !== 1 ? 'es' : ''}`;
+        } else {
+            countDisplay.textContent = `${shown} of ${total} batch${total !== 1 ? 'es' : ''}`;
+        }
+    }
+
+    // Batch search functionality
+    document.getElementById('batchSearchInput').addEventListener('input', function() {
+        const keyword = this.value.trim().toLowerCase();
+        const clearBtn = document.getElementById('clearBatchSearchBtn');
+        
+        if (keyword) {
+            clearBtn.classList.remove('hidden');
+            // Filter batches by batch_id
+            const filtered = currentBatches.filter(batch => 
+                batch.batch_id.toString().includes(keyword)
+            );
+            renderBatchList(filtered);
+            updateBatchCount(filtered.length, currentBatches.length);
+        } else {
+            clearBtn.classList.add('hidden');
+            renderBatchList(currentBatches);
+            updateBatchCount(currentBatches.length, currentBatches.length);
+        }
+    });
+
+    function clearBatchSearch() {
+        document.getElementById('batchSearchInput').value = '';
+        document.getElementById('clearBatchSearchBtn').classList.add('hidden');
+        renderBatchList(currentBatches);
+        updateBatchCount(currentBatches.length, currentBatches.length);
     }
 
     function closeBatchModal() {
         document.getElementById('batchModal').classList.add('hidden');
+        // Reset search
+        document.getElementById('batchSearchInput').value = '';
+        document.getElementById('clearBatchSearchBtn').classList.add('hidden');
     }
 
     function selectAllBatches() {
