@@ -904,7 +904,6 @@ def api_delete_batch(batch_id):
         return jsonify({'success': False, 'error': str(e)}), 400
 
 # ===================== SALES API =====================
-# ===================== SALES API =====================
 @app.route('/api/sales/products', methods=['GET'])
 @login_required
 def api_sales_products():
@@ -918,7 +917,7 @@ def api_sales_products():
     if exclude_category:
         products = [p for p in products if p.get('category') != exclude_category]
     
-    # ✅ GROUP products by name + brand to show one entry per product
+    # ✅ GROUP products by name + brand, PRESERVING batches
     grouped = {}
     for p in products:
         key = (p['name'], p['brand'])
@@ -936,12 +935,33 @@ def api_sales_products():
             }
         # Sum stock across all batches
         grouped[key]['stock'] += p.get('stock', 0)
-        # Keep track of batches for selection
+        
+        # ✅ PRESERVE BATCHES from each product entry
         if 'batches' in p and p['batches']:
-            grouped[key]['batches'].extend(p['batches'])
+            existing_batch_ids = {b.get('batch_id') for b in grouped[key]['batches']}
+            for batch in p['batches']:
+                if batch.get('batch_id') not in existing_batch_ids:
+                    grouped[key]['batches'].append(batch)
+        # ✅ Handle case where p itself is a batch
+        elif p.get('batch_id'):
+            grouped[key]['batches'].append({
+                'batch_id': p.get('batch_id'),
+                'remaining_quantity': p.get('stock', 0),
+                'selling_price': p.get('selling_price', 0),
+                'cost_price': p.get('cost_price', 0),
+                'batch_quantity': p.get('batch_quantity', p.get('stock', 0))
+            })
     
     # Convert back to list
     result = list(grouped.values())
+    
+    # ✅ Log for debugging
+    for r in result:
+        if r.get('batches') and len(r['batches']) > 0:
+            print(f"✅ {r['name']}: {len(r['batches'])} batches, stock: {r['stock']}")
+        elif r['stock'] > 0:
+            print(f"⚠️ {r['name']}: STOCK {r['stock']} but 0 batches!")
+    
     return jsonify(result)
 
 @app.route('/api/sales/batches/<int:product_id>', methods=['GET'])
