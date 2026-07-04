@@ -199,7 +199,7 @@ app.secret_key = os.getenv("SECRET_KEY", "temporary-dev-key")
 import json
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LICENSE_FILE = os.path.join(BASE_DIR, "license.json")
-TRIAL_DAYS = 30
+TRIAL_DAYS = 3
 MASTER_KEY = "OXSMART-1234-KEY"
 
 # ===================== IMPORT JOB TRACKING =====================
