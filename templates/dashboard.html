@@ -148,6 +148,22 @@
         });
     }
 
+    // ----- Navigate to product page and open batches -----
+    function navigateToProduct(productName, category) {
+        // Determine which product page to go to based on category
+        let page = '/products';
+        if (category && category.toLowerCase() === 'screen') {
+            page = '/products/screens';
+        }
+        
+        // Store the product name in sessionStorage so the product page can auto-open batches
+        sessionStorage.setItem('autoOpenProduct', productName);
+        sessionStorage.setItem('autoOpenBatches', 'true');
+        
+        // Navigate to the product page
+        window.location.href = page;
+    }
+
     // Update clock every second
     function updateClock() {
         const now = new Date();
@@ -218,7 +234,7 @@
         } catch (e) { return null; }
     }
 
-    // ----- Render low stock list (with search support and batch numbers) -----
+    // ----- Render low stock list (with click navigation) -----
     function renderLowStockList(products) {
         const container = document.getElementById('lowStockList');
         container.innerHTML = '';
@@ -228,14 +244,13 @@
                 let name, brand, category, stock, batchIds;
                 
                 if (Array.isArray(item)) {
-                    // Old format: [name, brand, category, stock]
                     name = item[0] || '';
                     brand = item[1] || '';
                     category = item[2] || '';
                     stock = item[3] || 0;
+                    // item[4] is the batch_ids array
                     batchIds = item[4] || [];
                 } else {
-                    // New format: { name, brand, category, stock, batch_ids }
                     name = item.name || '';
                     brand = item.brand || '';
                     category = item.category || '';
@@ -243,30 +258,70 @@
                     batchIds = item.batch_ids || [];
                 }
                 
-                // Format batch numbers for display
+                // Debug: log what we're getting
+                console.log(`📦 ${name}: stock=${stock}, batchIds=`, batchIds);
+                
+                // Format batch numbers for display with status
                 let batchDisplay = '';
+                let statusClass = '';
+                let categoryBadge = '';
+                
+                // Add category badge
+                if (category && category.toLowerCase() === 'screen') {
+                    categoryBadge = `<span class="bg-purple-100 text-purple-800 text-xs px-1.5 py-0.5 rounded ml-1">Screen</span>`;
+                } else if (category && category.toLowerCase() === 'accessory') {
+                    categoryBadge = `<span class="bg-green-100 text-green-800 text-xs px-1.5 py-0.5 rounded ml-1">Accessory</span>`;
+                }
+                
                 if (batchIds && batchIds.length > 0) {
+                    // Product has batches
                     const batchList = batchIds.slice(0, 5).join(', #');
                     const more = batchIds.length > 5 ? ` +${batchIds.length - 5} more` : '';
                     batchDisplay = ` | Batch${batchIds.length > 1 ? 'es' : ''}: #${batchList}${more}`;
+                    statusClass = 'text-green-600';
+                } else if (stock === 0) {
+                    batchDisplay = ' | ⚠️ DEPLETED - No active batches';
+                    statusClass = 'text-orange-500';
+                } else if (stock > 0) {
+                    batchDisplay = ' | ⚠️ WARNING: Stock without batches!';
+                    statusClass = 'text-red-500';
                 } else {
                     batchDisplay = ' | No batches';
+                    statusClass = 'text-gray-400';
                 }
                 
                 const div = document.createElement('div');
-                div.className = 'text-red-600 border-b pb-1 flex justify-between items-center';
+                const stockClass = stock === 0 ? 'text-red-600 font-bold' : 'text-red-600';
+                
+                // Make the entire div clickable
+                div.className = 'border-b pb-1 flex justify-between items-center hover:bg-blue-50 p-2 rounded transition-colors cursor-pointer';
+                div.style.cursor = 'pointer';
+                div.title = `Click to view ${name} in products page`;
+                
+                // Store product info for click handler
+                div.dataset.productName = name;
+                div.dataset.productCategory = category || 'Accessory';
+                
+                // Click handler to navigate to product page
+                div.addEventListener('click', function(e) {
+                    const productName = this.dataset.productName;
+                    const productCategory = this.dataset.productCategory || 'Accessory';
+                    navigateToProduct(productName, productCategory);
+                });
+                
                 div.innerHTML = `
                     <span>
-                        <strong>${escapeHtml(name)}</strong> 
-                        (${escapeHtml(brand)} | ${escapeHtml(category)})
-                        <span class="text-xs text-gray-500 block">${batchDisplay}</span>
+                        <strong class="text-indigo-700">${escapeHtml(name)}</strong>
+                        <span class="text-gray-600"> (${escapeHtml(brand)} | ${escapeHtml(category)})</span>
+                        ${categoryBadge}
+                        <span class="text-xs ${statusClass} block">${batchDisplay}</span>
                     </span>
-                    <span class="font-bold">${stock} left</span>
+                    <span class="${stockClass}">${stock} left</span>
                 `;
                 container.appendChild(div);
             });
         } else {
-            container.innerHTML = '<div class="text-gray-400">No low stock items.</div>';
+            container.innerHTML = '<div class="text-gray-400 text-center py-4">✅ No low stock items found.</div>';
         }
     }
 
@@ -406,7 +461,7 @@
             if (lowStockProducts.length > 0) {
                 renderLowStockList(lowStockProducts);
             } else {
-                document.getElementById('lowStockList').innerHTML = '<div class="text-gray-400">No low stock items.</div>';
+                document.getElementById('lowStockList').innerHTML = '<div class="text-gray-400 text-center py-4">✅ No low stock items found.</div>';
             }
 
             // Low stock alert
@@ -415,7 +470,9 @@
                     const name = Array.isArray(item) ? item[0] : item.name;
                     const brand = Array.isArray(item) ? item[1] : item.brand;
                     const stock = Array.isArray(item) ? item[3] : item.stock;
-                    return `• ${name} (${brand}) - ${stock} left`;
+                    const batchIds = Array.isArray(item) ? item[4] : (item.batch_ids || []);
+                    const batchInfo = batchIds && batchIds.length > 0 ? ` (Batch: #${batchIds.slice(0,3).join(', #')}${batchIds.length > 3 ? '...' : ''})` : ' (No batches)';
+                    return `• ${name} (${brand}) - ${stock} left${batchInfo}`;
                 }).join('\n');
                 if (lowStockProducts.length > 10) {
                     productList += `\n\n... and ${lowStockProducts.length - 10} more items`;
@@ -448,19 +505,19 @@
             if (topProducts.length) {
                 topProducts.forEach((p, index) => {
                     const div = document.createElement('div');
-                    div.className = 'border-b pb-1 flex justify-between items-center';
+                    div.className = 'border-b pb-1 flex justify-between items-center hover:bg-gray-50 p-1 rounded transition-colors';
                     let medal = '';
                     if (index === 0) medal = '🥇 ';
                     else if (index === 1) medal = '🥈 ';
                     else if (index === 2) medal = '🥉 ';
                     div.innerHTML = `
-                        <span>${medal}${escapeHtml(p.name)} (${escapeHtml(p.brand)} | ${escapeHtml(p.category)})</span>
+                        <span>${medal}<strong class="text-indigo-700">${escapeHtml(p.name)}</strong> <span class="text-gray-600">(${escapeHtml(p.brand)} | ${escapeHtml(p.category)})</span></span>
                         <span class="font-bold text-indigo-600">${p.qty} sold</span>
                     `;
                     topContainer.appendChild(div);
                 });
             } else {
-                topContainer.innerHTML = '<div class="text-gray-400">No sales data for this period.</div>';
+                topContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📊 No sales data for this period.</div>';
             }
 
             // Pie chart
@@ -541,10 +598,10 @@
             if (history && history.length > 0) {
                 history.forEach(item => {
                     const div = document.createElement('div');
-                    div.className = 'border-b pb-2 mb-1';
+                    div.className = 'border-b pb-2 mb-1 hover:bg-gray-50 p-1 rounded transition-colors';
                     div.innerHTML = `
                         <div class="flex justify-between items-center">
-                            <span class="font-medium">${item.date}</span>
+                            <span class="font-medium text-gray-700">${item.date}</span>
                             <span class="font-bold text-green-600">${formatMoney(item.total_sales)}</span>
                         </div>
                         <div class="text-sm text-gray-500 flex justify-between">
@@ -556,8 +613,8 @@
                 });
                 if (historyError) {
                     const note = document.createElement('div');
-                    note.className = 'text-xs text-gray-400 mt-2';
-                    note.innerText = '⚠️ Data may be outdated (offline)';
+                    note.className = 'text-xs text-amber-500 mt-2 text-center';
+                    note.innerText = '⚠️ Data may be outdated (offline mode)';
                     historyContainer.appendChild(note);
                 }
             } else {
@@ -565,7 +622,7 @@
             }
         } catch (err) {
             console.error('Error loading sales history:', err);
-            document.getElementById('salesHistoryList').innerHTML = '<div class="text-red-400 text-center py-4">Error loading sales history.</div>';
+            document.getElementById('salesHistoryList').innerHTML = '<div class="text-red-400 text-center py-4">❌ Error loading sales history.</div>';
         }
     }
 

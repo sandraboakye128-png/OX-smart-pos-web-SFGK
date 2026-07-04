@@ -9,7 +9,10 @@
 
     <!-- ADD / EDIT FORM -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <h2 class="text-xl font-bold mb-4" id="formTitle">➕ Add Purchase</h2>
+        <div class="flex items-center gap-2 mb-4">
+            <h2 class="text-xl font-bold" id="formTitle">➕ Add Accessory Purchase</h2>
+            <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
             <div>
                 <label class="block text-sm font-medium text-gray-700">Product Name</label>
@@ -43,7 +46,7 @@
             </div>
         </div>
         <div class="mt-4 flex gap-3">
-            <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Purchase</button>
+            <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Accessory Purchase</button>
             <button id="cancelBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg hidden">Cancel Edit</button>
         </div>
     </div>
@@ -136,6 +139,34 @@
         }
     }
 
+    // ---------- Check for batch edit from URL ----------
+    function checkForBatchEdit() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const batchId = urlParams.get('edit_batch');
+        if (batchId) {
+            // Wait for purchases to load
+            setTimeout(function() {
+                const purchase = currentPurchases.find(p => p.batch_id === parseInt(batchId));
+                if (purchase) {
+                    editPurchase(parseInt(batchId));
+                    // Scroll to the form
+                    const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
+                    if (form) {
+                        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                    // Highlight the form
+                    form.style.border = '3px solid #f59e0b';
+                    form.style.transition = 'border-color 0.5s';
+                    setTimeout(() => {
+                        form.style.border = 'none';
+                    }, 3000);
+                } else {
+                    alert('Batch #' + batchId + ' not found. It may have been deleted.');
+                }
+            }, 1000);
+        }
+    }
+
     // ---------- Load purchases (EXCLUDE screens) ----------
     async function loadPurchases() {
         updateOfflineBanner();
@@ -160,6 +191,9 @@
 
         currentPurchases = purchases;
         renderList(currentPurchases);
+        
+        // Check for batch edit after loading
+        checkForBatchEdit();
     }
 
     // ---------- Render list ----------
@@ -224,7 +258,7 @@
         };
     }
 
-    // ---------- Submit / Update (unchanged) ----------
+    // ---------- Submit / Update ----------
     async function submitPurchase() {
         const payload = {
             name: document.getElementById('name').value.trim(),
@@ -258,7 +292,7 @@
             if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
             const data = await res.json();
             if (data.success) {
-                alert(editMode ? 'Purchase updated!' : 'Purchase added!');
+                alert(editMode ? 'Accessory purchase updated!' : 'Accessory purchase added!');
                 resetForm();
                 loadPurchases();
             } else {
@@ -287,9 +321,20 @@
         document.getElementById('selling_price').value = purchase.selling_price;
         editMode = true;
         editBatchId = batchId;
-        document.getElementById('formTitle').innerText = '✏️ Update Purchase';
-        document.getElementById('submitBtn').innerHTML = '✏️ Update Purchase';
+        document.getElementById('formTitle').innerHTML = '✏️ Update Accessory Purchase <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>';
+        document.getElementById('submitBtn').innerHTML = '✏️ Update Accessory Purchase';
         document.getElementById('cancelBtn').classList.remove('hidden');
+        
+        // Scroll to form
+        const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
+        if (form) {
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            form.style.border = '3px solid #f59e0b';
+            form.style.transition = 'border-color 0.5s';
+            setTimeout(() => {
+                form.style.border = 'none';
+            }, 3000);
+        }
     }
 
     function resetForm() {
@@ -302,9 +347,15 @@
         document.getElementById('selling_price').value = '';
         editMode = false;
         editBatchId = null;
-        document.getElementById('formTitle').innerText = '➕ Add Purchase';
-        document.getElementById('submitBtn').innerHTML = '➕ Add Purchase';
+        document.getElementById('formTitle').innerHTML = '➕ Add Accessory Purchase <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>';
+        document.getElementById('submitBtn').innerHTML = '➕ Add Accessory Purchase';
         document.getElementById('cancelBtn').classList.add('hidden');
+        
+        // Remove highlight
+        const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
+        if (form) {
+            form.style.border = 'none';
+        }
     }
 
     // ---------- Search & Filter (EXCLUDE screens) ----------
@@ -433,7 +484,7 @@
     window.selectNameSuggestion = function(name, brand, category) {
         document.getElementById('name').value = name;
         document.getElementById('brand').value = brand;
-        document.getElementById('category').value = category;
+        document.getElementById('category').value = category || 'Accessory';
         document.getElementById('nameSuggestions').classList.add('hidden');
     };
 

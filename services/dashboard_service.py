@@ -182,12 +182,12 @@ def get_total_batches():
     return count
 
 
-# ----------------- LOW STOCK PRODUCTS (including zero stock, products without batches, AND batch IDs) -----------------
+# ----------------- LOW STOCK PRODUCTS (including zero stock, products without batches, AND ALL batch IDs) -----------------
 def get_low_stock_products(threshold=10):
     """
     Return products with stock <= threshold (including 0).
     FIXED: Now includes ALL products with low stock, even those without batches.
-    NEW: Includes batch IDs for each product.
+    NEW: Includes ALL batch IDs for each product (including depleted batches) so you can trace them.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -196,9 +196,15 @@ def get_low_stock_products(threshold=10):
                COALESCE(
                    (SELECT array_agg(pb.id ORDER BY pb.date ASC)
                     FROM purchase_batches pb
+                    WHERE pb.product_id = p.id),
+                   '{}'::integer[]
+               ) as all_batch_ids,
+               COALESCE(
+                   (SELECT array_agg(pb.id ORDER BY pb.date ASC)
+                    FROM purchase_batches pb
                     WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
                    '{}'::integer[]
-               ) as batch_ids
+               ) as active_batch_ids
         FROM products p
         WHERE p.stock <= %s
         AND p.stock >= 0
@@ -215,7 +221,16 @@ def get_low_stock_products(threshold=10):
     conn.close()
     
     # Return as list of tuples with batch_ids as the 5th element
-    return products
+    # Use active_batch_ids (remaining_quantity > 0) as the primary batch list
+    # If no active batches, return all_batch_ids to show history
+    result = []
+    for p in products:
+        name, brand, category, stock, all_batch_ids, active_batch_ids = p
+        # Use active batches if available, otherwise show all batches
+        batch_ids = active_batch_ids if active_batch_ids else all_batch_ids
+        result.append((name, brand, category, stock, batch_ids))
+    
+    return result
 
 
 # ----------------- WEEKLY SALES (NET) -----------------
@@ -330,7 +345,7 @@ def get_dashboard_summary(start_datetime=None, end_datetime=None):
     Get all dashboard summary data in one call.
     Returns sales, profit, total_products, total_batches, low_stock_count, and low_stock_products.
     FIXED: Uses COUNT(*) for total_products instead of COUNT(DISTINCT CONCAT)
-    NEW: Includes batch IDs for low stock products.
+    NEW: Includes ALL batch IDs for low stock products (including depleted batches) so you can trace them.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -408,15 +423,21 @@ def get_dashboard_summary(start_datetime=None, end_datetime=None):
     """)
     total_batches = cursor.fetchone()[0] or 0
     
-    # Get low stock products with batch IDs
+    # Get low stock products with ALL batch IDs (including depleted batches)
     cursor.execute("""
         SELECT p.name, p.brand, p.category, p.stock,
                COALESCE(
                    (SELECT array_agg(pb.id ORDER BY pb.date ASC)
                     FROM purchase_batches pb
+                    WHERE pb.product_id = p.id),
+                   '{}'::integer[]
+               ) as all_batch_ids,
+               COALESCE(
+                   (SELECT array_agg(pb.id ORDER BY pb.date ASC)
+                    FROM purchase_batches pb
                     WHERE pb.product_id = p.id AND pb.remaining_quantity > 0),
                    '{}'::integer[]
-               ) as batch_ids
+               ) as active_batch_ids
         FROM products p
         WHERE p.stock <= 10
         AND p.stock >= 0
@@ -433,13 +454,19 @@ def get_dashboard_summary(start_datetime=None, end_datetime=None):
     
     conn.close()
     
-    # Return as list of tuples with batch_ids as the 5th element
-    # This maintains backward compatibility with the dashboard HTML
+    # Process rows to use active batches if available, otherwise all batches
+    processed_rows = []
+    for row in low_stock_rows:
+        name, brand, category, stock, all_batch_ids, active_batch_ids = row
+        # Use active batches if available, otherwise show all batches
+        batch_ids = active_batch_ids if active_batch_ids else all_batch_ids
+        processed_rows.append((name, brand, category, stock, batch_ids))
+    
     return {
         'sales': total_sales,
         'profit': total_profit,
         'total_products': total_products,
         'total_batches': total_batches,
-        'low_stock_count': len(low_stock_rows),
-        'low_stock_products': low_stock_rows  # Each row: (name, brand, category, stock, batch_ids)
+        'low_stock_count': len(processed_rows),
+        'low_stock_products': processed_rows  # Each row: (name, brand, category, stock, batch_ids)
     }

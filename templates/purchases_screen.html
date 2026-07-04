@@ -9,7 +9,6 @@
 
     <!-- ADD / EDIT FORM -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <!-- Screen indicator -->
         <div class="flex items-center gap-2 mb-4">
             <h2 class="text-xl font-bold" id="formTitle">➕ Add Screen Purchase</h2>
             <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
@@ -96,7 +95,8 @@
     let currentPurchases = [];
     let editMode = false;
     let editBatchId = null;
-    const CACHE_KEY = 'cached_purchases_screen';  // separate cache
+    // Separate cache key for screens
+    const CACHE_KEY = 'cached_purchases_screen';
 
     // ---------- Helper functions ----------
     function escapeHtml(str) {
@@ -139,6 +139,34 @@
         }
     }
 
+    // ---------- Check for batch edit from URL ----------
+    function checkForBatchEdit() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const batchId = urlParams.get('edit_batch');
+        if (batchId) {
+            // Wait for purchases to load
+            setTimeout(function() {
+                const purchase = currentPurchases.find(p => p.batch_id === parseInt(batchId));
+                if (purchase) {
+                    editPurchase(parseInt(batchId));
+                    // Scroll to the form
+                    const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
+                    if (form) {
+                        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                    // Highlight the form
+                    form.style.border = '3px solid #f59e0b';
+                    form.style.transition = 'border-color 0.5s';
+                    setTimeout(() => {
+                        form.style.border = 'none';
+                    }, 3000);
+                } else {
+                    alert('Batch #' + batchId + ' not found. It may have been deleted.');
+                }
+            }, 1000);
+        }
+    }
+
     // ---------- Load purchases (filtered to screens) ----------
     async function loadPurchases() {
         updateOfflineBanner();
@@ -163,6 +191,9 @@
 
         currentPurchases = purchases;
         renderList(currentPurchases);
+        
+        // Check for batch edit after loading
+        checkForBatchEdit();
     }
 
     // ---------- Render list ----------
@@ -227,7 +258,7 @@
         };
     }
 
-    // ---------- Submit / Update (unchanged – category already set) ----------
+    // ---------- Submit / Update ----------
     async function submitPurchase() {
         const payload = {
             name: document.getElementById('name').value.trim(),
@@ -277,7 +308,7 @@
         }
     }
 
-    // ---------- Edit / Reset (unchanged) ----------
+    // ---------- Edit / Reset ----------
     function editPurchase(batchId) {
         const purchase = currentPurchases.find(p => p.batch_id === batchId);
         if (!purchase) return;
@@ -293,6 +324,17 @@
         document.getElementById('formTitle').innerHTML = '✏️ Update Screen Purchase <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>';
         document.getElementById('submitBtn').innerHTML = '✏️ Update Screen Purchase';
         document.getElementById('cancelBtn').classList.remove('hidden');
+        
+        // Scroll to form
+        const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
+        if (form) {
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            form.style.border = '3px solid #f59e0b';
+            form.style.transition = 'border-color 0.5s';
+            setTimeout(() => {
+                form.style.border = 'none';
+            }, 3000);
+        }
     }
 
     function resetForm() {
@@ -308,9 +350,15 @@
         document.getElementById('formTitle').innerHTML = '➕ Add Screen Purchase <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>';
         document.getElementById('submitBtn').innerHTML = '➕ Add Screen Purchase';
         document.getElementById('cancelBtn').classList.add('hidden');
+        
+        // Remove highlight
+        const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
+        if (form) {
+            form.style.border = 'none';
+        }
     }
 
-    // ---------- Search & Filter (with offline fallback, category filtered) ----------
+    // ---------- Search & Filter (filtered to screens) ----------
     async function filterPurchases() {
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
@@ -380,8 +428,8 @@
         }
     }
 
-    // ---------- Autocomplete (hide offline, with category filter) ----------
-    let nameTimeout;
+    // ---------- Autocomplete (hide offline, filter to screens) ----------
+    let nameTimeout, catTimeout;
 
     async function fetchNameSuggestions() {
         if (!navigator.onLine) {
@@ -407,11 +455,40 @@
         }
     }
 
+    async function fetchCategorySuggestions() {
+        if (!navigator.onLine) {
+            document.getElementById('categorySuggestions').classList.add('hidden');
+            return;
+        }
+        const q = document.getElementById('category').value.trim();
+        if (!q) { document.getElementById('categorySuggestions').classList.add('hidden'); return; }
+        try {
+            const res = await fetch(`/api/purchases/suggestions/category?q=${encodeURIComponent(q)}&category=Screen`);
+            if (!res.ok) throw new Error();
+            const suggestions = await res.json();
+            const box = document.getElementById('categorySuggestions');
+            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectCategorySuggestion('${escapeHtml(s.category)}')">${escapeHtml(s.category)}</div>`).join('');
+            box.classList.remove('hidden');
+            const rect = document.getElementById('category').getBoundingClientRect();
+            box.style.top = rect.bottom + window.scrollY + 'px';
+            box.style.left = rect.left + 'px';
+            box.style.width = rect.width + 'px';
+        } catch (err) {
+            document.getElementById('categorySuggestions').classList.add('hidden');
+        }
+    }
+
     window.selectNameSuggestion = function(name, brand, category) {
         document.getElementById('name').value = name;
         document.getElementById('brand').value = brand;
         document.getElementById('category').value = category || 'Screen';
         document.getElementById('nameSuggestions').classList.add('hidden');
+    };
+
+    window.selectCategorySuggestion = function(cat) {
+        document.getElementById('category').value = cat;
+        document.getElementById('categorySuggestions').classList.add('hidden');
     };
 
     // ---------- Event listeners ----------
@@ -421,8 +498,10 @@
     document.getElementById('pdfBtn').addEventListener('click', generatePDF);
     document.getElementById('searchInput').addEventListener('input', applySearch);
     document.getElementById('name').addEventListener('input', () => { clearTimeout(nameTimeout); nameTimeout = setTimeout(fetchNameSuggestions, 300); });
+    document.getElementById('category').addEventListener('input', () => { clearTimeout(catTimeout); catTimeout = setTimeout(fetchCategorySuggestions, 300); });
     document.addEventListener('click', function(e) {
         if (!e.target.closest('#name')) document.getElementById('nameSuggestions').classList.add('hidden');
+        if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
     });
 
     // ---------- On load ----------

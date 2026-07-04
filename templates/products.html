@@ -9,8 +9,11 @@
 
     <!-- Header -->
     <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <h2 class="text-2xl font-bold text-indigo-600 mb-4">📦 Product Manager</h2>
-        <p class="text-gray-600">Manage your accessory products and batches</p>
+        <div class="flex items-center gap-2">
+            <h2 class="text-2xl font-bold text-indigo-600 mb-0">📦 Product Manager</h2>
+            <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>
+        </div>
+        <p class="text-gray-600 mt-1">Manage your accessory products and batches</p>
     </div>
 
     <!-- Search Bar -->
@@ -112,6 +115,13 @@
         });
     }
 
+    // Helper: Navigate to purchase page with batch ID
+    function navigateToPurchase(batchId) {
+        // Open the purchase page in a new tab with the batch ID as a parameter
+        const url = `/purchases?edit_batch=${batchId}`;
+        window.open(url, '_blank');
+    }
+
     // Update offline banner
     function updateOfflineBanner() {
         const banner = document.getElementById('offlineBanner');
@@ -161,6 +171,35 @@
         currentProducts = productsData || [];
         document.getElementById('summary').innerHTML = `Total Accessory Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}${fromCache ? ' (cached)' : ''}`;
         applySearch();
+        
+        // Auto-open batches if coming from dashboard
+        autoOpenBatches();
+    }
+
+    // Auto-open batches when coming from dashboard
+    function autoOpenBatches() {
+        if (sessionStorage.getItem('autoOpenBatches') === 'true') {
+            const productName = sessionStorage.getItem('autoOpenProduct');
+            if (productName) {
+                // Wait for products to render
+                setTimeout(function() {
+                    const products = document.querySelectorAll('#productsList .bg-white');
+                    for (const product of products) {
+                        const nameEl = product.querySelector('h3');
+                        if (nameEl && nameEl.textContent.trim().startsWith(productName)) {
+                            const viewBtn = product.querySelector('button.bg-blue-500');
+                            if (viewBtn) {
+                                viewBtn.click();
+                                break;
+                            }
+                        }
+                    }
+                    // Clear the session storage
+                    sessionStorage.removeItem('autoOpenBatches');
+                    sessionStorage.removeItem('autoOpenProduct');
+                }, 800);
+            }
+        }
     }
 
     // Filter products based on search input
@@ -177,7 +216,7 @@
         renderProducts(filtered);
     }
 
-    // Render product cards (unchanged except for the empty message)
+    // Render product cards
     function renderProducts(products) {
         const container = document.getElementById('productsList');
         if (!products.length) {
@@ -210,7 +249,7 @@
         }).join('');
     }
 
-    // ----- Batch Management with Search -----
+    // ----- Batch Management with Search and Update Button -----
     function viewBatches(productId, productName, batches) {
         currentBatches = batches;
         currentBatchModalProductName = productName;
@@ -240,24 +279,38 @@
         
         batches.forEach((batch, idx) => {
             const div = document.createElement('div');
-            div.className = 'border rounded-lg p-3 flex items-start space-x-3 hover:bg-gray-50';
+            div.className = 'border rounded-lg p-3 hover:bg-gray-50';
+            
+            // Create a flex container for checkbox and content
+            const flexDiv = document.createElement('div');
+            flexDiv.className = 'flex items-start space-x-3';
+            
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.className = 'mt-1';
             cb.dataset.batchId = batch.batch_id;
             cb.dataset.batchData = JSON.stringify(batch);
-            div.appendChild(cb);
+            
             const info = document.createElement('div');
             info.className = 'flex-1 text-sm';
+            
+            // Build batch info with Update button
             info.innerHTML = `
                 <div class="flex justify-between items-start">
                     <div>
                         <strong class="text-indigo-600">Batch #${batch.batch_id}</strong>
                         <span class="text-xs text-gray-400 ml-2">${new Date(batch.date).toLocaleString()}</span>
                     </div>
-                    <span class="text-xs font-semibold ${batch.remaining_quantity > 0 ? 'text-green-600' : 'text-red-600'}">
-                        ${batch.remaining_quantity > 0 ? '● In Stock' : '● Depleted'}
-                    </span>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs font-semibold ${batch.remaining_quantity > 0 ? 'text-green-600' : 'text-red-600'}">
+                            ${batch.remaining_quantity > 0 ? '● In Stock' : '● Depleted'}
+                        </span>
+                        <button onclick="event.stopPropagation(); navigateToPurchase(${batch.batch_id})" 
+                                class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs px-2 py-1 rounded transition-colors" 
+                                title="Update this batch">
+                            ✏️ Update
+                        </button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-1 text-xs">
                     <span>Qty: <strong>${batch.quantity}</strong></span>
@@ -267,7 +320,10 @@
                 </div>
                 ${batch.discount > 0 ? `<div class="text-xs text-gray-500 mt-1">Discount: ₵${batch.discount.toFixed(2)}</div>` : ''}
             `;
-            div.appendChild(info);
+            
+            flexDiv.appendChild(cb);
+            flexDiv.appendChild(info);
+            div.appendChild(flexDiv);
             container.appendChild(div);
             currentBatchSelections.push({ cb, batchId: batch.batch_id, batch });
         });
@@ -359,7 +415,7 @@
         loadProducts();
     }
 
-    // ----- Product Deletion (unchanged, but modal title updated) -----
+    // ----- Product Deletion (unchanged) -----
     function confirmDeleteProduct(productId, productName) {
         currentProductIdForDelete = productId;
         document.getElementById('deleteProductName').innerHTML = `Accessory Product: ${productName}`;
