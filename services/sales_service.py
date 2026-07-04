@@ -29,7 +29,6 @@ def get_products_for_sale():
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Removed LIMIT 1000 – now returns ALL products with stock > 0
         cursor.execute("""
             SELECT p.id, p.name, p.brand, p.selling_price, p.stock, p.category
             FROM products p
@@ -127,24 +126,26 @@ def get_batches_by_ids(batch_ids):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        placeholders = ','.join(['%s'] * len(batch_ids))
-        cursor.execute(f"""
-            SELECT id, product_id, remaining_quantity, cost_price, selling_price
-            FROM purchase_batches
-            WHERE id IN ({placeholders})
-        """, batch_ids)
-        
-        rows = cursor.fetchall()
-        return {
-            r[0]: {
-                "batch_id": r[0],
-                "product_id": r[1],
-                "remaining_quantity": int(r[2] or 0),
-                "cost_price": float(r[3] or 0),
-                "selling_price": float(r[4] or 0),
-            }
-            for r in rows
-        }
+        # Use a simpler approach with better error handling
+        result = {}
+        for batch_id in batch_ids:
+            cursor.execute("""
+                SELECT id, product_id, remaining_quantity, cost_price, selling_price
+                FROM purchase_batches
+                WHERE id = %s
+            """, (batch_id,))
+            row = cursor.fetchone()
+            if row:
+                result[row[0]] = {
+                    "batch_id": row[0],
+                    "product_id": row[1],
+                    "remaining_quantity": int(row[2] or 0),
+                    "cost_price": float(row[3] or 0),
+                    "selling_price": float(row[4] or 0),
+                }
+            else:
+                print(f"⚠️ Batch {batch_id} not found in database")
+        return result
     finally:
         from database.db import return_connection
         return_connection(conn)
@@ -216,6 +217,9 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
         if selected_batches:
             batch_ids = [sb["batch_id"] for sb in selected_batches]
             batches_cache = get_batches_by_ids(batch_ids)
+            print(f"🔍 Selected batches: {selected_batches}")
+            print(f"🔍 Batch IDs: {batch_ids}")
+            print(f"🔍 Batches cache keys: {list(batches_cache.keys())}")
         
         # 4. Process each cart item
         for item in cart_items:
@@ -230,14 +234,20 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
             batches_used = []
             
             if selected_batches:
-                # Use selected batches (pre-fetched)
+                # FIX: Filter selected batches for this specific product
                 product_batches = []
                 for sb in selected_batches:
-                    batch = batches_cache.get(sb["batch_id"])
-                    if batch and batch["product_id"] == product_id:
+                    # Only process batches that belong to this product
+                    if sb.get("product_id") == product_id:
+                        batch = batches_cache.get(sb["batch_id"])
+                        if not batch:
+                            print(f"⚠️ Batch {sb['batch_id']} not found in cache for product {product['name']}")
+                            continue
+                        
                         # Validate stock
                         if batch["remaining_quantity"] < sb["qty"]:
-                            raise ValueError(f"Batch {sb['batch_id']} has only {batch['remaining_quantity']} left")
+                            raise ValueError(f"Batch {sb['batch_id']} has only {batch['remaining_quantity']} left, requested {sb['qty']} for {product['name']}")
+                        
                         product_batches.append({
                             "batch_id": sb["batch_id"],
                             "qty": sb["qty"],
@@ -248,7 +258,7 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
                 # Verify quantity
                 total_assigned = sum(b["qty"] for b in product_batches)
                 if total_assigned != quantity:
-                    raise ValueError(f"Quantity mismatch for {product['name']}")
+                    raise ValueError(f"Quantity mismatch for {product['name']}. Assigned: {total_assigned}, Requested: {quantity}")
                 
                 for b in product_batches:
                     batch_total = b["selling_price"] * b["qty"]
