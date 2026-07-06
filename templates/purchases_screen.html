@@ -2,9 +2,15 @@
 
 {% block content %}
 <div class="p-6">
-    <!-- Offline banner (updated for screens) -->
+    <!-- Offline banner -->
     <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
         ⚠️ You are offline – showing cached screen purchases. New purchases will be saved and synced when you reconnect.
+    </div>
+
+    <!-- Cache banner (shows when using cached data while online) -->
+    <div id="cacheBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
+        ⚠️ Showing cached data (last updated: <span id="cacheTimestamp"></span>). 
+        <button onclick="refreshData()" class="underline font-bold">Click here to refresh</button>
     </div>
 
     <!-- ADD / EDIT FORM -->
@@ -67,6 +73,11 @@
         </div>
         <button id="filterBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">🔍 Filter</button>
         <button id="pdfBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-5 py-2 rounded-lg">🧾 PDF Report</button>
+        <!-- Pending Button -->
+        <button id="viewPendingBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg flex items-center gap-2">
+            <span>⏳ Pending</span>
+            <span id="pendingCount" class="bg-red-500 text-white text-xs rounded-full px-2 py-0.5 hidden">0</span>
+        </button>
     </div>
 
     <!-- PURCHASES LIST (scrollable) -->
@@ -75,6 +86,30 @@
             <!-- dynamically loaded -->
         </div>
         <div id="summary" class="mt-4 p-3 bg-gray-50 rounded-lg font-bold text-center text-teal-700"></div>
+    </div>
+</div>
+
+<!-- PENDING PURCHASES MODAL -->
+<div id="pendingModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl w-11/12 max-w-4xl max-h-[90vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white p-4 border-b flex justify-between items-center">
+            <h3 class="text-xl font-bold">⏳ Pending Screen Purchases</h3>
+            <button onclick="closePendingModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+        <div id="pendingList" class="p-4 space-y-3">
+            <!-- dynamically loaded -->
+        </div>
+        <div class="sticky bottom-0 bg-white p-4 border-t flex justify-between">
+            <div>
+                <button onclick="syncAllPending()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">
+                    🔄 Sync All
+                </button>
+                <button onclick="clearAllPending()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded ml-2">
+                    🗑️ Clear All
+                </button>
+            </div>
+            <button onclick="closePendingModal()" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">Close</button>
+        </div>
     </div>
 </div>
 
@@ -95,8 +130,9 @@
     let currentPurchases = [];
     let editMode = false;
     let editBatchId = null;
-    // Separate cache key for screens
+    let isDataFresh = false;
     const CACHE_KEY = 'cached_purchases_screen';
+    const CACHE_TIMESTAMP_KEY = 'cached_purchases_screen_timestamp';
 
     // ---------- Helper functions ----------
     function escapeHtml(str) {
@@ -120,9 +156,19 @@
     }
 
     // ---------- Caching ----------
+    function getCacheTimestamp() {
+        try {
+            return localStorage.getItem(CACHE_TIMESTAMP_KEY);
+        } catch (e) {
+            return null;
+        }
+    }
+
     function cachePurchases(purchases) {
         try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ purchases, timestamp: Date.now() }));
+            localStorage.setItem(CACHE_KEY, JSON.stringify(purchases));
+            localStorage.setItem(CACHE_TIMESTAMP_KEY, new Date().toISOString());
+            isDataFresh = true;
         } catch (e) {}
     }
 
@@ -130,13 +176,239 @@
         try {
             const raw = localStorage.getItem(CACHE_KEY);
             if (!raw) return null;
-            const data = JSON.parse(raw);
-            const ageMinutes = (Date.now() - data.timestamp) / (1000 * 60);
-            if (ageMinutes > 60) return null;
-            return data.purchases;
+            return JSON.parse(raw);
         } catch (e) {
             return null;
         }
+    }
+
+    function updateCacheBanner() {
+        const cacheBanner = document.getElementById('cacheBanner');
+        const timestampSpan = document.getElementById('cacheTimestamp');
+        
+        if (navigator.onLine && !isDataFresh) {
+            const cached = loadCachedPurchases();
+            if (cached && cached.length > 0) {
+                const ts = getCacheTimestamp();
+                if (ts) {
+                    const date = new Date(ts);
+                    timestampSpan.innerText = date.toLocaleString();
+                } else {
+                    timestampSpan.innerText = 'unknown time';
+                }
+                cacheBanner.classList.remove('hidden');
+            } else {
+                cacheBanner.classList.add('hidden');
+            }
+        } else {
+            cacheBanner.classList.add('hidden');
+        }
+    }
+
+    window.refreshData = function() {
+        loadPurchases(true);
+    };
+
+    // ---------- PENDING PURCHASES MANAGEMENT ----------
+    function getPendingPurchases() {
+        try {
+            return JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function savePendingPurchases(pending) {
+        try {
+            localStorage.setItem('pendingPurchases', JSON.stringify(pending));
+        } catch (e) {}
+    }
+
+    function updatePendingBadge() {
+        const pending = getPendingPurchases();
+        const count = pending.length;
+        const badge = document.getElementById('pendingCount');
+        if (badge) {
+            badge.textContent = count;
+            if (count === 0) {
+                badge.classList.add('hidden');
+            } else {
+                badge.classList.remove('hidden');
+            }
+        }
+    }
+
+    function viewPendingPurchases() {
+        const pending = getPendingPurchases();
+        const container = document.getElementById('pendingList');
+        const modal = document.getElementById('pendingModal');
+        
+        if (pending.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-gray-400 py-8">
+                    <p class="text-2xl mb-2">📭</p>
+                    <p>No pending screen purchases.</p>
+                    <p class="text-sm">All purchases have been synced to the server.</p>
+                </div>
+            `;
+        } else {
+            container.innerHTML = pending.map((p, index) => `
+                <div class="border rounded-lg p-4 hover:shadow transition">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-semibold ${p.type === 'add' ? 'text-green-600' : 'text-yellow-600'}">
+                                    ${p.type === 'add' ? '➕ Add' : '✏️ Update'}
+                                </span>
+                                <span class="text-xs text-gray-400">${new Date(p.timestamp).toLocaleString()}</span>
+                                ${p.batchId ? `<span class="text-xs bg-gray-100 px-2 py-0.5 rounded">Batch #${p.batchId}</span>` : ''}
+                            </div>
+                            <h3 class="font-bold text-lg mt-1">${escapeHtml(p.data.name)} (${escapeHtml(p.data.brand)})</h3>
+                            <p class="text-sm text-gray-600">
+                                Qty: ${p.data.quantity} | 
+                                Cost: ₵${p.data.cost_price.toFixed(2)} | 
+                                Selling: ₵${p.data.selling_price.toFixed(2)}
+                                ${p.data.discount ? `| Discount: ₵${p.data.discount.toFixed(2)}` : ''}
+                            </p>
+                            <p class="text-sm text-gray-500">Category: ${p.data.category || 'Screen'}</p>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <button onclick="syncPendingItem(${index})" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm">
+                                🔄 Sync
+                            </button>
+                            <button onclick="removePendingItem(${index})" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm">
+                                🗑️ Remove
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        updatePendingBadge();
+        modal.classList.remove('hidden');
+    }
+
+    function closePendingModal() {
+        document.getElementById('pendingModal').classList.add('hidden');
+    }
+
+    async function syncPendingItem(index) {
+        const pending = getPendingPurchases();
+        const item = pending[index];
+        if (!item) return;
+        
+        const confirmMsg = `Sync this ${item.type === 'add' ? 'addition' : 'update'} for "${item.data.name}"?`;
+        if (!confirm(confirmMsg)) return;
+        
+        try {
+            let url = '/api/purchases';
+            let method = 'POST';
+            
+            if (item.type === 'update' && item.batchId) {
+                url = `/api/purchases/${item.batchId}`;
+                method = 'PUT';
+            }
+            
+            const res = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(item.data)
+            });
+            
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            const data = await res.json();
+            
+            if (data.success) {
+                pending.splice(index, 1);
+                savePendingPurchases(pending);
+                updatePendingBadge();
+                viewPendingPurchases();
+                loadPurchases(true);
+                alert(`✅ ${item.type === 'add' ? 'Added' : 'Updated'} successfully!`);
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch (error) {
+            alert('❌ Failed to sync: ' + error.message);
+        }
+    }
+
+    async function syncAllPending() {
+        const pending = getPendingPurchases();
+        if (pending.length === 0) {
+            alert('No pending items to sync.');
+            return;
+        }
+        
+        if (!confirm(`Sync all ${pending.length} pending purchase(s)?`)) return;
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (let i = pending.length - 1; i >= 0; i--) {
+            const item = pending[i];
+            try {
+                let url = '/api/purchases';
+                let method = 'POST';
+                
+                if (item.type === 'update' && item.batchId) {
+                    url = `/api/purchases/${item.batchId}`;
+                    method = 'PUT';
+                }
+                
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(item.data)
+                });
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success) {
+                        pending.splice(i, 1);
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } else {
+                    failCount++;
+                }
+            } catch (error) {
+                failCount++;
+            }
+        }
+        
+        savePendingPurchases(pending);
+        updatePendingBadge();
+        viewPendingPurchases();
+        loadPurchases(true);
+        
+        alert(`✅ Synced: ${successCount} | ❌ Failed: ${failCount}`);
+    }
+
+    function removePendingItem(index) {
+        const pending = getPendingPurchases();
+        const item = pending[index];
+        if (!confirm(`Remove pending ${item.type === 'add' ? 'addition' : 'update'} for "${item.data.name}"?`)) return;
+        
+        pending.splice(index, 1);
+        savePendingPurchases(pending);
+        updatePendingBadge();
+        viewPendingPurchases();
+    }
+
+    function clearAllPending() {
+        const pending = getPendingPurchases();
+        if (pending.length === 0) {
+            alert('No pending items to clear.');
+            return;
+        }
+        if (!confirm(`Delete all ${pending.length} pending purchase(s)? This cannot be undone.`)) return;
+        
+        savePendingPurchases([]);
+        updatePendingBadge();
+        viewPendingPurchases();
     }
 
     // ---------- Check for batch edit from URL ----------
@@ -144,22 +416,19 @@
         const urlParams = new URLSearchParams(window.location.search);
         const batchId = urlParams.get('edit_batch');
         if (batchId) {
-            // Wait for purchases to load
             setTimeout(function() {
                 const purchase = currentPurchases.find(p => p.batch_id === parseInt(batchId));
                 if (purchase) {
                     editPurchase(parseInt(batchId));
-                    // Scroll to the form
                     const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
                     if (form) {
                         form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        form.style.border = '3px solid #f59e0b';
+                        form.style.transition = 'border-color 0.5s';
+                        setTimeout(() => {
+                            form.style.border = 'none';
+                        }, 3000);
                     }
-                    // Highlight the form
-                    form.style.border = '3px solid #f59e0b';
-                    form.style.transition = 'border-color 0.5s';
-                    setTimeout(() => {
-                        form.style.border = 'none';
-                    }, 3000);
                 } else {
                     alert('Batch #' + batchId + ' not found. It may have been deleted.');
                 }
@@ -168,36 +437,116 @@
     }
 
     // ---------- Load purchases (filtered to screens) ----------
-    async function loadPurchases() {
+    async function loadPurchases(forceRefresh = false) {
         updateOfflineBanner();
+        
+        if (forceRefresh) {
+            isDataFresh = false;
+        }
+        
         let purchases = [];
         let fromCache = false;
 
-        try {
-            const res = await fetch('/api/purchases?category=Screen');
-            if (!res.ok) throw new Error('Network error');
-            purchases = await res.json();
-            cachePurchases(purchases);
-        } catch (err) {
-            console.warn('Offline – using cached screen purchases');
+        if (navigator.onLine) {
+            try {
+                const res = await fetch('/api/purchases?category=Screen');
+                if (res.ok) {
+                    purchases = await res.json();
+                    cachePurchases(purchases);
+                    isDataFresh = true;
+                    console.log('✅ Data loaded from API (fresh)');
+                    
+                    // Auto-sync pending items when online
+                    const pending = getPendingPurchases();
+                    if (pending.length > 0) {
+                        console.log(`📦 ${pending.length} pending purchases found - syncing automatically...`);
+                        await syncAllPendingSilently();
+                    }
+                } else {
+                    throw new Error('API returned error');
+                }
+            } catch (err) {
+                console.warn('⚠️ API failed, using cached data:', err.message);
+                fromCache = true;
+                const cached = loadCachedPurchases();
+                if (cached) {
+                    purchases = cached;
+                    isDataFresh = false;
+                } else {
+                    purchases = [];
+                    isDataFresh = false;
+                }
+            }
+        } else {
             fromCache = true;
             const cached = loadCachedPurchases();
             if (cached) {
                 purchases = cached;
+                isDataFresh = false;
             } else {
                 purchases = [];
+                isDataFresh = false;
             }
         }
 
         currentPurchases = purchases;
-        renderList(currentPurchases);
+        renderList(currentPurchases, fromCache);
+        updateCacheBanner();
+        updatePendingBadge();
         
-        // Check for batch edit after loading
         checkForBatchEdit();
     }
 
+    // Silent sync for pending items (used on reconnect)
+    async function syncAllPendingSilently() {
+        const pending = getPendingPurchases();
+        if (pending.length === 0) return;
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (let i = pending.length - 1; i >= 0; i--) {
+            const item = pending[i];
+            try {
+                let url = '/api/purchases';
+                let method = 'POST';
+                
+                if (item.type === 'update' && item.batchId) {
+                    url = `/api/purchases/${item.batchId}`;
+                    method = 'PUT';
+                }
+                
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(item.data)
+                });
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success) {
+                        pending.splice(i, 1);
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } else {
+                    failCount++;
+                }
+            } catch (error) {
+                failCount++;
+            }
+        }
+        
+        if (successCount > 0 || failCount > 0) {
+            savePendingPurchases(pending);
+            updatePendingBadge();
+            console.log(`📦 Sync results: ${successCount} success, ${failCount} failed`);
+        }
+    }
+
     // ---------- Render list ----------
-    function renderList(purchases) {
+    function renderList(purchases, fromCache = false) {
         const container = document.getElementById('purchasesList');
         if (!purchases.length) {
             container.innerHTML = '<div class="text-center text-gray-400 py-8">No screen purchase records found.</div>';
@@ -221,10 +570,10 @@
         updateSummary(purchases);
     }
 
-    // ---------- Update summary (now includes Total Batches) ----------
+    // ---------- Update summary ----------
     function updateSummary(purchases) {
         let totalQty = 0, totalCost = 0, totalDiscount = 0, totalSelling = 0;
-        const totalBatches = purchases.length;  // count of distinct batch records
+        const totalBatches = purchases.length;
         purchases.forEach(p => {
             totalQty += p.quantity;
             totalCost += p.total_cost;
@@ -232,6 +581,7 @@
             totalSelling += p.selling_price * p.quantity;
         });
         const isOffline = !navigator.onLine;
+        const isCached = !isDataFresh && !isOffline;
         document.getElementById('summary').innerHTML = `
             📦 Batches: ${totalBatches} | 
             🧾 Total Qty: ${totalQty} | 
@@ -239,23 +589,22 @@
             💰 Total Cost: ₵${totalCost.toFixed(2)} | 
             💵 Total Selling: ₵${totalSelling.toFixed(2)}
             ${isOffline ? ' <span class="text-red-500 text-sm">(offline)</span>' : ''}
+            ${isCached ? ' <span class="text-yellow-500 text-sm">(cached)</span>' : ''}
         `;
     }
 
-    // ---------- Offline helpers (fallback) ----------
-    if (typeof window.savePendingPurchase === 'undefined') {
-        window.savePendingPurchase = function(payload, actionType, batchId) {
-            let pending = JSON.parse(localStorage.getItem('pendingPurchases') || '[]');
-            pending.push({
-                id: Date.now() + '_' + Math.random().toString(36).substr(2,5),
-                type: actionType,
-                batchId: batchId,
-                data: payload,
-                timestamp: new Date().toISOString()
-            });
-            localStorage.setItem('pendingPurchases', JSON.stringify(pending));
-            if (typeof updatePendingBadge === 'function') updatePendingBadge();
-        };
+    // ---------- Save pending purchase ----------
+    function savePendingPurchase(payload, actionType, batchId) {
+        let pending = getPendingPurchases();
+        pending.push({
+            id: Date.now() + '_' + Math.random().toString(36).substr(2,5),
+            type: actionType || 'add',
+            batchId: batchId || null,
+            data: payload,
+            timestamp: new Date().toISOString()
+        });
+        savePendingPurchases(pending);
+        updatePendingBadge();
     }
 
     // ---------- Submit / Update ----------
@@ -269,6 +618,7 @@
             discount: parseFloat(document.getElementById('discount').value) || 0,
             selling_price: parseFloat(document.getElementById('selling_price').value)
         };
+        
         if (!payload.name || !payload.brand || !payload.quantity || !payload.cost_price || !payload.selling_price) {
             alert('Please fill required fields: Name, Brand, Quantity, Cost Price, Selling Price');
             return;
@@ -277,10 +627,13 @@
         let url = '/api/purchases';
         let method = 'POST';
         let actionType = 'add';
+        let batchId = null;
+        
         if (editMode) {
             url = `/api/purchases/${editBatchId}`;
             method = 'PUT';
             actionType = 'update';
+            batchId = editBatchId;
         }
 
         try {
@@ -289,19 +642,21 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            
             if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
             const data = await res.json();
+            
             if (data.success) {
                 alert(editMode ? 'Screen purchase updated!' : 'Screen purchase added!');
                 resetForm();
-                loadPurchases();
+                loadPurchases(true);
             } else {
                 alert('Error: ' + data.error);
             }
         } catch (error) {
             console.warn('Network error, saving screen purchase offline:', error);
-            savePendingPurchase(payload, actionType, editMode ? editBatchId : null);
-            if (typeof updatePendingBadge === 'function') updatePendingBadge();
+            savePendingPurchase(payload, actionType, batchId);
+            updatePendingBadge();
             alert('You are offline. Screen purchase saved locally and will be synced later.');
             resetForm();
             loadPurchases();
@@ -325,7 +680,6 @@
         document.getElementById('submitBtn').innerHTML = '✏️ Update Screen Purchase';
         document.getElementById('cancelBtn').classList.remove('hidden');
         
-        // Scroll to form
         const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
         if (form) {
             form.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -351,14 +705,13 @@
         document.getElementById('submitBtn').innerHTML = '➕ Add Screen Purchase';
         document.getElementById('cancelBtn').classList.add('hidden');
         
-        // Remove highlight
         const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
         if (form) {
             form.style.border = 'none';
         }
     }
 
-    // ---------- Search & Filter (filtered to screens) ----------
+    // ---------- Search & Filter ----------
     async function filterPurchases() {
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
@@ -368,10 +721,14 @@
                 if (!res.ok) throw new Error();
                 currentPurchases = await res.json();
                 cachePurchases(currentPurchases);
+                isDataFresh = true;
+                updateCacheBanner();
             } catch (err) {
-                alert('Filter is unavailable offline. Showing cached screen purchases.');
+                alert('Filter is unavailable offline. Showing cached data.');
                 const cached = loadCachedPurchases();
                 if (cached) currentPurchases = cached;
+                isDataFresh = false;
+                updateCacheBanner();
             }
         } else {
             await loadPurchases();
@@ -382,7 +739,7 @@
     function applySearch() {
         const keyword = document.getElementById('searchInput').value.toLowerCase();
         if (!keyword) {
-            renderList(currentPurchases);
+            renderList(currentPurchases, !isDataFresh);
             return;
         }
         const filtered = currentPurchases.filter(p =>
@@ -390,10 +747,10 @@
             (p.brand && p.brand.toLowerCase().includes(keyword)) ||
             (p.category && p.category.toLowerCase().includes(keyword))
         );
-        renderList(filtered);
+        renderList(filtered, !isDataFresh);
     }
 
-    // ---------- PDF (skip if offline) ----------
+    // ---------- PDF ----------
     async function generatePDF() {
         if (!navigator.onLine) {
             alert('PDF generation requires internet. Please connect and try again.');
@@ -428,7 +785,7 @@
         }
     }
 
-    // ---------- Autocomplete (hide offline, filter to screens) ----------
+    // ---------- Autocomplete ----------
     let nameTimeout, catTimeout;
 
     async function fetchNameSuggestions() {
@@ -492,27 +849,33 @@
     };
 
     // ---------- Event listeners ----------
-    document.getElementById('submitBtn').addEventListener('click', submitPurchase);
-    document.getElementById('cancelBtn').addEventListener('click', resetForm);
-    document.getElementById('filterBtn').addEventListener('click', filterPurchases);
-    document.getElementById('pdfBtn').addEventListener('click', generatePDF);
-    document.getElementById('searchInput').addEventListener('input', applySearch);
-    document.getElementById('name').addEventListener('input', () => { clearTimeout(nameTimeout); nameTimeout = setTimeout(fetchNameSuggestions, 300); });
-    document.getElementById('category').addEventListener('input', () => { clearTimeout(catTimeout); catTimeout = setTimeout(fetchCategorySuggestions, 300); });
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('#name')) document.getElementById('nameSuggestions').classList.add('hidden');
-        if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
-    });
-
-    // ---------- On load ----------
     document.addEventListener('DOMContentLoaded', function() {
         loadPurchases();
         if (typeof updatePendingBadge === 'function') updatePendingBadge();
+        
+        // View Pending button
+        const viewPendingBtn = document.getElementById('viewPendingBtn');
+        if (viewPendingBtn) {
+            viewPendingBtn.addEventListener('click', viewPendingPurchases);
+        }
+        
+        // Submit button
+        document.getElementById('submitBtn').addEventListener('click', submitPurchase);
+        document.getElementById('cancelBtn').addEventListener('click', resetForm);
+        document.getElementById('filterBtn').addEventListener('click', filterPurchases);
+        document.getElementById('pdfBtn').addEventListener('click', generatePDF);
+        document.getElementById('searchInput').addEventListener('input', applySearch);
+        document.getElementById('name').addEventListener('input', () => { clearTimeout(nameTimeout); nameTimeout = setTimeout(fetchNameSuggestions, 300); });
+        document.getElementById('category').addEventListener('input', () => { clearTimeout(catTimeout); catTimeout = setTimeout(fetchCategorySuggestions, 300); });
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#name')) document.getElementById('nameSuggestions').classList.add('hidden');
+            if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
+        });
     });
 
     // Auto-refresh on reconnect
     window.addEventListener('online', function() {
-        loadPurchases();
+        loadPurchases(true);
     });
 
 </script>
