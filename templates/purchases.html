@@ -416,9 +416,13 @@
         const urlParams = new URLSearchParams(window.location.search);
         const batchId = urlParams.get('edit_batch');
         if (batchId) {
+            console.log('🔍 Batch edit requested for:', batchId);
+            
+            // Wait for purchases to load
             setTimeout(function() {
                 const purchase = currentPurchases.find(p => p.batch_id === parseInt(batchId));
                 if (purchase) {
+                    console.log('✅ Found purchase:', purchase);
                     editPurchase(parseInt(batchId));
                     const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
                     if (form) {
@@ -430,9 +434,10 @@
                         }, 3000);
                     }
                 } else {
+                    console.warn('⚠️ Batch #' + batchId + ' not found');
                     alert('Batch #' + batchId + ' not found. It may have been deleted.');
                 }
-            }, 1000);
+            }, 1500);
         }
     }
 
@@ -570,26 +575,70 @@
         updateSummary(purchases);
     }
 
-    // ---------- Update summary ----------
+    // ---------- Update summary with Grand Total, Capital, and Profit ----------
     function updateSummary(purchases) {
-        let totalQty = 0, totalCost = 0, totalDiscount = 0, totalSelling = 0;
+        let totalQty = 0;
+        let totalCost = 0;
+        let totalDiscount = 0;
+        let totalSelling = 0;
+        let totalProfit = 0;
+        let totalCapital = 0;
         const totalBatches = purchases.length;
+        
         purchases.forEach(p => {
-            totalQty += p.quantity;
-            totalCost += p.total_cost;
-            totalDiscount += p.discount;
-            totalSelling += p.selling_price * p.quantity;
+            const itemQty = p.quantity || 0;
+            const itemCost = p.cost_price || 0;
+            const itemSelling = p.selling_price || 0;
+            const itemDiscount = p.discount || 0;
+            
+            totalQty += itemQty;
+            totalCost += p.total_cost || (itemCost * itemQty);
+            totalDiscount += itemDiscount;
+            totalSelling += itemSelling * itemQty;
+            
+            // Profit = (Selling Price - Cost Price) * Quantity - Discount
+            const itemProfit = (itemSelling - itemCost) * itemQty - itemDiscount;
+            totalProfit += itemProfit;
+            
+            // Capital = Total Cost - Discount
+            totalCapital += (itemCost * itemQty) - itemDiscount;
         });
+        
         const isOffline = !navigator.onLine;
         const isCached = !isDataFresh && !isOffline;
+        
         document.getElementById('summary').innerHTML = `
-            📦 Batches: ${totalBatches} | 
-            🧾 Total Qty: ${totalQty} | 
-            📉 Total Discount: ₵${totalDiscount.toFixed(2)} | 
-            💰 Total Cost: ₵${totalCost.toFixed(2)} | 
-            💵 Total Selling: ₵${totalSelling.toFixed(2)}
-            ${isOffline ? ' <span class="text-red-500 text-sm">(offline)</span>' : ''}
-            ${isCached ? ' <span class="text-yellow-500 text-sm">(cached)</span>' : ''}
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+                <div class="bg-white rounded p-2 shadow">
+                    <span class="text-gray-500">📦 Batches</span><br>
+                    <span class="text-lg font-bold text-indigo-600">${totalBatches}</span>
+                </div>
+                <div class="bg-white rounded p-2 shadow">
+                    <span class="text-gray-500">🧾 Total Qty</span><br>
+                    <span class="text-lg font-bold text-blue-600">${totalQty}</span>
+                </div>
+                <div class="bg-white rounded p-2 shadow">
+                    <span class="text-gray-500">💰 Capital</span><br>
+                    <span class="text-lg font-bold text-purple-600">${formatMoney(totalCapital)}</span>
+                </div>
+                <div class="bg-white rounded p-2 shadow">
+                    <span class="text-gray-500">📈 Total Selling</span><br>
+                    <span class="text-lg font-bold text-green-600">${formatMoney(totalSelling)}</span>
+                </div>
+                <div class="bg-white rounded p-2 shadow">
+                    <span class="text-gray-500">📉 Total Discount</span><br>
+                    <span class="text-lg font-bold text-red-600">${formatMoney(totalDiscount)}</span>
+                </div>
+                <div class="bg-white rounded p-2 shadow">
+                    <span class="text-gray-500">💎 Profit</span><br>
+                    <span class="text-lg font-bold ${totalProfit >= 0 ? 'text-teal-600' : 'text-red-600'}">${formatMoney(totalProfit)}</span>
+                </div>
+            </div>
+            <div class="mt-2 text-xs text-gray-400">
+                ${isOffline ? '⚠️ Offline mode' : ''}
+                ${isCached ? '📦 Showing cached data' : ''}
+                ${!isOffline && !isCached ? '✅ Live data' : ''}
+            </div>
         `;
     }
 
@@ -605,6 +654,7 @@
         });
         savePendingPurchases(pending);
         updatePendingBadge();
+        console.log('💾 Saved pending purchase:', payload);
     }
 
     // ---------- Submit / Update ----------
@@ -634,6 +684,9 @@
             method = 'PUT';
             actionType = 'update';
             batchId = editBatchId;
+            console.log('✏️ Updating batch:', editBatchId, payload);
+        } else {
+            console.log('➕ Adding new purchase:', payload);
         }
 
         try {
@@ -643,12 +696,23 @@
                 body: JSON.stringify(payload)
             });
             
-            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.error || `HTTP error! status: ${res.status}`);
+            }
+            
             const data = await res.json();
             
             if (data.success) {
-                alert(editMode ? 'Accessory purchase updated!' : 'Accessory purchase added!');
+                alert(editMode ? '✅ Accessory purchase updated!' : '✅ Accessory purchase added!');
                 resetForm();
+                
+                // Clear the URL parameter if coming from edit
+                if (window.history && window.history.pushState) {
+                    const newUrl = window.location.pathname;
+                    window.history.pushState({}, '', newUrl);
+                }
+                
                 loadPurchases(true);
             } else {
                 alert('Error: ' + data.error);
@@ -657,7 +721,7 @@
             console.warn('Network error, saving purchase offline:', error);
             savePendingPurchase(payload, actionType, batchId);
             updatePendingBadge();
-            alert('You are offline. Purchase saved locally and will be synced later.');
+            alert('⚠️ You are offline. Purchase saved locally and will be synced later.');
             resetForm();
             loadPurchases();
         }
@@ -665,17 +729,26 @@
 
     // ---------- Edit / Reset ----------
     function editPurchase(batchId) {
+        console.log('✏️ Editing purchase:', batchId);
         const purchase = currentPurchases.find(p => p.batch_id === batchId);
-        if (!purchase) return;
+        if (!purchase) {
+            console.warn('Purchase not found:', batchId);
+            return;
+        }
+        
+        console.log('📦 Purchase data:', purchase);
+        
         document.getElementById('name').value = purchase.name;
         document.getElementById('brand').value = purchase.brand;
-        document.getElementById('category').value = purchase.category;
+        document.getElementById('category').value = purchase.category || 'Accessory';
         document.getElementById('quantity').value = purchase.quantity;
         document.getElementById('cost_price').value = purchase.cost_price;
         document.getElementById('discount').value = purchase.discount;
         document.getElementById('selling_price').value = purchase.selling_price;
+        
         editMode = true;
         editBatchId = batchId;
+        
         document.getElementById('formTitle').innerHTML = '✏️ Update Accessory Purchase <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>';
         document.getElementById('submitBtn').innerHTML = '✏️ Update Accessory Purchase';
         document.getElementById('cancelBtn').classList.remove('hidden');
@@ -699,8 +772,10 @@
         document.getElementById('cost_price').value = '';
         document.getElementById('discount').value = '';
         document.getElementById('selling_price').value = '';
+        
         editMode = false;
         editBatchId = null;
+        
         document.getElementById('formTitle').innerHTML = '➕ Add Accessory Purchase <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>';
         document.getElementById('submitBtn').innerHTML = '➕ Add Accessory Purchase';
         document.getElementById('cancelBtn').classList.add('hidden');
@@ -708,6 +783,12 @@
         const form = document.querySelector('.bg-white.rounded-xl.shadow-md.p-6.mb-6');
         if (form) {
             form.style.border = 'none';
+        }
+        
+        // Clear URL parameter
+        if (window.history && window.history.pushState) {
+            const newUrl = window.location.pathname;
+            window.history.pushState({}, '', newUrl);
         }
     }
 
@@ -750,7 +831,7 @@
         renderList(filtered, !isDataFresh);
     }
 
-    // ---------- PDF ----------
+    // ---------- PDF with Enhanced Summary ----------
     async function generatePDF() {
         if (!navigator.onLine) {
             alert('PDF generation requires internet. Please connect and try again.');
@@ -760,6 +841,30 @@
         const toDate = document.getElementById('toDate').value;
         const purchasesToExport = currentPurchases;
 
+        // Calculate totals for the report
+        let totalQty = 0;
+        let totalCost = 0;
+        let totalDiscount = 0;
+        let totalSelling = 0;
+        let totalProfit = 0;
+        let totalCapital = 0;
+        
+        purchasesToExport.forEach(p => {
+            const itemQty = p.quantity || 0;
+            const itemCost = p.cost_price || 0;
+            const itemSelling = p.selling_price || 0;
+            const itemDiscount = p.discount || 0;
+            
+            totalQty += itemQty;
+            totalCost += p.total_cost || (itemCost * itemQty);
+            totalDiscount += itemDiscount;
+            totalSelling += itemSelling * itemQty;
+            
+            const itemProfit = (itemSelling - itemCost) * itemQty - itemDiscount;
+            totalProfit += itemProfit;
+            totalCapital += (itemCost * itemQty) - itemDiscount;
+        });
+
         try {
             const res = await fetch('/api/purchases/pdf', {
                 method: 'POST',
@@ -767,7 +872,17 @@
                 body: JSON.stringify({
                     purchases: purchasesToExport,
                     from_date: fromDate,
-                    to_date: toDate
+                    to_date: toDate,
+                    // Send calculated totals for the PDF
+                    totals: {
+                        total_qty: totalQty,
+                        total_cost: totalCost,
+                        total_discount: totalDiscount,
+                        total_selling: totalSelling,
+                        total_profit: totalProfit,
+                        total_capital: totalCapital,
+                        total_batches: purchasesToExport.length
+                    }
                 })
             });
             if (!res.ok) throw new Error();

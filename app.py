@@ -747,11 +747,15 @@ def api_purchases_pdf():
     purchases = data.get('purchases', [])
     from_date = data.get('from_date', '')
     to_date = data.get('to_date', '')
+    totals = data.get('totals', {})
+    
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=15, leftMargin=15,
                             topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
     elements = []
+    
+    # Title
     elements.append(Paragraph("📦 Purchases Report", styles["Title"]))
     elements.append(Spacer(1, 6))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
@@ -759,6 +763,7 @@ def api_purchases_pdf():
         elements.append(Paragraph(f"Date Range: {from_date} → {to_date}", styles["Normal"]))
     elements.append(Spacer(1, 12))
 
+    # Table data
     table_data = [["ID", "Name", "Brand", "Qty", "Stock", "Cost", "Discount", "Total", "Selling", "Date/Time"]]
     total_qty = total_cost = total_discount = total_selling = 0
     row_colors = [colors.whitesmoke, colors.lightgrey]
@@ -800,10 +805,68 @@ def api_purchases_pdf():
         style.add("BACKGROUND", (0,i), (-1,i), row_colors[i%2])
     table.setStyle(style)
     elements.append(table)
-    elements.append(Spacer(1,12))
+    elements.append(Spacer(1, 12))
 
-    summary = f"Total Qty: {total_qty} | Total Discount: ₵{total_discount:.2f} | Total Cost: ₵{total_cost:.2f} | Total Selling: ₵{total_selling:.2f}"
-    elements.append(Paragraph(summary, styles["Heading2"]))
+    # ================================================================
+    # ENHANCED SUMMARY SECTION WITH GRAND TOTAL, CAPITAL, AND PROFIT
+    # ================================================================
+    elements.append(Paragraph("📊 Summary", styles["Heading2"]))
+    elements.append(Spacer(1, 6))
+    
+    # Use totals from request if provided, otherwise calculate from data
+    if totals:
+        total_batches_export = totals.get('total_batches', len(purchases))
+        total_qty_export = totals.get('total_qty', total_qty)
+        total_cost_export = totals.get('total_cost', total_cost)
+        total_discount_export = totals.get('total_discount', total_discount)
+        total_selling_export = totals.get('total_selling', total_selling)
+        total_capital_export = totals.get('total_capital', total_cost - total_discount)
+        total_profit_export = totals.get('total_profit', total_selling - (total_cost - total_discount))
+    else:
+        # Calculate from data
+        total_batches_export = len(purchases)
+        total_qty_export = total_qty
+        total_cost_export = total_cost
+        total_discount_export = total_discount
+        total_selling_export = total_selling
+        total_capital_export = total_cost - total_discount
+        total_profit_export = total_selling - total_capital_export
+    
+    # Create a nice summary table
+    summary_data = [
+        ["Metric", "Value"],
+        ["📦 Total Batches", str(total_batches_export)],
+        ["🧾 Total Quantity", str(total_qty_export)],
+        ["💰 Capital (Total Cost - Discount)", f"₵{total_capital_export:.2f}"],
+        ["📈 Total Selling Price", f"₵{total_selling_export:.2f}"],
+        ["📉 Total Discount", f"₵{total_discount_export:.2f}"],
+        ["💎 Total Profit", f"₵{total_profit_export:.2f}"]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[6*cm, 6*cm], hAlign='CENTER')
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1E3A5F")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('BACKGROUND', (1,1), (1,6), colors.lightgrey),
+        ('TEXTCOLOR', (1,1), (1,6), colors.black),
+        ('BACKGROUND', (0,1), (0,6), colors.whitesmoke),
+    ]))
+    elements.append(summary_table)
+    
+    # Add profit status indicator
+    profit_color = colors.green if total_profit_export >= 0 else colors.red
+    profit_status = "📈 PROFIT" if total_profit_export >= 0 else "📉 LOSS"
+    elements.append(Spacer(1, 6))
+    elements.append(Paragraph(
+        f"<font color='{profit_color}' size='14'><b>{profit_status}: ₵{total_profit_export:.2f}</b></font>",
+        styles["Normal"]
+    ))
+    
     doc.build(elements)
     buffer.seek(0)
     return send_file(buffer, as_attachment=True,
