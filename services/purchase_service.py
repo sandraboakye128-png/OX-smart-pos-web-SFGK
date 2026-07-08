@@ -51,7 +51,7 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
 
         if product:
             product_id = product[0]
-            # Only update category, NOT other fields
+            # Update category if different (keep other fields as-is)
             cursor.execute("""
                 UPDATE products
                 SET category = %s
@@ -85,8 +85,12 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
         conn.close()
 
 
-# --------------------------- UPDATE BATCH ONLY ---------------------------
+# --------------------------- UPDATE BATCH (FIXED) ---------------------------
 def update_product(batch_id, name, brand, category, quantity, cost_price, discount, selling_price):
+    """
+    Update a batch and its associated product.
+    FIXED: Now updates ALL product fields (name, brand, category, cost_price, selling_price, discount)
+    """
     quantity = int(quantity)
     cost_price = float(cost_price)
     discount = float(discount or 0)
@@ -96,17 +100,25 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     try:
         cursor = conn.cursor()
 
-        # Get linked product_id
-        cursor.execute(
-            "SELECT product_id FROM purchase_batches WHERE id = %s",
-            (batch_id,)
-        )
+        # Get linked product_id and current product data
+        cursor.execute("""
+            SELECT pb.product_id, p.name, p.brand, p.category, p.cost_price, p.selling_price, p.discount
+            FROM purchase_batches pb
+            JOIN products p ON p.id = pb.product_id
+            WHERE pb.id = %s
+        """, (batch_id,))
         result = cursor.fetchone()
 
         if not result:
             raise ValueError("Batch not found")
 
         product_id = result[0]
+        old_product_name = result[1]
+        old_product_brand = result[2]
+        old_category = result[3]
+        old_cost_price = result[4]
+        old_selling_price = result[5]
+        old_discount = result[6]
 
         # Archive old batch data
         cursor.execute("""
@@ -114,37 +126,43 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
             FROM purchase_batches
             WHERE id = %s
         """, (batch_id,))
-        old = cursor.fetchone()
-        if old:
+        old_batch = cursor.fetchone()
+        
+        if old_batch:
             cursor.execute("""
                 INSERT INTO deleted_products
                 (name, brand, cost_price, selling_price, stock, category, discount, action, product_id, source, batch_id, batch_quantity, batch_remaining)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (name, brand, old[2], old[3], old[1], category, old[4], "updated", product_id, "product", batch_id, old[0], old[1]))
+            """, (old_product_name, old_product_brand, old_batch[2], old_batch[3], old_batch[1], 
+                  old_category, old_batch[4], "updated", product_id, "product", batch_id, old_batch[0], old_batch[1]))
 
-        # Update only the batch record
+        # Update the batch record
         cursor.execute("""
             UPDATE purchase_batches
             SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s
             WHERE id = %s
         """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", batch_id))
 
-        # Update only category in products table
+        # ✅ FIXED: Update ALL product fields, not just category
         cursor.execute("""
             UPDATE products
-            SET category = %s
+            SET name = %s, brand = %s, category = %s, cost_price = %s, selling_price = %s, discount = %s
             WHERE id = %s
-        """, (category, product_id))
+        """, (name, brand, category, cost_price, selling_price, discount, product_id))
 
         # Recalculate stock
         update_product_stock(cursor, product_id)
 
         conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        raise e
     finally:
         conn.close()
 
 
-# --------------------------- GET ALL PURCHASES (FIXED) ---------------------------
+# --------------------------- GET ALL PURCHASES ---------------------------
 def get_all_purchases():
     conn = get_connection()
     try:
