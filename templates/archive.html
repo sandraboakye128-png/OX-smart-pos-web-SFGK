@@ -227,6 +227,7 @@
             const btnDiv = document.createElement('div');
             btnDiv.className = 'flex justify-end gap-2';
             
+            // View Batches button for ACTIVE items
             if (item.action === 'ACTIVE') {
                 const viewBtn = document.createElement('button');
                 viewBtn.textContent = '📋 View Batches';
@@ -235,18 +236,31 @@
                 btnDiv.appendChild(viewBtn);
             }
             
-            if (['DELETED', 'UPDATED', 'BATCH DELETED', 'PRODUCT DELETED'].includes(item.action) && item.id && !item.is_permanent) {
-                const restoreBtn = document.createElement('button');
-                restoreBtn.textContent = '↻ Restore';
-                restoreBtn.className = 'bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm';
-                restoreBtn.onclick = () => restoreItem(item.id);
-                btnDiv.appendChild(restoreBtn);
-            } else if (item.action === 'PERMANENTLY DELETED') {
+            // ✅ FIXED: Restore button logic
+            // Only show restore for DELETED, BATCH DELETED, PRODUCT DELETED
+            // EXCLUDE "UPDATED" records
+            const canRestore = ['DELETED', 'BATCH DELETED', 'PRODUCT DELETED'].includes(item.action);
+            const isPermanent = item.action === 'PERMANENTLY DELETED';
+            
+            if (isPermanent) {
                 const disabledBtn = document.createElement('button');
                 disabledBtn.textContent = '❌ Cannot Restore';
                 disabledBtn.className = 'bg-gray-400 text-white px-3 py-1 rounded text-sm cursor-not-allowed';
                 disabledBtn.disabled = true;
                 btnDiv.appendChild(disabledBtn);
+            } else if (canRestore && item.id && !item.is_permanent) {
+                const restoreBtn = document.createElement('button');
+                restoreBtn.textContent = '↻ Restore';
+                restoreBtn.className = 'bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm';
+                restoreBtn.onclick = () => restoreItem(item.id);
+                btnDiv.appendChild(restoreBtn);
+            } else if (item.action === 'UPDATED') {
+                // "UPDATED" records show this special message
+                const infoBtn = document.createElement('button');
+                infoBtn.textContent = 'ℹ️ Update History';
+                infoBtn.className = 'bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-sm';
+                infoBtn.onclick = () => alert('This is an update history record.\n\nIt tracks changes made to products and cannot be restored.\n\n✅ The actual product is still active in inventory.');
+                btnDiv.appendChild(infoBtn);
             }
             
             card.appendChild(btnDiv);
