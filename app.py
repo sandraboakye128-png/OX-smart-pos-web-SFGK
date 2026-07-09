@@ -196,11 +196,23 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "temporary-dev-key")
 
 # ===================== LICENSE / TRIAL SYSTEM =====================
+# ===================== LICENSE / TRIAL SYSTEM =====================
 import json
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LICENSE_FILE = os.path.join(BASE_DIR, "license.json")
 TRIAL_DAYS = 3
 MASTER_KEY = "OXSMART-1234-KEY"
+
+# ===================== TRIAL END TIME =====================
+def get_trial_end_time():
+    """
+    Returns the trial end time.
+    Currently set to tomorrow at 5:00 AM.
+    """
+    now = datetime.now()
+    tomorrow = now + timedelta(days=1)
+    end_time = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 5, 0, 0)
+    return end_time
 
 # ===================== IMPORT JOB TRACKING =====================
 def init_import_jobs_table():
@@ -279,18 +291,18 @@ def get_trial_start():
     return None
 
 def get_trial_end():
-    start = get_trial_start()
-    if start:
-        return start + timedelta(days=TRIAL_DAYS)
-    return None
+    # This now uses the specific end time
+    return get_trial_end_time()
 
 def get_remaining_trial():
     data = load_license_data()
     if data.get("licensed", False):
         return None
+    
     end = get_trial_end()
     if not end:
         return None
+    
     now = datetime.now()
     if now >= end:
         return timedelta(0)
@@ -301,7 +313,6 @@ def is_trial_active():
         return True
     rem = get_remaining_trial()
     return rem is not None and rem.total_seconds() > 0
-
 # ---------------------- CONTEXT PROCESSOR ----------------------
 @app.context_processor
 def inject_user():
