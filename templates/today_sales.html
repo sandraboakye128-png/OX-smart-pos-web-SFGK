@@ -46,6 +46,9 @@
             <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
             <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
         </div>
+        <div id="filterInfo" class="text-xs text-gray-500 mt-2 hidden">
+            📋 Currently filtered by: <span id="filterDescription"></span>
+        </div>
     </div>
 
     <!-- Sales List (cards) – scrollable area -->
@@ -85,9 +88,11 @@
         console.log("DOM loaded – initializing Today Sales (Accessories & Phones)");
 
         let currentSalesData = [];
+        let currentFilteredData = [];
         let currentPeriod = 'daily';
         let currentStartDate = null;
         let currentEndDate = null;
+        let currentSearchTerm = '';
 
         // For reversal modal
         let currentReverseSaleId = null;
@@ -105,7 +110,7 @@
         window.addEventListener('online', updateOfflineBanner);
         window.addEventListener('offline', updateOfflineBanner);
 
-        // ---------- Caching helpers (distinct cache key for non‑screen) ----------
+        // ---------- Caching helpers ----------
         function cacheData(key, data) {
             try {
                 localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
@@ -157,7 +162,7 @@
             }
         }
 
-        // ---------- Fetch sales data with offline fallback (EXCLUDE screens) ----------
+        // ---------- Fetch sales data ----------
         async function loadSalesData() {
             updateOfflineBanner();
             console.log("Loading non‑screen sales data...");
@@ -202,6 +207,10 @@
             }
 
             currentSalesData = data;
+            
+            // Update filter info
+            updateFilterInfo();
+            
             applySearchAndRender();
             if (fromCache) {
                 document.getElementById('salesList').innerHTML +=
@@ -209,17 +218,56 @@
             }
         }
 
+        // ---------- Update filter info ----------
+        function updateFilterInfo() {
+            const filterInfo = document.getElementById('filterInfo');
+            const filterDesc = document.getElementById('filterDescription');
+            
+            let hasFilter = false;
+            let descriptions = [];
+            
+            if (currentSearchTerm) {
+                hasFilter = true;
+                descriptions.push(`Search: "${currentSearchTerm}"`);
+            }
+            
+            if (currentStartDate && currentEndDate) {
+                hasFilter = true;
+                descriptions.push(`Date: ${currentStartDate} to ${currentEndDate}`);
+            } else if (currentPeriod) {
+                hasFilter = true;
+                const periodNames = {
+                    'daily': 'Today',
+                    'weekly': 'This Week',
+                    'monthly': 'This Month',
+                    'yearly': 'This Year',
+                    'all': 'All Time'
+                };
+                descriptions.push(`Period: ${periodNames[currentPeriod] || currentPeriod}`);
+            }
+            
+            if (hasFilter) {
+                filterInfo.classList.remove('hidden');
+                filterDesc.textContent = descriptions.join(' | ');
+            } else {
+                filterInfo.classList.add('hidden');
+            }
+        }
+
         // ---------- Filter and render ----------
         function applySearchAndRender() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            currentSearchTerm = document.getElementById('searchInput').value.toLowerCase();
             let filtered = currentSalesData;
-            if (searchTerm) {
+            if (currentSearchTerm) {
                 filtered = currentSalesData.filter(sale =>
-                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) ||
-                    (sale.brand && sale.brand.toLowerCase().includes(searchTerm)) ||
-                    (sale.username && sale.username.toLowerCase().includes(searchTerm))
+                    (sale.name && sale.name.toLowerCase().includes(currentSearchTerm)) ||
+                    (sale.brand && sale.brand.toLowerCase().includes(currentSearchTerm)) ||
+                    (sale.username && sale.username.toLowerCase().includes(currentSearchTerm)) ||
+                    (sale.category && sale.category.toLowerCase().includes(currentSearchTerm))
                 );
             }
+            currentFilteredData = filtered;
+            updateFilterInfo();
             renderSales(filtered);
         }
 
@@ -387,7 +435,7 @@
             });
         }
 
-        // ---------- Update summary – now includes total sales count ----------
+        // ---------- Update summary – includes filter info ----------
         function updateSummary(sales) {
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
@@ -411,7 +459,7 @@
                 totalItems += sale.quantity || 0;
             }
 
-            const totalSalesCount = seenSales.size;  // total number of unique sales
+            const totalSalesCount = seenSales.size;
 
             let periodText = '';
             if (currentStartDate && currentEndDate) {
@@ -427,23 +475,34 @@
                 }
             }
 
+            // Add filter info to summary
+            let filterSummary = '';
+            if (currentSearchTerm) {
+                filterSummary = ` | 🔍 Filtered by: "${currentSearchTerm}"`;
+            }
+
             document.getElementById('summaryBar').innerHTML =
-                `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
+                `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}${filterSummary}<br>
                 <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
                 <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
                 <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
         }
 
-        // ---------- PDF export ----------
+        // ---------- PDF export – exports ONLY filtered data ----------
         async function exportPDF() {
             if (!navigator.onLine) {
                 alert('PDF export requires internet. Please connect and try again.');
                 return;
             }
-            if (!currentSalesData.length) {
-                alert('No data to export.');
+            
+            // Use currentFilteredData (which includes search filter)
+            const dataToExport = currentFilteredData;
+            
+            if (!dataToExport.length) {
+                alert('No data to export. Please adjust your filters.');
                 return;
             }
+            
             let periodText = '';
             if (currentStartDate && currentEndDate) {
                 periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
@@ -457,12 +516,18 @@
                     default: periodText = 'Today';
                 }
             }
+            
+            // Add search filter info to period text
+            if (currentSearchTerm) {
+                periodText += ` (Filtered by: "${currentSearchTerm}")`;
+            }
+            
             try {
                 const response = await fetch('/api/today_sales/pdf', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        sales_data: currentSalesData,
+                        sales_data: dataToExport,
                         period_text: periodText + ' (Accessories & Phones)'
                     })
                 });
@@ -471,7 +536,7 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `TodaySales_AccessoriesPhones_${new Date().toISOString().slice(0, 19)}.pdf`;
+                    a.download = `Sales_${periodText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 19)}.pdf`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
@@ -510,6 +575,9 @@
                 currentEndDate = null;
                 document.getElementById('startDate').value = '';
                 document.getElementById('endDate').value = '';
+                // Reset search when changing period
+                document.getElementById('searchInput').value = '';
+                currentSearchTerm = '';
                 loadSalesData();
             });
         });

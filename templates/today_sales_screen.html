@@ -13,29 +13,23 @@
             <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
             <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
         </div>
-        <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄
-            Refresh</button>
+        <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
     </div>
 
     <!-- Search Bar -->
     <div class="mb-4">
         <input type="text" id="searchInput" placeholder="🔍 Search screen product, brand, or user..."
-            class="w-full border border-gray-300 rounded-lg px-4 py-2">
+               class="w-full border border-gray-300 rounded-lg px-4 py-2">
         <p class="text-xs text-gray-500 mt-1">🔎 Type to filter screen sales records by product, brand, or user</p>
     </div>
 
     <!-- Period Filter Buttons -->
     <div class="flex flex-wrap gap-2 mb-4">
-        <button data-period="daily"
-            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
-        <button data-period="weekly"
-            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
-        <button data-period="monthly"
-            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
-        <button data-period="yearly"
-            class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
-        <button data-period="all"
-            class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
+        <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
+        <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
+        <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
+        <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
+        <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
     </div>
 
     <!-- Date Range Filter -->
@@ -49,10 +43,11 @@
                 <label class="block text-sm font-medium text-gray-700">To Date</label>
                 <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
             </div>
-            <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom
-                Range</button>
-            <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️
-                Print / Save PDF</button>
+            <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
+            <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
+        </div>
+        <div id="filterInfo" class="text-xs text-gray-500 mt-2 hidden">
+            📋 Currently filtered by: <span id="filterDescription"></span>
         </div>
     </div>
 
@@ -63,8 +58,7 @@
 </div>
 
 <!-- ========== SUMMARY BAR – fixed at the bottom ========== -->
-<div id="summaryBar"
-    class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-3 text-center font-bold shadow-lg z-50">
+<div id="summaryBar" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-3 text-center font-bold shadow-lg z-50">
     <!-- totals will appear here -->
 </div>
 
@@ -78,16 +72,12 @@
         <div id="reverseItemList" class="p-4 space-y-3"></div>
         <div class="sticky bottom-0 bg-white p-4 border-t flex justify-between">
             <div>
-                <button onclick="selectAllReverseItems()" class="bg-blue-500 text-white px-3 py-1 rounded mr-2">Select
-                    All</button>
-                <button onclick="deselectAllReverseItems()" class="bg-orange-500 text-white px-3 py-1 rounded">Deselect
-                    All</button>
+                <button onclick="selectAllReverseItems()" class="bg-blue-500 text-white px-3 py-1 rounded mr-2">Select All</button>
+                <button onclick="deselectAllReverseItems()" class="bg-orange-500 text-white px-3 py-1 rounded">Deselect All</button>
             </div>
             <div>
-                <button id="confirmReverseBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Reverse
-                    Selected</button>
-                <button onclick="closeReverseModal()"
-                    class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded ml-2">Cancel</button>
+                <button id="confirmReverseBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Reverse Selected</button>
+                <button onclick="closeReverseModal()" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded ml-2">Cancel</button>
             </div>
         </div>
     </div>
@@ -98,9 +88,11 @@
         console.log("DOM fully loaded - initializing screen today sales page");
 
         let currentSalesData = [];
+        let currentFilteredData = [];
         let currentPeriod = 'daily';
         let currentStartDate = null;
         let currentEndDate = null;
+        let currentSearchTerm = '';
 
         // For reversal modal
         let currentReverseSaleId = null;
@@ -122,7 +114,7 @@
         function cacheData(key, data) {
             try {
                 localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
-            } catch (e) { }
+            } catch (e) {}
         }
         function getCachedData(key, maxAgeMinutes = 60) {
             try {
@@ -215,6 +207,10 @@
             }
 
             currentSalesData = data;
+            
+            // Update filter info
+            updateFilterInfo();
+            
             applySearchAndRender();
             if (fromCache) {
                 document.getElementById('salesList').innerHTML +=
@@ -222,17 +218,56 @@
             }
         }
 
+        // ---------- Update filter info ----------
+        function updateFilterInfo() {
+            const filterInfo = document.getElementById('filterInfo');
+            const filterDesc = document.getElementById('filterDescription');
+            
+            let hasFilter = false;
+            let descriptions = [];
+            
+            if (currentSearchTerm) {
+                hasFilter = true;
+                descriptions.push(`Search: "${currentSearchTerm}"`);
+            }
+            
+            if (currentStartDate && currentEndDate) {
+                hasFilter = true;
+                descriptions.push(`Date: ${currentStartDate} to ${currentEndDate}`);
+            } else if (currentPeriod) {
+                hasFilter = true;
+                const periodNames = {
+                    'daily': 'Today',
+                    'weekly': 'This Week',
+                    'monthly': 'This Month',
+                    'yearly': 'This Year',
+                    'all': 'All Time'
+                };
+                descriptions.push(`Period: ${periodNames[currentPeriod] || currentPeriod}`);
+            }
+            
+            if (hasFilter) {
+                filterInfo.classList.remove('hidden');
+                filterDesc.textContent = descriptions.join(' | ');
+            } else {
+                filterInfo.classList.add('hidden');
+            }
+        }
+
         // ---------- Filter and render ----------
         function applySearchAndRender() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            currentSearchTerm = document.getElementById('searchInput').value.toLowerCase();
             let filtered = currentSalesData;
-            if (searchTerm) {
+            if (currentSearchTerm) {
                 filtered = currentSalesData.filter(sale =>
-                    (sale.name && sale.name.toLowerCase().includes(searchTerm)) ||
-                    (sale.brand && sale.brand.toLowerCase().includes(searchTerm)) ||
-                    (sale.username && sale.username.toLowerCase().includes(searchTerm))
+                    (sale.name && sale.name.toLowerCase().includes(currentSearchTerm)) ||
+                    (sale.brand && sale.brand.toLowerCase().includes(currentSearchTerm)) ||
+                    (sale.username && sale.username.toLowerCase().includes(currentSearchTerm)) ||
+                    (sale.category && sale.category.toLowerCase().includes(currentSearchTerm))
                 );
             }
+            currentFilteredData = filtered;
+            updateFilterInfo();
             renderSales(filtered);
         }
 
@@ -400,7 +435,7 @@
             });
         }
 
-        // ---------- Update summary – now includes total sales count ----------
+        // ---------- Update summary – includes filter info ----------
         function updateSummary(sales) {
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
@@ -424,7 +459,7 @@
                 totalItems += sale.quantity || 0;
             }
 
-            const totalSalesCount = seenSales.size;  // <-- total number of unique sales
+            const totalSalesCount = seenSales.size;
 
             let periodText = '';
             if (currentStartDate && currentEndDate) {
@@ -440,23 +475,34 @@
                 }
             }
 
+            // Add filter info to summary
+            let filterSummary = '';
+            if (currentSearchTerm) {
+                filterSummary = ` | 🔍 Filtered by: "${currentSearchTerm}"`;
+            }
+
             document.getElementById('summaryBar').innerHTML =
-                `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}<br>
+                `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}${filterSummary}<br>
                 <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
                 <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
                 <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
         }
 
-        // ---------- PDF export ----------
+        // ---------- PDF export – exports ONLY filtered data ----------
         async function exportPDF() {
             if (!navigator.onLine) {
                 alert('PDF export requires internet. Please connect and try again.');
                 return;
             }
-            if (!currentSalesData.length) {
-                alert('No data to export.');
+            
+            // Use currentFilteredData (which includes search filter)
+            const dataToExport = currentFilteredData;
+            
+            if (!dataToExport.length) {
+                alert('No data to export. Please adjust your filters.');
                 return;
             }
+            
             let periodText = '';
             if (currentStartDate && currentEndDate) {
                 periodText = `Period: ${currentStartDate} to ${currentEndDate}`;
@@ -470,12 +516,18 @@
                     default: periodText = 'Today';
                 }
             }
+            
+            // Add search filter info to period text
+            if (currentSearchTerm) {
+                periodText += ` (Filtered by: "${currentSearchTerm}")`;
+            }
+            
             try {
                 const response = await fetch('/api/today_sales/pdf', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        sales_data: currentSalesData,
+                        sales_data: dataToExport,
                         period_text: periodText + ' (Screens)'
                     })
                 });
@@ -484,7 +536,7 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `Screen_SalesReport_${new Date().toISOString().slice(0, 19)}.pdf`;
+                    a.download = `Screen_Sales_${periodText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 19)}.pdf`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
@@ -523,6 +575,9 @@
                 currentEndDate = null;
                 document.getElementById('startDate').value = '';
                 document.getElementById('endDate').value = '';
+                // Reset search when changing period
+                document.getElementById('searchInput').value = '';
+                currentSearchTerm = '';
                 loadSalesData();
             });
         });
