@@ -82,6 +82,7 @@
         .app-container {
             display: flex;
             min-height: 100vh;
+            height: 100%;
         }
 
         /* Sidebar overlay (mobile only) */
@@ -115,13 +116,14 @@
             transform: translateX(0);
         }
 
-        /* Desktop: sidebar always visible */
+        /* Desktop: sidebar always visible, full height */
         @media (min-width: 768px) {
             .sidebar {
                 position: relative;
                 transform: translateX(0) !important;
                 width: 224px;
-                height: 100vh;
+                min-height: 100vh;
+                height: 100%;
                 border-radius: 0 1.5rem 1.5rem 0;
             }
             .sidebar-overlay {
@@ -135,13 +137,15 @@
             }
             .app-container {
                 flex-direction: row;
+                align-items: stretch;
             }
             .main-content-wrapper {
                 flex: 1;
                 display: flex;
                 flex-direction: column;
                 min-height: 100vh;
-                width: 0; /* Forces flex to take remaining space */
+                height: 100%;
+                width: 0;
             }
         }
 
@@ -153,6 +157,8 @@
             .sidebar {
                 border-radius: 0 1.5rem 1.5rem 0;
                 transform: translateX(-100%);
+                width: 280px;
+                height: 100vh;
             }
             .sidebar.open {
                 transform: translateX(0);
@@ -165,6 +171,156 @@
             }
             .hamburger-btn {
                 display: block !important;
+            }
+            
+            /* ===== MOBILE FONT & SPACING REDUCTIONS ===== */
+            body {
+                font-size: 14px;
+            }
+            
+            h1, .text-3xl {
+                font-size: 1.25rem !important;
+                line-height: 1.4 !important;
+            }
+            h2, .text-2xl {
+                font-size: 1.1rem !important;
+                line-height: 1.4 !important;
+            }
+            h3, .text-xl {
+                font-size: 1rem !important;
+                line-height: 1.4 !important;
+            }
+            h4, .text-lg {
+                font-size: 0.95rem !important;
+                line-height: 1.4 !important;
+            }
+            
+            .p-6 {
+                padding: 0.75rem !important;
+            }
+            .p-4 {
+                padding: 0.5rem !important;
+            }
+            .p-3 {
+                padding: 0.4rem !important;
+            }
+            .px-4 {
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+            }
+            .py-2 {
+                padding-top: 0.4rem !important;
+                padding-bottom: 0.4rem !important;
+            }
+            .mb-6 {
+                margin-bottom: 0.75rem !important;
+            }
+            .mb-4 {
+                margin-bottom: 0.5rem !important;
+            }
+            .mt-4 {
+                margin-top: 0.5rem !important;
+            }
+            .gap-4 {
+                gap: 0.5rem !important;
+            }
+            .gap-3 {
+                gap: 0.4rem !important;
+            }
+            .gap-2 {
+                gap: 0.3rem !important;
+            }
+            
+            .bg-white.rounded-xl.shadow-md.p-4 {
+                padding: 0.5rem !important;
+            }
+            .bg-white.rounded-xl.shadow-md.p-6 {
+                padding: 0.75rem !important;
+            }
+            
+            .text-2xl {
+                font-size: 1.1rem !important;
+            }
+            .text-xl {
+                font-size: 1rem !important;
+            }
+            .text-sm {
+                font-size: 0.7rem !important;
+            }
+            .text-xs {
+                font-size: 0.6rem !important;
+            }
+            
+            button, .btn, .px-4.py-2 {
+                padding: 0.3rem 0.6rem !important;
+                font-size: 0.7rem !important;
+            }
+            .px-3.py-2 {
+                padding: 0.25rem 0.5rem !important;
+                font-size: 0.7rem !important;
+            }
+            
+            input, select, .border.rounded-lg.px-3.py-2 {
+                padding: 0.25rem 0.5rem !important;
+                font-size: 0.7rem !important;
+            }
+            
+            table td, table th {
+                font-size: 0.65rem !important;
+                padding: 0.3rem 0.4rem !important;
+            }
+            
+            .nav-link {
+                font-size: 0.75rem !important;
+                padding: 0.3rem 0.6rem !important;
+            }
+            
+            .text-xl.font-bold.text-white {
+                font-size: 1rem !important;
+            }
+            .text-xs.text-gray-400 {
+                font-size: 0.55rem !important;
+            }
+            
+            .grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-5 {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 0.4rem !important;
+            }
+            .grid-cols-1.lg\\:grid-cols-2 {
+                grid-template-columns: 1fr !important;
+            }
+            
+            .flex-wrap {
+                gap: 0.3rem !important;
+            }
+            
+            #summaryBar {
+                font-size: 0.6rem !important;
+                padding: 0.3rem !important;
+            }
+            #summaryBar .grid {
+                gap: 0.2rem !important;
+            }
+            
+            .fixed.inset-0 .bg-white.rounded-xl {
+                max-width: 95% !important;
+                margin: 0.5rem !important;
+            }
+            .fixed.inset-0 .bg-white.rounded-xl .p-6 {
+                padding: 0.5rem !important;
+            }
+            .fixed.inset-0 .bg-white.rounded-xl .p-4 {
+                padding: 0.4rem !important;
+            }
+            
+            .border.rounded-lg.p-4 {
+                padding: 0.4rem !important;
+            }
+            .border.rounded-lg.p-4 .text-sm {
+                font-size: 0.6rem !important;
+            }
+            .border.rounded-lg.p-4 .text-lg {
+                font-size: 0.85rem !important;
             }
         }
 
@@ -213,6 +369,7 @@
             display: flex;
             flex-direction: column;
             min-height: 100vh;
+            height: 100%;
             width: 100%;
         }
 
@@ -244,6 +401,16 @@
         @media (max-width: 767px) {
             .mobile-header {
                 display: flex !important;
+                padding: 8px 12px !important;
+            }
+            .mobile-header h1 {
+                font-size: 0.9rem !important;
+            }
+            .mobile-header .text-sm {
+                font-size: 0.65rem !important;
+            }
+            .mobile-header .text-xl {
+                font-size: 1.1rem !important;
             }
         }
 
@@ -255,12 +422,17 @@
             padding: 12px;
             font-size: 0.75rem;
             flex-shrink: 0;
+            margin-top: auto;
         }
 
         @media (max-width: 767px) {
             footer {
-                padding: 8px;
-                font-size: 0.6rem;
+                padding: 6px;
+                font-size: 0.5rem !important;
+                line-height: 1.4 !important;
+            }
+            footer .mt-1 {
+                margin-top: 0.2rem !important;
             }
         }
     </style>

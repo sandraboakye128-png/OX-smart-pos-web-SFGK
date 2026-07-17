@@ -7,43 +7,43 @@
 </div>
 
 <!-- Header with category indicator -->
-<div class="flex justify-between items-center mb-6">
+<div class="flex flex-wrap justify-between items-center gap-3 mb-6">
     <div class="flex items-center gap-2">
-        <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
+        <h1 class="text-2xl md:text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
         <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories &amp; Phones</span>
     </div>
-    <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
+    <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-sm md:text-base">🔄 Refresh</button>
 </div>
 
 <!-- Search Bar -->
 <div class="mb-4">
     <input type="text" id="searchInput" placeholder="🔍 Search product, brand, or user..."
-           class="w-full border border-gray-300 rounded-lg px-4 py-2">
+           class="w-full border border-gray-300 rounded-lg px-3 py-1.5 md:px-4 md:py-2 text-sm md:text-base">
     <p class="text-xs text-gray-500 mt-1">🔎 Type to filter sales records by product, brand, or user</p>
 </div>
 
 <!-- Period Filter Buttons -->
-<div class="flex flex-wrap gap-2 mb-4">
-    <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
-    <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
-    <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
-    <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
-    <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
+<div class="flex flex-wrap gap-1.5 md:gap-2 mb-4">
+    <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-2.5 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm">Today</button>
+    <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-2.5 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm">This Week</button>
+    <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-2.5 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm">This Month</button>
+    <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-2.5 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm">This Year</button>
+    <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-2.5 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm">All Time</button>
 </div>
 
 <!-- Date Range Filter -->
-<div class="bg-white rounded-xl shadow-md p-4 mb-6">
-    <div class="flex flex-wrap items-end gap-4">
+<div class="bg-white rounded-xl shadow-md p-3 md:p-4 mb-6">
+    <div class="flex flex-wrap items-end gap-2 md:gap-4">
         <div>
-            <label class="block text-sm font-medium text-gray-700">From Date</label>
-            <input type="date" id="startDate" class="border rounded-lg px-3 py-2">
+            <label class="block text-xs md:text-sm font-medium text-gray-700">From Date</label>
+            <input type="date" id="startDate" class="border rounded-lg px-2 py-1 md:px-3 md:py-2 text-sm">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700">To Date</label>
-            <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
+            <label class="block text-xs md:text-sm font-medium text-gray-700">To Date</label>
+            <input type="date" id="endDate" class="border rounded-lg px-2 py-1 md:px-3 md:py-2 text-sm">
         </div>
-        <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
-        <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
+        <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 md:px-5 md:py-2 rounded-lg text-xs md:text-sm">Apply Custom Range</button>
+        <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 md:px-5 md:py-2 rounded-lg text-xs md:text-sm ml-auto">🖨️ PDF</button>
     </div>
     <div id="filterInfo" class="text-xs text-gray-500 mt-2 hidden">
         📋 Currently filtered by: <span id="filterDescription"></span>
@@ -51,31 +51,31 @@
 </div>
 
 <!-- Sales List (cards) – scrollable area -->
-<div id="salesList" class="space-y-4">
+<div id="salesList" class="space-y-3 md:space-y-4 pb-4">
     <div class="text-center text-gray-400 py-8">Loading sales data...</div>
 </div>
 
-<!-- ========== SUMMARY BAR – fixed at the bottom ========== -->
-<div id="summaryBar" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-3 text-center font-bold shadow-lg z-50">
+<!-- ========== SUMMARY BAR – Fixed at bottom with proper spacing ========== -->
+<div id="summaryBar" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-2 md:p-3 text-center font-bold shadow-lg z-50 text-xs md:text-sm">
     <!-- totals will appear here -->
 </div>
 
 <!-- ========== MODAL: SELECT ITEMS TO REVERSE ========== -->
-<div id="reverseModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
-    <div class="bg-white rounded-xl shadow-xl w-11/12 max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div class="sticky top-0 bg-white p-4 border-b flex justify-between items-center">
-            <h3 class="text-xl font-bold" id="reverseModalTitle">Select Items to Reverse</h3>
-            <button onclick="closeReverseModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+<div id="reverseModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white p-3 md:p-4 border-b flex justify-between items-center">
+            <h3 class="text-base md:text-xl font-bold" id="reverseModalTitle">Select Items to Reverse</h3>
+            <button onclick="closeReverseModal()" class="text-gray-500 hover:text-gray-700 text-xl md:text-2xl">&times;</button>
         </div>
-        <div id="reverseItemList" class="p-4 space-y-3"></div>
-        <div class="sticky bottom-0 bg-white p-4 border-t flex justify-between">
-            <div>
-                <button onclick="selectAllReverseItems()" class="bg-blue-500 text-white px-3 py-1 rounded mr-2">Select All</button>
-                <button onclick="deselectAllReverseItems()" class="bg-orange-500 text-white px-3 py-1 rounded">Deselect All</button>
+        <div id="reverseItemList" class="p-3 md:p-4 space-y-3"></div>
+        <div class="sticky bottom-0 bg-white p-3 md:p-4 border-t flex flex-wrap justify-between gap-2">
+            <div class="flex gap-2">
+                <button onclick="selectAllReverseItems()" class="bg-blue-500 text-white px-2 py-1 md:px-3 md:py-1 rounded text-xs md:text-sm">Select All</button>
+                <button onclick="deselectAllReverseItems()" class="bg-orange-500 text-white px-2 py-1 md:px-3 md:py-1 rounded text-xs md:text-sm">Deselect All</button>
             </div>
-            <div>
-                <button id="confirmReverseBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">Reverse Selected</button>
-                <button onclick="closeReverseModal()" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded ml-2">Cancel</button>
+            <div class="flex gap-2">
+                <button id="confirmReverseBtn" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 md:px-4 md:py-2 rounded text-xs md:text-sm">Reverse Selected</button>
+                <button onclick="closeReverseModal()" class="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 md:px-4 md:py-2 rounded text-xs md:text-sm">Cancel</button>
             </div>
         </div>
     </div>
@@ -150,13 +150,13 @@
 
         function getPaymentBadge(paymentMethod, chequeNumber) {
             if (paymentMethod === 'cash') {
-                return '<span class="inline-flex items-center bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">💵 Cash</span>';
+                return '<span class="inline-flex items-center bg-green-100 text-green-800 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs font-medium">💵 Cash</span>';
             } else if (paymentMethod === 'momo') {
-                return '<span class="inline-flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">📱 Mobile Money</span>';
+                return '<span class="inline-flex items-center bg-blue-100 text-blue-800 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs font-medium">📱 MoMo</span>';
             } else if (paymentMethod === 'cheque') {
-                return `<span class="inline-flex items-center bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">📝 Cheque ${chequeNumber ? '#' + escapeHtml(chequeNumber) : ''}</span>`;
+                return `<span class="inline-flex items-center bg-purple-100 text-purple-800 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs font-medium">📝 Cheque ${chequeNumber ? '#' + escapeHtml(chequeNumber) : ''}</span>`;
             } else {
-                return '<span class="inline-flex items-center bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">❓ Unknown</span>';
+                return '<span class="inline-flex items-center bg-gray-100 text-gray-800 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs font-medium">❓ Unknown</span>';
             }
         }
 
@@ -205,10 +205,7 @@
             }
 
             currentSalesData = data;
-            
-            // Update filter info
             updateFilterInfo();
-            
             applySearchAndRender();
             if (fromCache) {
                 document.getElementById('salesList').innerHTML +=
@@ -278,7 +275,7 @@
 
             saleItems.forEach((item, idx) => {
                 const itemDiv = document.createElement('div');
-                itemDiv.className = 'border rounded-lg p-3 flex items-start space-x-3';
+                itemDiv.className = 'border rounded-lg p-2 md:p-3 flex items-start space-x-2 md:space-x-3';
                 const cb = document.createElement('input');
                 cb.type = 'checkbox';
                 cb.className = 'mt-1';
@@ -288,12 +285,12 @@
                     product_id: item.product_id
                 });
                 const info = document.createElement('div');
-                info.className = 'flex-1 text-sm';
+                info.className = 'flex-1 text-xs md:text-sm';
                 info.innerHTML = `
                     <strong>${escapeHtml(item.name)} (${escapeHtml(item.brand)})</strong><br>
                     Batch #${item.batch_id === -1 ? 'DELETED' : item.batch_id}<br>
                     Quantity: ${item.quantity}<br>
-                    Selling Price: ${formatMoney(item.selling_price)}<br>
+                    Selling: ${formatMoney(item.selling_price)}<br>
                     Cost: ${formatMoney(item.cost_price)}<br>
                     Profit: ${formatMoney(item.profit)}
                 `;
@@ -389,9 +386,9 @@
                 const itemsHtml = saleGroup.items.map(item => {
                     const statusText = item.is_deleted_batch ? '⚠️ (Batch Deleted - History Only)' : '';
                     return `
-                        <div class="border-b pb-2 mb-2 last:border-0">
-                            <div class="font-semibold text-indigo-700">${escapeHtml(item.name)} (${escapeHtml(item.brand)}) ${statusText}</div>
-                            <div class="text-sm grid grid-cols-2 gap-1">
+                        <div class="border-b pb-1 md:pb-2 mb-1 md:mb-2 last:border-0">
+                            <div class="font-semibold text-indigo-700 text-sm md:text-base">${escapeHtml(item.name)} (${escapeHtml(item.brand)}) ${statusText}</div>
+                            <div class="text-xs md:text-sm grid grid-cols-2 gap-0.5 md:gap-1">
                                 <div>Qty: ${item.quantity}</div>
                                 <div>Selling: ${formatMoney(item.selling_price)}</div>
                                 <div>Batch: ${item.batch_id === -1 ? 'DELETED' : '#' + item.batch_id}</div>
@@ -404,18 +401,18 @@
                 }).join('');
 
                 html += `
-                    <div class="bg-white rounded-xl shadow-md p-4 border" data-sale-id="${saleId}">
-                        <div class="flex justify-between items-start mb-2">
-                            <div class="text-sm text-gray-500">Sale #${saleId} | ${saleGroup.date}</div>
+                    <div class="bg-white rounded-xl shadow-md p-3 md:p-4 border" data-sale-id="${saleId}">
+                        <div class="flex flex-wrap justify-between items-start mb-1 md:mb-2 gap-1">
+                            <div class="text-xs md:text-sm text-gray-500">Sale #${saleId} | ${saleGroup.date}</div>
                             <div>${paymentBadge}</div>
                         </div>
                         <div class="text-xs text-gray-600 mb-1">👤 User: ${escapeHtml(saleGroup.username)}</div>
                         ${itemsHtml}
-                        <div class="mt-2 pt-2 border-t flex justify-between items-center">
-                            <button class="reverse-sale-btn bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm" data-sale-id="${saleId}" data-sale-items='${JSON.stringify(saleGroup.items)}'>↺ Reverse Selected Items</button>
-                            <div>
-                                <span class="text-sm">Discount: ${formatMoney(saleGroup.discount)}</span>
-                                <span class="text-lg font-bold ml-4">Total: ${formatMoney(saleGroup.total)}</span>
+                        <div class="mt-1 md:mt-2 pt-1 md:pt-2 border-t flex flex-wrap justify-between items-center gap-2">
+                            <button class="reverse-sale-btn bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 md:px-3 md:py-1 rounded text-xs md:text-sm" data-sale-id="${saleId}" data-sale-items='${JSON.stringify(saleGroup.items)}'>↺ Reverse</button>
+                            <div class="flex flex-wrap items-center gap-1 md:gap-2">
+                                <span class="text-xs md:text-sm">Discount: ${formatMoney(saleGroup.discount)}</span>
+                                <span class="text-base md:text-lg font-bold">Total: ${formatMoney(saleGroup.total)}</span>
                             </div>
                         </div>
                     </div>
@@ -433,7 +430,7 @@
             });
         }
 
-        // ---------- Update summary – includes filter info ----------
+        // ---------- Update summary – nicely formatted like purchases ----------
         function updateSummary(sales) {
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
@@ -473,17 +470,34 @@
                 }
             }
 
-            // Add filter info to summary
             let filterSummary = '';
             if (currentSearchTerm) {
-                filterSummary = ` | 🔍 Filtered by: "${currentSearchTerm}"`;
+                filterSummary = ` | 🔍 "${currentSearchTerm}"`;
             }
 
-            document.getElementById('summaryBar').innerHTML =
-                `${periodText}  |  🧾 Sales: ${totalSalesCount}  |  📦 Items: ${totalItems}  |  💰 Sales: ${formatMoney(totalSales)}  |  📉 Discount: ${formatMoney(totalDiscount)}  |  📈 Profit: ${formatMoney(totalProfit)}${filterSummary}<br>
-                <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>  |  
-                <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>  |  
-                <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>`;
+            document.getElementById('summaryBar').innerHTML = `
+                <div class="flex flex-wrap justify-center items-center gap-1 md:gap-2 text-[10px] md:text-xs">
+                    <span class="text-teal-300">${periodText}</span>
+                    <span class="text-gray-500">|</span>
+                    <span>🧾 Sales: <strong>${totalSalesCount}</strong></span>
+                    <span class="text-gray-500">|</span>
+                    <span>📦 Items: <strong>${totalItems}</strong></span>
+                    <span class="text-gray-500">|</span>
+                    <span>💰 Sales: <strong class="text-green-400">${formatMoney(totalSales)}</strong></span>
+                    <span class="text-gray-500">|</span>
+                    <span>📉 Disc: <strong class="text-red-400">${formatMoney(totalDiscount)}</strong></span>
+                    <span class="text-gray-500">|</span>
+                    <span>📈 Profit: <strong class="${totalProfit >= 0 ? 'text-teal-400' : 'text-red-400'}">${formatMoney(totalProfit)}</strong></span>
+                    ${filterSummary}
+                </div>
+                <div class="flex flex-wrap justify-center items-center gap-1 md:gap-2 text-[9px] md:text-xs mt-0.5">
+                    <span class="text-green-400">💵 Cash: ${formatMoney(cashTotal)}</span>
+                    <span class="text-gray-600">|</span>
+                    <span class="text-blue-400">📱 MoMo: ${formatMoney(momoTotal)}</span>
+                    <span class="text-gray-600">|</span>
+                    <span class="text-purple-400">📝 Cheque: ${formatMoney(chequeTotal)}</span>
+                </div>
+            `;
         }
 
         // ---------- PDF export – exports ONLY filtered data ----------
@@ -493,7 +507,6 @@
                 return;
             }
             
-            // Use currentFilteredData (which includes search filter)
             const dataToExport = currentFilteredData;
             
             if (!dataToExport.length) {
@@ -515,7 +528,6 @@
                 }
             }
             
-            // Add search filter info to period text
             if (currentSearchTerm) {
                 periodText += ` (Filtered by: "${currentSearchTerm}")`;
             }
@@ -573,7 +585,6 @@
                 currentEndDate = null;
                 document.getElementById('startDate').value = '';
                 document.getElementById('endDate').value = '';
-                // Reset search when changing period
                 document.getElementById('searchInput').value = '';
                 currentSearchTerm = '';
                 loadSalesData();

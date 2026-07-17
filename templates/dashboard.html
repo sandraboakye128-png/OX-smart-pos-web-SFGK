@@ -2,114 +2,114 @@
 
 {% block content %}
 <!-- Offline banner (hidden by default) -->
-<div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+<div id="offlineBanner" class="mb-3 md:mb-4 bg-red-100 border border-red-400 text-red-700 px-3 py-2 md:px-4 md:py-3 rounded text-sm md:text-base hidden">
     ⚠️ You are offline – showing cached data. Data will update when you reconnect.
 </div>
 
 <!-- Header with date range, time range and real-time clock -->
-<div class="flex flex-wrap justify-between items-center gap-4 mb-6">
-    <h1 class="text-3xl font-bold text-gray-800">Dashboard</h1>
-    <div class="flex flex-wrap items-center gap-4">
+<div class="flex flex-wrap justify-between items-center gap-3 md:gap-4 mb-4 md:mb-6">
+    <h1 class="text-2xl md:text-3xl font-bold text-gray-800">Dashboard</h1>
+    <div class="flex flex-wrap items-center gap-2 md:gap-4">
         <!-- Date Range Picker -->
-        <div class="flex items-center gap-2">
-            <input type="date" id="startDate" class="border border-gray-300 rounded-lg px-3 py-2" placeholder="Start Date">
-            <span class="text-gray-500">to</span>
-            <input type="date" id="endDate" class="border border-gray-300 rounded-lg px-3 py-2" placeholder="End Date">
+        <div class="flex items-center gap-1 md:gap-2">
+            <input type="date" id="startDate" class="border border-gray-300 rounded-lg px-2 py-1 md:px-3 md:py-2 text-xs md:text-sm">
+            <span class="text-gray-500 text-xs md:text-sm">to</span>
+            <input type="date" id="endDate" class="border border-gray-300 rounded-lg px-2 py-1 md:px-3 md:py-2 text-xs md:text-sm">
         </div>
         <!-- Time Range Picker -->
-        <div class="flex items-center gap-2">
-            <input type="time" id="startTime" class="border border-gray-300 rounded-lg px-3 py-2" step="60">
-            <span class="text-gray-500">to</span>
-            <input type="time" id="endTime" class="border border-gray-300 rounded-lg px-3 py-2" step="60">
+        <div class="flex items-center gap-1 md:gap-2">
+            <input type="time" id="startTime" class="border border-gray-300 rounded-lg px-2 py-1 md:px-3 md:py-2 text-xs md:text-sm" step="60">
+            <span class="text-gray-500 text-xs md:text-sm">to</span>
+            <input type="time" id="endTime" class="border border-gray-300 rounded-lg px-2 py-1 md:px-3 md:py-2 text-xs md:text-sm" step="60">
         </div>
-        <button id="applyFilterBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Apply Filter</button>
-        <span id="clock" class="text-gray-500 font-mono"></span>
+        <button id="applyFilterBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-2.5 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm">Apply Filter</button>
+        <span id="clock" class="text-gray-500 font-mono text-xs md:text-sm"></span>
     </div>
 </div>
 
-<!-- KPI Cards – 5 columns -->
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <p class="text-gray-500 text-sm">Total Sales</p>
-        <p id="salesValue" class="text-2xl font-bold text-indigo-600">₵0</p>
+<!-- KPI Cards – 5 columns (2 on mobile) -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-4 mb-4 md:mb-6">
+    <div class="bg-white rounded-xl shadow-md p-2 md:p-4">
+        <p class="text-gray-500 text-[10px] md:text-sm">Total Sales</p>
+        <p id="salesValue" class="text-base md:text-2xl font-bold text-indigo-600">₵0</p>
     </div>
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <p class="text-gray-500 text-sm">Total Profit</p>
-        <p id="profitValue" class="text-2xl font-bold text-green-600">₵0</p>
+    <div class="bg-white rounded-xl shadow-md p-2 md:p-4">
+        <p class="text-gray-500 text-[10px] md:text-sm">Total Profit</p>
+        <p id="profitValue" class="text-base md:text-2xl font-bold text-green-600">₵0</p>
     </div>
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <p class="text-gray-500 text-sm">Total Products</p>
-        <p id="productsValue" class="text-2xl font-bold text-blue-600">0</p>
+    <div class="bg-white rounded-xl shadow-md p-2 md:p-4">
+        <p class="text-gray-500 text-[10px] md:text-sm">Total Products</p>
+        <p id="productsValue" class="text-base md:text-2xl font-bold text-blue-600">0</p>
     </div>
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <p class="text-gray-500 text-sm">Total Batches</p>
-        <p id="batchesValue" class="text-2xl font-bold text-purple-600">0</p>
+    <div class="bg-white rounded-xl shadow-md p-2 md:p-4">
+        <p class="text-gray-500 text-[10px] md:text-sm">Total Batches</p>
+        <p id="batchesValue" class="text-base md:text-2xl font-bold text-purple-600">0</p>
     </div>
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <p class="text-gray-500 text-sm">Low Stock Items</p>
-        <p id="lowStockValue" class="text-2xl font-bold text-red-600">0</p>
+    <div class="bg-white rounded-xl shadow-md p-2 md:p-4 col-span-2 md:col-span-1">
+        <p class="text-gray-500 text-[10px] md:text-sm">Low Stock Items</p>
+        <p id="lowStockValue" class="text-base md:text-2xl font-bold text-red-600">0</p>
     </div>
 </div>
 
 <!-- Top Products & Low Stock Lists -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-    <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
-        <h2 class="text-xl font-semibold mb-3">🏆 Top Products</h2>
-        <div id="topProductsList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2"></div>
-        <p class="text-xs text-gray-400 mt-2">* Based on total quantity sold for selected period</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-4 md:mb-6">
+    <div class="bg-white rounded-xl shadow-md p-3 md:p-4 flex flex-col">
+        <h2 class="text-base md:text-xl font-semibold mb-2 md:mb-3">🏆 Top Products</h2>
+        <div id="topProductsList" class="flex-1 max-h-60 md:max-h-80 overflow-y-auto space-y-1 md:space-y-2 pr-2"></div>
+        <p class="text-[10px] md:text-xs text-gray-400 mt-1 md:mt-2">* Based on total quantity sold for selected period</p>
     </div>
-    <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
-        <h2 class="text-xl font-semibold mb-3">⚠️ Low Stock Items</h2>
+    <div class="bg-white rounded-xl shadow-md p-3 md:p-4 flex flex-col">
+        <h2 class="text-base md:text-xl font-semibold mb-2 md:mb-3">⚠️ Low Stock Items</h2>
         <!-- Search bar for low stock -->
-        <div class="mb-3">
+        <div class="mb-2 md:mb-3">
             <input type="text" id="lowStockSearch" placeholder="🔍 Search by name, brand, category, or batch #..." 
-                   class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
+                   class="w-full border border-gray-300 rounded-lg px-2 py-1 md:px-3 md:py-1.5 text-xs md:text-sm">
         </div>
-        <div id="lowStockList" class="flex-1 max-h-80 overflow-y-auto space-y-2 pr-2"></div>
+        <div id="lowStockList" class="flex-1 max-h-60 md:max-h-80 overflow-y-auto space-y-1 md:space-y-2 pr-2"></div>
     </div>
 </div>
 
 <!-- Pie Chart & Sales History (with Calendar) -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
     <!-- Pie Chart -->
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <h2 class="text-xl font-semibold mb-3">🥧 Product Distribution</h2>
-        <div id="pieChartContainer">
-            <canvas id="pieChart" width="400" height="300" class="mx-auto"></canvas>
+    <div class="bg-white rounded-xl shadow-md p-3 md:p-4">
+        <h2 class="text-base md:text-xl font-semibold mb-2 md:mb-3">🥧 Product Distribution</h2>
+        <div id="pieChartContainer" class="w-full max-w-[300px] md:max-w-full mx-auto">
+            <canvas id="pieChart" class="w-full h-auto"></canvas>
         </div>
-        <div id="pieChartOfflineMsg" class="text-gray-500 text-center hidden">Offline – pie chart unavailable</div>
+        <div id="pieChartOfflineMsg" class="text-gray-500 text-center text-sm hidden">Offline – pie chart unavailable</div>
     </div>
     <!-- Sales History with Calendar -->
-    <div class="bg-white rounded-xl shadow-md p-4 flex flex-col">
-        <div class="flex justify-between items-center mb-3">
-            <h2 class="text-xl font-semibold">📊 Sales History</h2>
-            <div class="flex items-center gap-2">
-                <button id="todayHistoryBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-1 rounded-lg text-sm">Today</button>
+    <div class="bg-white rounded-xl shadow-md p-3 md:p-4 flex flex-col">
+        <div class="flex justify-between items-center mb-2 md:mb-3">
+            <h2 class="text-base md:text-xl font-semibold">📊 Sales History</h2>
+            <div class="flex items-center gap-1 md:gap-2">
+                <button id="todayHistoryBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-2 py-0.5 md:px-3 md:py-1 rounded-lg text-xs md:text-sm">Today</button>
             </div>
         </div>
         <!-- Calendar -->
-        <div id="calendarContainer" class="mb-4">
-            <div class="flex justify-between items-center mb-2">
-                <button id="prevMonthBtn" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-sm">&larr;</button>
-                <span id="calendarMonthYear" class="font-semibold"></span>
-                <button id="nextMonthBtn" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-sm">&rarr;</button>
+        <div id="calendarContainer" class="mb-3 md:mb-4">
+            <div class="flex justify-between items-center mb-1 md:mb-2">
+                <button id="prevMonthBtn" class="bg-gray-200 hover:bg-gray-300 px-2 py-0.5 md:px-3 md:py-1 rounded text-xs md:text-sm">&larr;</button>
+                <span id="calendarMonthYear" class="font-semibold text-sm md:text-base"></span>
+                <button id="nextMonthBtn" class="bg-gray-200 hover:bg-gray-300 px-2 py-0.5 md:px-3 md:py-1 rounded text-xs md:text-sm">&rarr;</button>
             </div>
             <table class="w-full text-center border-collapse">
                 <thead>
                     <tr>
-                        <th class="text-xs text-gray-500 py-1">Su</th>
-                        <th class="text-xs text-gray-500 py-1">Mo</th>
-                        <th class="text-xs text-gray-500 py-1">Tu</th>
-                        <th class="text-xs text-gray-500 py-1">We</th>
-                        <th class="text-xs text-gray-500 py-1">Th</th>
-                        <th class="text-xs text-gray-500 py-1">Fr</th>
-                        <th class="text-xs text-gray-500 py-1">Sa</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">Su</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">Mo</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">Tu</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">We</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">Th</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">Fr</th>
+                        <th class="text-[8px] md:text-xs text-gray-500 py-0.5 md:py-1">Sa</th>
                     </tr>
                 </thead>
                 <tbody id="calendarBody"></tbody>
             </table>
         </div>
-        <div id="salesHistoryList" class="flex-1 max-h-72 overflow-y-auto space-y-2 pr-2">
+        <div id="salesHistoryList" class="flex-1 max-h-48 md:max-h-72 overflow-y-auto space-y-1 md:space-y-2 pr-2">
             <!-- dynamic content -->
         </div>
     </div>
@@ -118,7 +118,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let pieChart = null;
-    let lowStockShown = false;  // ✅ Track if alert has been shown
+    let lowStockShown = false;
     let startDate = null;
     let endDate = null;
     let startTime = null;
@@ -251,9 +251,9 @@
                 let categoryBadge = '';
                 
                 if (category && category.toLowerCase() === 'screen') {
-                    categoryBadge = `<span class="bg-purple-100 text-purple-800 text-xs px-1.5 py-0.5 rounded ml-1">Screen</span>`;
+                    categoryBadge = `<span class="bg-purple-100 text-purple-800 text-[8px] md:text-xs px-1 md:px-1.5 py-0.5 rounded ml-0.5 md:ml-1">Screen</span>`;
                 } else if (category && category.toLowerCase() === 'accessory') {
-                    categoryBadge = `<span class="bg-green-100 text-green-800 text-xs px-1.5 py-0.5 rounded ml-1">Accessory</span>`;
+                    categoryBadge = `<span class="bg-green-100 text-green-800 text-[8px] md:text-xs px-1 md:px-1.5 py-0.5 rounded ml-0.5 md:ml-1">Accessory</span>`;
                 }
                 
                 if (batchIds && batchIds.length > 0) {
@@ -275,7 +275,7 @@
                 const div = document.createElement('div');
                 const stockClass = stock === 0 ? 'text-red-600 font-bold' : 'text-red-600';
                 
-                div.className = 'border-b pb-1 flex justify-between items-center hover:bg-blue-50 p-2 rounded transition-colors cursor-pointer';
+                div.className = 'border-b pb-1 flex justify-between items-center hover:bg-blue-50 p-1 md:p-2 rounded transition-colors cursor-pointer text-xs md:text-sm';
                 div.dataset.productName = name;
                 div.dataset.productCategory = category || 'Accessory';
                 
@@ -284,18 +284,18 @@
                 });
                 
                 div.innerHTML = `
-                    <span>
-                        <strong class="text-indigo-700">${escapeHtml(name)}</strong>
-                        <span class="text-gray-600"> (${escapeHtml(brand)} | ${escapeHtml(category)})</span>
+                    <span class="truncate">
+                        <strong class="text-indigo-700 text-xs md:text-sm">${escapeHtml(name)}</strong>
+                        <span class="text-gray-600 text-[10px] md:text-xs"> (${escapeHtml(brand)} | ${escapeHtml(category)})</span>
                         ${categoryBadge}
-                        <span class="text-xs ${statusClass} block">${batchDisplay}</span>
+                        <span class="text-[8px] md:text-xs ${statusClass} block">${batchDisplay}</span>
                     </span>
-                    <span class="${stockClass}">${stock} left</span>
+                    <span class="${stockClass} text-xs md:text-sm whitespace-nowrap">${stock} left</span>
                 `;
                 container.appendChild(div);
             });
         } else {
-            container.innerHTML = '<div class="text-gray-400 text-center py-4">✅ No low stock items found.</div>';
+            container.innerHTML = '<div class="text-gray-400 text-center py-4 text-sm">✅ No low stock items found.</div>';
         }
     }
 
@@ -317,7 +317,7 @@
             const dateStr = dateObj.toISOString().split('T')[0];
             const isSelected = (selectedDate === dateStr);
             const isToday = (dateStr === new Date().toISOString().split('T')[0]);
-            let cls = 'p-1 rounded cursor-pointer hover:bg-blue-100 ';
+            let cls = 'p-0.5 md:p-1 rounded cursor-pointer hover:bg-blue-100 text-xs md:text-sm ';
             if (isSelected) cls += 'bg-blue-500 text-white hover:bg-blue-600 ';
             else if (isToday) cls += 'bg-gray-200 font-bold ';
             html += `<td class="${cls}" data-date="${dateStr}">${d}</td>`;
@@ -424,7 +424,7 @@
 
             lowStockProducts = summary.low_stock_products || [];
             
-            // ✅ SHOW LOW STOCK ALERT (only once per page load)
+            // SHOW LOW STOCK ALERT (only once per page load)
             if (!summaryError && !lowStockShown && summary.low_stock_count > 0 && lowStockProducts.length > 0) {
                 let productList = lowStockProducts.slice(0, 10).map(item => {
                     const name = Array.isArray(item) ? item[0] : item.name;
@@ -444,7 +444,7 @@
             if (lowStockProducts.length > 0) {
                 renderLowStockList(lowStockProducts);
             } else {
-                document.getElementById('lowStockList').innerHTML = '<div class="text-gray-400 text-center py-4">✅ No low stock items found.</div>';
+                document.getElementById('lowStockList').innerHTML = '<div class="text-gray-400 text-center py-4 text-sm">✅ No low stock items found.</div>';
             }
 
             // Top products
@@ -471,19 +471,19 @@
             if (topProducts.length) {
                 topProducts.forEach((p, index) => {
                     const div = document.createElement('div');
-                    div.className = 'border-b pb-1 flex justify-between items-center hover:bg-gray-50 p-1 rounded transition-colors';
+                    div.className = 'border-b pb-1 flex justify-between items-center hover:bg-gray-50 p-1 rounded transition-colors text-xs md:text-sm';
                     let medal = '';
                     if (index === 0) medal = '🥇 ';
                     else if (index === 1) medal = '🥈 ';
                     else if (index === 2) medal = '🥉 ';
                     div.innerHTML = `
-                        <span>${medal}<strong class="text-indigo-700">${escapeHtml(p.name)}</strong> <span class="text-gray-600">(${escapeHtml(p.brand)} | ${escapeHtml(p.category)})</span></span>
-                        <span class="font-bold text-indigo-600">${p.qty} sold</span>
+                        <span>${medal}<strong class="text-indigo-700">${escapeHtml(p.name)}</strong> <span class="text-gray-600 text-[10px] md:text-xs">(${escapeHtml(p.brand)} | ${escapeHtml(p.category)})</span></span>
+                        <span class="font-bold text-indigo-600 text-xs md:text-sm">${p.qty} sold</span>
                     `;
                     topContainer.appendChild(div);
                 });
             } else {
-                topContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📊 No sales data for this period.</div>';
+                topContainer.innerHTML = '<div class="text-gray-400 text-center py-4 text-sm">📊 No sales data for this period.</div>';
             }
 
             // Pie chart
@@ -505,13 +505,13 @@
                     pieChart = new Chart(ctx, {
                         type: 'pie',
                         data: { labels: top8Labels, datasets: [{ data: top8Values, backgroundColor: generateColors(top8Labels.length) }] },
-                        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
+                        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } } }
                     });
                 } else {
                     pieChart = new Chart(ctx, {
                         type: 'pie',
                         data: { labels: labels, datasets: [{ data: values, backgroundColor: generateColors(labels.length) }] },
-                        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
+                        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } } }
                     });
                 }
             } else {
@@ -564,13 +564,13 @@
             if (history && history.length > 0) {
                 history.forEach(item => {
                     const div = document.createElement('div');
-                    div.className = 'border-b pb-2 mb-1 hover:bg-gray-50 p-1 rounded transition-colors';
+                    div.className = 'border-b pb-1 md:pb-2 mb-1 md:mb-2 hover:bg-gray-50 p-1 rounded transition-colors';
                     div.innerHTML = `
                         <div class="flex justify-between items-center">
-                            <span class="font-medium text-gray-700">${item.date}</span>
-                            <span class="font-bold text-green-600">${formatMoney(item.total_sales)}</span>
+                            <span class="font-medium text-gray-700 text-xs md:text-sm">${item.date}</span>
+                            <span class="font-bold text-green-600 text-xs md:text-base">${formatMoney(item.total_sales)}</span>
                         </div>
-                        <div class="text-sm text-gray-500 flex justify-between">
+                        <div class="text-[10px] md:text-sm text-gray-500 flex justify-between">
                             <span>Profit: ${formatMoney(item.profit)}</span>
                             <span>Discount: ${formatMoney(item.discount)}</span>
                         </div>
@@ -579,16 +579,16 @@
                 });
                 if (historyError) {
                     const note = document.createElement('div');
-                    note.className = 'text-xs text-amber-500 mt-2 text-center';
+                    note.className = 'text-[10px] md:text-xs text-amber-500 mt-2 text-center';
                     note.innerText = '⚠️ Data may be outdated (offline mode)';
                     historyContainer.appendChild(note);
                 }
             } else {
-                historyContainer.innerHTML = '<div class="text-gray-400 text-center py-4">📅 No sales history found for this period.</div>';
+                historyContainer.innerHTML = '<div class="text-gray-400 text-center py-4 text-sm">📅 No sales history found for this period.</div>';
             }
         } catch (err) {
             console.error('Error loading sales history:', err);
-            document.getElementById('salesHistoryList').innerHTML = '<div class="text-red-400 text-center py-4">❌ Error loading sales history.</div>';
+            document.getElementById('salesHistoryList').innerHTML = '<div class="text-red-400 text-center py-4 text-sm">❌ Error loading sales history.</div>';
         }
     }
 
@@ -681,7 +681,7 @@
     calendarMonth = now.getMonth();
     renderCalendar(calendarYear, calendarMonth);
 
-    // ✅ Reset lowStockShown when page is reloaded
+    // Reset lowStockShown when page is reloaded
     window.addEventListener('beforeunload', function() {
         lowStockShown = false;
     });
