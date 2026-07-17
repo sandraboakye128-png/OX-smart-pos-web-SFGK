@@ -55,7 +55,11 @@ from services.auth_service import (
     count_admins,
     get_all_users,
     update_user_role,
-    delete_user
+    delete_user,
+    logout_user,          # ✅ Added
+    get_user_by_id,       # ✅ Added
+    is_protected_user,    # ✅ Added
+    get_user_logs         # ✅ Added (for logs API)
 )
 
 # ---------- IMPORT ARCHIVE SERVICES ----------
