@@ -11,7 +11,6 @@
     <!-- Your custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
-    <!-- ===== SERVICE WORKER REGISTRATION ===== -->
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/static/sw.js')
@@ -21,6 +20,14 @@
     </script>
 
     <style>
+        /* Reset and base */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        body { 
+            background: #f3f4f6; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
         /* Custom scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 8px; }
@@ -61,7 +68,7 @@
             padding-left: 2.5rem;
         }
 
-        /* Protected user badge in sidebar */
+        /* Protected user badge */
         .protected-badge {
             background-color: #ef4444;
             color: white;
@@ -71,13 +78,13 @@
             margin-left: 4px;
         }
 
-        /* ===== FIXED SIDEBAR LAYOUT ===== */
+        /* ===== SIDEBAR LAYOUT ===== */
         .app-container {
             display: flex;
             min-height: 100vh;
         }
 
-        /* Sidebar overlay (mobile only) */
+        /* Sidebar overlay (mobile) */
         .sidebar-overlay {
             display: none;
             position: fixed;
@@ -89,7 +96,7 @@
             display: block;
         }
 
-        /* Sidebar - positioned left, hidden on mobile */
+        /* Sidebar */
         .sidebar {
             position: fixed;
             top: 0;
@@ -98,17 +105,16 @@
             height: 100vh;
             z-index: 50;
             transition: left 0.3s ease;
-            border-radius: 0 1.5rem 1.5rem 0;
-            overflow-y: auto;
             background: #1E293B;
             box-shadow: 4px 0 15px rgba(0,0,0,0.2);
+            overflow-y: auto;
             flex-shrink: 0;
         }
         .sidebar.open {
             left: 0;
         }
 
-        /* Desktop sidebar - visible and positioned left */
+        /* Desktop sidebar */
         @media (min-width: 768px) {
             .sidebar {
                 position: relative;
@@ -116,8 +122,6 @@
                 width: 224px;
                 height: 100vh;
                 border-radius: 0 1.5rem 1.5rem 0;
-                overflow-y: auto;
-                flex-shrink: 0;
             }
             .sidebar-overlay {
                 display: none !important;
@@ -136,16 +140,16 @@
                 display: flex;
                 flex-direction: column;
                 min-height: 100vh;
+                width: 0; /* Prevents overflow */
             }
         }
 
-        /* Mobile layout */
+        /* Mobile */
         @media (max-width: 767px) {
             .app-container {
                 flex-direction: column;
             }
             .sidebar {
-                height: 100vh;
                 border-radius: 0 1.5rem 1.5rem 0;
             }
             .sidebar-content {
@@ -164,7 +168,6 @@
             padding: 8px;
             color: #1E293B;
             font-size: 1.5rem;
-            display: block;
         }
         .hamburger-btn:hover {
             color: #00CFCF;
@@ -182,7 +185,6 @@
             cursor: pointer;
             padding: 4px 8px;
             border-radius: 8px;
-            transition: all 0.2s;
             display: none;
             z-index: 10;
         }
@@ -209,6 +211,7 @@
         .main-content {
             flex: 1;
             padding: 1rem;
+            overflow-x: hidden;
         }
 
         @media (min-width: 768px) {
@@ -256,26 +259,22 @@
 </head>
 <body>
 
-<!-- ===== APP CONTAINER ===== -->
 <div class="app-container">
 
-    <!-- ===== SIDEBAR OVERLAY (mobile only) ===== -->
+    <!-- SIDEBAR OVERLAY -->
     <div id="sidebarOverlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
 
-    <!-- ===== SIDEBAR ===== -->
+    <!-- SIDEBAR -->
     <div id="sidebar" class="sidebar">
-        <!-- Close button (mobile only) -->
         <button onclick="closeSidebar()" class="sidebar-close-btn" aria-label="Close sidebar">
             <i class="fas fa-times"></i>
         </button>
 
-        <!-- Brand -->
         <div class="px-4 py-5 sidebar-content">
             <h2 class="text-xl font-bold text-white">🧾 TOMFRIMP MOBICOM</h2>
             <p class="text-xs text-gray-400 mt-1">OX SMART INVENTORY & POS SYSTEM</p>
         </div>
 
-        <!-- User Info -->
         {% if current_user %}
         <div class="mx-3 mb-4 p-2 bg-[#273449] rounded-xl">
             <div class="flex items-center gap-2 text-white text-sm">
@@ -289,40 +288,26 @@
         </div>
         {% endif %}
 
-        <!-- Navigation -->
         <nav class="flex-1 px-2 space-y-1 overflow-y-auto pb-4">
-
-            <!-- DASHBOARD -->
             <a href="/" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-tachometer-alt w-5"></i> Dashboard
             </a>
-
-            <!-- SALES (Accessories) -->
             <a href="/sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-cash-register w-5"></i> Sales (Accessories)
             </a>
-
-            <!-- PRODUCTS (Accessories) -->
             <a href="/products" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-boxes w-5"></i> Products (Accessories)
             </a>
-
-            <!-- TODAY'S SALES (Accessories) -->
             <a href="/today-sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-chart-line w-5"></i> Today's Sales (Accessories)
             </a>
-
-            <!-- ANALYTICS -->
             <a href="/analytics" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-chart-pie w-5"></i> Analytics
             </a>
-
-            <!-- ARCHIVE -->
             <a href="/archive" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-archive w-5"></i> Archive
             </a>
 
-            <!-- ===== SCREENS DROPDOWN ===== -->
             <div class="mt-2">
                 <div class="dropdown-toggle flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm" onclick="toggleDropdown(this)">
                     <span class="flex items-center gap-3">
@@ -343,12 +328,10 @@
                 </div>
             </div>
 
-            <!-- ===== ADMIN-ONLY LINKS ===== -->
             {% if current_user and current_user.role == 'admin' %}
             <div class="border-t border-gray-700 my-2"></div>
             <div class="text-xs text-gray-500 uppercase px-3 py-1">Admin</div>
 
-            <!-- USER LOGS (Only oxbee) -->
             {% if current_user.username.lower() == 'oxbee' %}
             <a href="/logs" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-history w-5"></i> User Logs
@@ -356,28 +339,20 @@
             </a>
             {% endif %}
 
-            <!-- Purchases (Accessories) -->
             <a href="/purchases" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-shopping-cart w-5"></i> Purchases (Accessories)
             </a>
-
-            <!-- Purchases (Screens) -->
             <a href="/purchases/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-shopping-cart w-5"></i> Purchases (Screens)
             </a>
-
-            <!-- Import Data -->
             <a href="/inventory/import" target="_blank" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-file-import w-5"></i> Import Data
             </a>
-
-            <!-- Users Management -->
             <a href="/admin/users" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-users-cog w-5"></i> Users
             </a>
             {% endif %}
 
-            <!-- ===== PENDING BADGE & BUTTONS ===== -->
             {% if current_user %}
             <div class="mt-4 flex flex-col gap-2 px-3 py-1">
                 <div class="flex items-center gap-2">
@@ -390,24 +365,18 @@
                     <i class="fas fa-trash mr-1"></i> Clear Offline Data
                 </button>
             </div>
-            {% endif %}
 
-            <!-- ===== LOGOUT BUTTON ===== -->
-            {% if current_user %}
             <div class="pt-4 pb-2">
                 <button onclick="logout()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2 text-sm">
                     <i class="fas fa-sign-out-alt"></i> Logout
                 </button>
             </div>
             {% endif %}
-
         </nav>
     </div>
 
-    <!-- ===== MAIN CONTENT WRAPPER ===== -->
+    <!-- MAIN CONTENT -->
     <div class="main-content-wrapper">
-
-        <!-- Mobile Header -->
         <div class="mobile-header">
             <button onclick="toggleSidebar()" class="hamburger-btn" aria-label="Toggle sidebar">
                 <i class="fas fa-bars text-2xl"></i>
@@ -423,12 +392,10 @@
             {% endif %}
         </div>
 
-        <!-- Dynamic content -->
         <div class="main-content">
             {% block content %}{% endblock %}
         </div>
 
-        <!-- Footer -->
         <footer>
             <div class="px-2">
                 TOMFRIMP MOBICOM SOLUTIONS | HOME OF COMPUTER, PHONES, AND ACCESSORIES
@@ -443,11 +410,8 @@
     </div>
 </div>
 
-<!-- ===== OFFLINE HELPERS ===== -->
 <script src="{{ url_for('static', filename='js/offline.js') }}"></script>
-
 <script>
-    // ===== SIDEBAR TOGGLE FUNCTIONS =====
     function toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         const overlay = document.getElementById('sidebarOverlay');
@@ -464,14 +428,10 @@
         document.body.style.overflow = '';
     }
 
-    // Close sidebar on escape key
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            closeSidebar();
-        }
+        if (e.key === 'Escape') closeSidebar();
     });
 
-    // ===== DROPDOWN TOGGLE =====
     function toggleDropdown(element) {
         const parent = element.closest('.dropdown-toggle');
         const menu = parent.nextElementSibling;
@@ -479,10 +439,8 @@
         menu.classList.toggle('open');
     }
 
-    // Auto-close dropdown if clicked outside
     document.addEventListener('click', function(e) {
-        const dropdown = e.target.closest('.dropdown-toggle');
-        if (!dropdown) {
+        if (!e.target.closest('.dropdown-toggle')) {
             document.querySelectorAll('.dropdown-toggle.open').forEach(el => {
                 el.classList.remove('open');
                 el.nextElementSibling.classList.remove('open');
@@ -490,7 +448,6 @@
         }
     });
 
-    // ===== LOGOUT FUNCTION =====
     async function logout() {
         try {
             const res = await fetch('/api/auth/logout', { method: 'POST' });
@@ -505,47 +462,28 @@
         }
     }
 
-    // ===== CLEAR OFFLINE DATA =====
     function clearOfflineData() {
         if (!confirm('⚠️ This will clear all pending offline sales and import data. Proceed?')) return;
         
-        const keysToRemove = [
-            'pendingCount', 'pendingSales', 'offlineQueue', 'importPending',
-            'pendingImports', 'offlineSales', 'pendingJobId', 'pendingJobStatus',
-            'pendingPurchases'
-        ];
-        keysToRemove.forEach(key => {
-            localStorage.removeItem(key);
-            sessionStorage.removeItem(key);
-        });
+        const keysToRemove = ['pendingCount', 'pendingSales', 'offlineQueue', 'importPending', 'pendingImports', 'offlineSales', 'pendingJobId', 'pendingJobStatus', 'pendingPurchases'];
+        keysToRemove.forEach(key => { localStorage.removeItem(key); sessionStorage.removeItem(key); });
         
         const dbNames = ['OfflineSalesDB', 'SalesDB', 'offlineDB', 'PendingDB', 'ImportQueueDB'];
         dbNames.forEach(name => {
-            try {
-                const request = indexedDB.deleteDatabase(name);
-                request.onerror = function() { console.warn('Could not delete DB:', name); };
-                request.onsuccess = function() { console.log('✅ Deleted DB:', name); };
-            } catch(e) {
-                console.warn('Error deleting DB:', name, e);
-            }
+            try { indexedDB.deleteDatabase(name); } catch(e) {}
         });
         
         const badge = document.getElementById('pending-badge');
-        if (badge) {
-            badge.style.display = 'none';
-            badge.textContent = '';
-        }
+        if (badge) { badge.style.display = 'none'; badge.textContent = ''; }
         
         setTimeout(() => { location.reload(); }, 600);
     }
 
-    // ===== SYNC PENDING SALES =====
     async function syncPendingSales() {
         if (!navigator.onLine) {
             alert('You are offline. Please connect to the internet to sync.');
             return;
         }
-        
         const badge = document.getElementById('pending-badge');
         if (badge && badge.style.display !== 'none') {
             alert('Syncing pending sales... This may take a moment.');
@@ -555,19 +493,13 @@
         }
     }
 
-    // ===== UPDATE FOOTER YEAR =====
     document.addEventListener('DOMContentLoaded', function() {
         const yearSpan = document.getElementById('footerYear');
-        if (yearSpan) {
-            yearSpan.textContent = new Date().getFullYear();
-        }
+        if (yearSpan) yearSpan.textContent = new Date().getFullYear();
     });
 
-    // Close sidebar when window resizes to desktop
     window.addEventListener('resize', function() {
-        if (window.innerWidth >= 768) {
-            closeSidebar();
-        }
+        if (window.innerWidth >= 768) closeSidebar();
     });
 </script>
 </body>
