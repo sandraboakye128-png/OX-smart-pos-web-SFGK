@@ -1,92 +1,90 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="container mx-auto p-6">
-    <div class="flex items-center gap-2 mb-6">
-        <a href="/admin/users" class="text-indigo-600 hover:text-indigo-800 hover:underline">← Back to Users</a>
-        <h1 class="text-3xl font-bold text-gray-800 ml-4">✏️ Edit User</h1>
+<div class="flex items-center gap-2 mb-6">
+    <a href="/admin/users" class="text-indigo-600 hover:text-indigo-800 hover:underline">← Back to Users</a>
+    <h1 class="text-3xl font-bold text-gray-800 ml-4">✏️ Edit User</h1>
+</div>
+
+<div class="bg-white rounded-lg shadow p-6 max-w-2xl">
+    <!-- User Info -->
+    <div id="userInfo" class="mb-6">
+        <div class="flex items-center gap-3 mb-3">
+            <span class="text-lg font-semibold text-gray-700">User:</span>
+            <span id="userName" class="text-lg font-bold text-indigo-700"></span>
+            <span id="userRoleBadge" class="px-2 py-1 text-xs font-semibold rounded-full"></span>
+            {% if is_oxbee %}
+            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">🔒 System Protected</span>
+            {% endif %}
+        </div>
+        <p class="text-sm text-gray-500">Joined: <span id="userCreated"></span></p>
+        <p class="text-sm text-gray-500">User ID: <span id="userIdDisplay"></span></p>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6 max-w-2xl">
-        <!-- User Info -->
-        <div id="userInfo" class="mb-6">
-            <div class="flex items-center gap-3 mb-3">
-                <span class="text-lg font-semibold text-gray-700">User:</span>
-                <span id="userName" class="text-lg font-bold text-indigo-700"></span>
-                <span id="userRoleBadge" class="px-2 py-1 text-xs font-semibold rounded-full"></span>
-                {% if is_oxbee %}
-                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">🔒 System Protected</span>
-                {% endif %}
-            </div>
-            <p class="text-sm text-gray-500">Joined: <span id="userCreated"></span></p>
-            <p class="text-sm text-gray-500">User ID: <span id="userIdDisplay"></span></p>
+    <!-- Role Change -->
+    <div class="border-t pt-4 mt-4">
+        <h3 class="font-semibold text-gray-700 mb-3">👤 Change Role</h3>
+        <div class="flex flex-wrap gap-3 items-center">
+            <select id="roleSelect" class="border rounded-lg px-3 py-2 bg-white" {% if is_oxbee %}disabled{% endif %}>
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+            </select>
+            <button id="updateRoleBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition {% if is_oxbee %}opacity-50 cursor-not-allowed{% endif %}" 
+                    {% if is_oxbee %}disabled{% endif %}>
+                Update Role
+            </button>
+            {% if is_oxbee %}
+            <span class="text-red-500 text-sm">🔒 Cannot modify system administrator</span>
+            {% endif %}
         </div>
-
-        <!-- Role Change -->
-        <div class="border-t pt-4 mt-4">
-            <h3 class="font-semibold text-gray-700 mb-3">👤 Change Role</h3>
-            <div class="flex flex-wrap gap-3 items-center">
-                <select id="roleSelect" class="border rounded-lg px-3 py-2 bg-white" {% if is_oxbee %}disabled{% endif %}>
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
-                </select>
-                <button id="updateRoleBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition {% if is_oxbee %}opacity-50 cursor-not-allowed{% endif %}" 
-                        {% if is_oxbee %}disabled{% endif %}>
-                    Update Role
-                </button>
-                {% if is_oxbee %}
-                <span class="text-red-500 text-sm">🔒 Cannot modify system administrator</span>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Password Reset -->
-        <div class="border-t pt-4 mt-4">
-            <h3 class="font-semibold text-gray-700 mb-3">🔑 Reset Password</h3>
-            <div class="flex flex-wrap gap-3 items-end">
-                <div class="flex-1 min-w-[200px]">
-                    <label class="block text-sm text-gray-600 mb-1">New Password</label>
-                    <input type="password" id="newPassword" class="w-full border rounded-lg px-3 py-2" 
-                           placeholder="Enter new password" {% if is_oxbee %}disabled{% endif %}>
-                </div>
-                <button id="resetPasswordBtn" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition {% if is_oxbee %}opacity-50 cursor-not-allowed{% endif %}"
-                        {% if is_oxbee %}disabled{% endif %}>
-                    Reset Password
-                </button>
-                {% if is_oxbee %}
-                <span class="text-red-500 text-sm">🔒 Cannot modify system administrator</span>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Password Hash (Admin Only) -->
-        <div class="border-t pt-4 mt-4">
-            <h3 class="font-semibold text-gray-700 mb-3">👁️ Password Hash</h3>
-            <div class="flex flex-wrap gap-3 items-center">
-                <button id="viewPasswordBtn" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition">
-                    Show Password Hash
-                </button>
-                <span id="passwordHashDisplay" class="text-xs text-gray-500 font-mono hidden break-all"></span>
-            </div>
-            <p class="text-xs text-gray-400 mt-2">⚠️ This shows the SHA-256 hash, not the actual password</p>
-        </div>
-
-        <!-- Danger Zone -->
-        <div class="border-t pt-4 mt-4 border-red-200">
-            <h3 class="font-semibold text-red-600 mb-3">⚠️ Danger Zone</h3>
-            <div class="flex flex-wrap gap-3 items-center">
-                <button id="deleteUserBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition {% if is_oxbee %}opacity-50 cursor-not-allowed{% endif %}"
-                        {% if is_oxbee %}disabled{% endif %}>
-                    🗑️ Delete User
-                </button>
-                {% if is_oxbee %}
-                <span class="text-red-500 text-sm">🔒 Cannot delete system administrator</span>
-                {% endif %}
-            </div>
-        </div>
-
-        <div id="actionMessage" class="mt-4 text-sm"></div>
     </div>
+
+    <!-- Password Reset -->
+    <div class="border-t pt-4 mt-4">
+        <h3 class="font-semibold text-gray-700 mb-3">🔑 Reset Password</h3>
+        <div class="flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-sm text-gray-600 mb-1">New Password</label>
+                <input type="password" id="newPassword" class="w-full border rounded-lg px-3 py-2" 
+                       placeholder="Enter new password" {% if is_oxbee %}disabled{% endif %}>
+            </div>
+            <button id="resetPasswordBtn" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition {% if is_oxbee %}opacity-50 cursor-not-allowed{% endif %}"
+                    {% if is_oxbee %}disabled{% endif %}>
+                Reset Password
+            </button>
+            {% if is_oxbee %}
+            <span class="text-red-500 text-sm">🔒 Cannot modify system administrator</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Password Hash (Admin Only) -->
+    <div class="border-t pt-4 mt-4">
+        <h3 class="font-semibold text-gray-700 mb-3">👁️ Password Hash</h3>
+        <div class="flex flex-wrap gap-3 items-center">
+            <button id="viewPasswordBtn" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition">
+                Show Password Hash
+            </button>
+            <span id="passwordHashDisplay" class="text-xs text-gray-500 font-mono hidden break-all"></span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">⚠️ This shows the SHA-256 hash, not the actual password</p>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="border-t pt-4 mt-4 border-red-200">
+        <h3 class="font-semibold text-red-600 mb-3">⚠️ Danger Zone</h3>
+        <div class="flex flex-wrap gap-3 items-center">
+            <button id="deleteUserBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition {% if is_oxbee %}opacity-50 cursor-not-allowed{% endif %}"
+                    {% if is_oxbee %}disabled{% endif %}>
+                🗑️ Delete User
+            </button>
+            {% if is_oxbee %}
+            <span class="text-red-500 text-sm">🔒 Cannot delete system administrator</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="actionMessage" class="mt-4 text-sm"></div>
 </div>
 
 <!-- Data attributes for JavaScript -->
@@ -99,10 +97,6 @@
     // Get data from data attributes (clean approach, no Jinja errors)
     const userId = parseInt(document.getElementById('editUserData').dataset.userId);
     const isOxbee = document.getElementById('editUserData').dataset.isOxbee === 'true';
-
-    // Alternative: If you prefer the direct approach (works in Flask)
-    // const userId = {{ user_id|tojson }};
-    // const isOxbee = {{ is_oxbee|tojson }};
 
     // Load user data
     async function loadUser() {

@@ -1,34 +1,32 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="p-6">
-    <!-- Offline banner (updated for screens) -->
-    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached screen products. Deletions will be saved and applied when you reconnect.
-    </div>
+<!-- Offline banner (updated for screens) -->
+<div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+    ⚠️ You are offline – showing cached screen products. Deletions will be saved and applied when you reconnect.
+</div>
 
-    <!-- Header with screen indicator -->
-    <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <div class="flex items-center gap-2">
-            <h2 class="text-2xl font-bold text-indigo-600 mb-0">📦 Product Manager</h2>
-            <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
-        </div>
-        <p class="text-gray-600 mt-1">Manage your screen products and batches</p>
+<!-- Header with screen indicator -->
+<div class="bg-white rounded-xl shadow-md p-6 mb-6">
+    <div class="flex items-center gap-2">
+        <h2 class="text-2xl font-bold text-indigo-600 mb-0">📦 Product Manager</h2>
+        <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
     </div>
+    <p class="text-gray-600 mt-1">Manage your screen products and batches</p>
+</div>
 
-    <!-- Search Bar -->
-    <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search screen by name, brand or category..." 
-               class="w-full border border-gray-300 rounded-lg px-4 py-2">
-    </div>
+<!-- Search Bar -->
+<div class="mb-4">
+    <input type="text" id="searchInput" placeholder="🔍 Search screen by name, brand or category..." 
+           class="w-full border border-gray-300 rounded-lg px-4 py-2">
+</div>
 
-    <!-- Summary -->
-    <div id="summary" class="text-teal-600 font-bold mb-4"></div>
+<!-- Summary -->
+<div id="summary" class="text-teal-600 font-bold mb-4"></div>
 
-    <!-- Products List (cards) -->
-    <div id="productsList" class="space-y-4">
-        <!-- dynamic content -->
-    </div>
+<!-- Products List (cards) -->
+<div id="productsList" class="space-y-4">
+    <!-- dynamic content -->
 </div>
 
 <!-- Modal: View Batches -->

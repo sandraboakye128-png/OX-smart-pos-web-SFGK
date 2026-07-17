@@ -1,60 +1,58 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="p-6 pb-24"> <!-- pb-24 leaves room for the fixed summary bar -->
-    <!-- Offline banner -->
-    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached sales data (Accessories & Phones). Data will refresh when you reconnect.
-    </div>
+<!-- Offline banner -->
+<div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+    ⚠️ You are offline – showing cached sales data (Accessories & Phones). Data will refresh when you reconnect.
+</div>
 
-    <!-- Header with category indicator -->
-    <div class="flex justify-between items-center mb-6">
-        <div class="flex items-center gap-2">
-            <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
-            <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories &amp; Phones</span>
+<!-- Header with category indicator -->
+<div class="flex justify-between items-center mb-6">
+    <div class="flex items-center gap-2">
+        <h1 class="text-3xl font-bold text-indigo-600">📊 Sales Overview</h1>
+        <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories &amp; Phones</span>
+    </div>
+    <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
+</div>
+
+<!-- Search Bar -->
+<div class="mb-4">
+    <input type="text" id="searchInput" placeholder="🔍 Search product, brand, or user..."
+           class="w-full border border-gray-300 rounded-lg px-4 py-2">
+    <p class="text-xs text-gray-500 mt-1">🔎 Type to filter sales records by product, brand, or user</p>
+</div>
+
+<!-- Period Filter Buttons -->
+<div class="flex flex-wrap gap-2 mb-4">
+    <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
+    <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
+    <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
+    <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
+    <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
+</div>
+
+<!-- Date Range Filter -->
+<div class="bg-white rounded-xl shadow-md p-4 mb-6">
+    <div class="flex flex-wrap items-end gap-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700">From Date</label>
+            <input type="date" id="startDate" class="border rounded-lg px-3 py-2">
         </div>
-        <button id="refreshBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">🔄 Refresh</button>
-    </div>
-
-    <!-- Search Bar -->
-    <div class="mb-4">
-        <input type="text" id="searchInput" placeholder="🔍 Search product, brand, or user..."
-               class="w-full border border-gray-300 rounded-lg px-4 py-2">
-        <p class="text-xs text-gray-500 mt-1">🔎 Type to filter sales records by product, brand, or user</p>
-    </div>
-
-    <!-- Period Filter Buttons -->
-    <div class="flex flex-wrap gap-2 mb-4">
-        <button data-period="daily" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">Today</button>
-        <button data-period="weekly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Week</button>
-        <button data-period="monthly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Month</button>
-        <button data-period="yearly" class="period-btn bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">This Year</button>
-        <button data-period="all" class="period-btn bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg">All Time</button>
-    </div>
-
-    <!-- Date Range Filter -->
-    <div class="bg-white rounded-xl shadow-md p-4 mb-6">
-        <div class="flex flex-wrap items-end gap-4">
-            <div>
-                <label class="block text-sm font-medium text-gray-700">From Date</label>
-                <input type="date" id="startDate" class="border rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">To Date</label>
-                <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
-            </div>
-            <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
-            <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">To Date</label>
+            <input type="date" id="endDate" class="border rounded-lg px-3 py-2">
         </div>
-        <div id="filterInfo" class="text-xs text-gray-500 mt-2 hidden">
-            📋 Currently filtered by: <span id="filterDescription"></span>
-        </div>
+        <button id="applyDateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">Apply Custom Range</button>
+        <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg ml-auto">🖨️ Print / Save PDF</button>
     </div>
+    <div id="filterInfo" class="text-xs text-gray-500 mt-2 hidden">
+        📋 Currently filtered by: <span id="filterDescription"></span>
+    </div>
+</div>
 
-    <!-- Sales List (cards) – scrollable area -->
-    <div id="salesList" class="space-y-4">
-        <div class="text-center text-gray-400 py-8">Loading sales data...</div>
-    </div>
+<!-- Sales List (cards) – scrollable area -->
+<div id="salesList" class="space-y-4">
+    <div class="text-center text-gray-400 py-8">Loading sales data...</div>
 </div>
 
 <!-- ========== SUMMARY BAR – fixed at the bottom ========== -->

@@ -1,97 +1,95 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="p-6">
-    <!-- Offline banner -->
-    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached accessory purchases. New purchases will be saved and synced when you reconnect.
-    </div>
+<!-- Offline banner -->
+<div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+    ⚠️ You are offline – showing cached accessory purchases. New purchases will be saved and synced when you reconnect.
+</div>
 
-    <!-- Cache banner -->
-    <div id="cacheBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
-        ⚠️ Showing cached data (last updated: <span id="cacheTimestamp"></span>). 
-        <button onclick="refreshData()" class="underline font-bold">Click here to refresh</button>
-    </div>
+<!-- Cache banner -->
+<div id="cacheBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
+    ⚠️ Showing cached data (last updated: <span id="cacheTimestamp"></span>). 
+    <button onclick="refreshData()" class="underline font-bold">Click here to refresh</button>
+</div>
 
-    <!-- ADD / EDIT FORM -->
-    <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-        <div class="flex items-center gap-2 mb-4">
-            <h2 class="text-xl font-bold" id="formTitle">➕ Add Accessory Purchase</h2>
-            <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-8 gap-3">
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Product Name</label>
-                <input type="text" id="name" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off">
-                <div id="nameSuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Brand</label>
-                <input type="text" id="brand" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Category</label>
-                <input type="text" id="category" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off">
-                <div id="categorySuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Quantity</label>
-                <input type="number" id="quantity" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Cost Price (₵)</label>
-                <input type="number" step="0.01" id="cost_price" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Discount (₵)</label>
-                <input type="number" step="0.01" id="discount" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Selling Price (₵)</label>
-                <input type="number" step="0.01" id="selling_price" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Source</label>
-                <input type="text" id="source" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Supplier, Wholesaler" autocomplete="off">
-                <div id="sourceSuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
-            </div>
-        </div>
-        <div class="mt-4 flex gap-3">
-            <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Accessory Purchase</button>
-            <button id="cancelBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg hidden">Cancel Edit</button>
-        </div>
+<!-- ADD / EDIT FORM -->
+<div class="bg-white rounded-xl shadow-md p-6 mb-6">
+    <div class="flex items-center gap-2 mb-4">
+        <h2 class="text-xl font-bold" id="formTitle">➕ Add Accessory Purchase</h2>
+        <span class="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">Accessories</span>
     </div>
-
-    <!-- SEARCH & FILTER BAR -->
-    <div class="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap gap-4 items-end">
-        <div class="flex-1 min-w-[200px]">
-            <label class="block text-sm font-medium text-gray-700">Search (name/brand/category/source)</label>
-            <input type="text" id="searchInput" placeholder="🔍 Type to filter..." class="w-full border border-gray-300 rounded-lg px-3 py-2">
+    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-8 gap-3">
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Product Name</label>
+            <input type="text" id="name" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off">
+            <div id="nameSuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700">From Date</label>
-            <input type="date" id="fromDate" class="border border-gray-300 rounded-lg px-3 py-2">
+            <label class="block text-sm font-medium text-gray-700">Brand</label>
+            <input type="text" id="brand" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700">To Date</label>
-            <input type="date" id="toDate" class="border border-gray-300 rounded-lg px-3 py-2">
+            <label class="block text-sm font-medium text-gray-700">Category</label>
+            <input type="text" id="category" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off">
+            <div id="categorySuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
         </div>
-        <button id="filterBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">🔍 Filter</button>
-        <button id="clearFilterBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg">✕ Clear</button>
-        <button id="pdfBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-5 py-2 rounded-lg">🧾 PDF Report</button>
-        <button id="viewPendingBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg flex items-center gap-2">
-            <span>⏳ Pending</span>
-            <span id="pendingCount" class="bg-red-500 text-white text-xs rounded-full px-2 py-0.5 hidden">0</span>
-        </button>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Quantity</label>
+            <input type="number" id="quantity" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Cost Price (₵)</label>
+            <input type="number" step="0.01" id="cost_price" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Discount (₵)</label>
+            <input type="number" step="0.01" id="discount" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Selling Price (₵)</label>
+            <input type="number" step="0.01" id="selling_price" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Source</label>
+            <input type="text" id="source" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Supplier, Wholesaler" autocomplete="off">
+            <div id="sourceSuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
+        </div>
     </div>
+    <div class="mt-4 flex gap-3">
+        <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Accessory Purchase</button>
+        <button id="cancelBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg hidden">Cancel Edit</button>
+    </div>
+</div>
 
-    <!-- PURCHASES LIST (scrollable) -->
-    <div class="bg-white rounded-xl shadow-md p-4">
-        <div id="purchasesList" class="max-h-[500px] overflow-y-auto space-y-3">
-            <!-- dynamically loaded -->
-        </div>
-        <div id="summary" class="mt-4 p-3 bg-gray-50 rounded-lg font-bold text-center text-teal-700"></div>
+<!-- SEARCH & FILTER BAR -->
+<div class="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap gap-4 items-end">
+    <div class="flex-1 min-w-[200px]">
+        <label class="block text-sm font-medium text-gray-700">Search (name/brand/category/source)</label>
+        <input type="text" id="searchInput" placeholder="🔍 Type to filter..." class="w-full border border-gray-300 rounded-lg px-3 py-2">
     </div>
+    <div>
+        <label class="block text-sm font-medium text-gray-700">From Date</label>
+        <input type="date" id="fromDate" class="border border-gray-300 rounded-lg px-3 py-2">
+    </div>
+    <div>
+        <label class="block text-sm font-medium text-gray-700">To Date</label>
+        <input type="date" id="toDate" class="border border-gray-300 rounded-lg px-3 py-2">
+    </div>
+    <button id="filterBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">🔍 Filter</button>
+    <button id="clearFilterBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg">✕ Clear</button>
+    <button id="pdfBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-5 py-2 rounded-lg">🧾 PDF Report</button>
+    <button id="viewPendingBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg flex items-center gap-2">
+        <span>⏳ Pending</span>
+        <span id="pendingCount" class="bg-red-500 text-white text-xs rounded-full px-2 py-0.5 hidden">0</span>
+    </button>
+</div>
+
+<!-- PURCHASES LIST (scrollable) -->
+<div class="bg-white rounded-xl shadow-md p-4">
+    <div id="purchasesList" class="max-h-[500px] overflow-y-auto space-y-3">
+        <!-- dynamically loaded -->
+    </div>
+    <div id="summary" class="mt-4 p-3 bg-gray-50 rounded-lg font-bold text-center text-teal-700"></div>
 </div>
 
 <!-- PENDING PURCHASES MODAL -->

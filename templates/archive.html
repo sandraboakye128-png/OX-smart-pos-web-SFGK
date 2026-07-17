@@ -1,37 +1,35 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="p-6">
-    <!-- Offline banner -->
-    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached archive data. Changes will be synced when you reconnect.
-    </div>
+<!-- Offline banner -->
+<div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+    ⚠️ You are offline – showing cached archive data. Changes will be synced when you reconnect.
+</div>
 
-    <!-- Header & Filter + Search -->
-    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
-        <h1 class="text-3xl font-bold text-indigo-600">📁 Product Archive</h1>
-        <div class="flex flex-wrap items-center gap-3">
-            <div>
-                <input type="text" id="searchInput" placeholder="🔍 Search product/brand..." 
-                       class="border border-gray-300 rounded-lg px-3 py-2 w-48 md:w-64">
-            </div>
-            <label class="text-gray-700">Filter:</label>
-            <select id="statusFilter" class="border border-gray-300 rounded-lg px-3 py-2 bg-white">
-                <option value="ALL">ALL</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="UPDATED">UPDATED</option>
-                <option value="DELETED">DELETED</option>
-                <option value="PRODUCT DELETED">PRODUCT DELETED</option>
-                <option value="BATCH DELETED">BATCH DELETED</option>
-                <option value="PERMANENTLY DELETED">PERMANENTLY DELETED</option>
-            </select>
+<!-- Header & Filter + Search -->
+<div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+    <h1 class="text-3xl font-bold text-indigo-600">📁 Product Archive</h1>
+    <div class="flex flex-wrap items-center gap-3">
+        <div>
+            <input type="text" id="searchInput" placeholder="🔍 Search product/brand..." 
+                   class="border border-gray-300 rounded-lg px-3 py-2 w-48 md:w-64">
         </div>
+        <label class="text-gray-700">Filter:</label>
+        <select id="statusFilter" class="border border-gray-300 rounded-lg px-3 py-2 bg-white">
+            <option value="ALL">ALL</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="UPDATED">UPDATED</option>
+            <option value="DELETED">DELETED</option>
+            <option value="PRODUCT DELETED">PRODUCT DELETED</option>
+            <option value="BATCH DELETED">BATCH DELETED</option>
+            <option value="PERMANENTLY DELETED">PERMANENTLY DELETED</option>
+        </select>
     </div>
+</div>
 
-    <!-- Archive List -->
-    <div id="archiveList" class="space-y-4">
-        <div class="text-center text-gray-400 py-8">Loading archive data...</div>
-    </div>
+<!-- Archive List -->
+<div id="archiveList" class="space-y-4">
+    <div class="text-center text-gray-400 py-8">Loading archive data...</div>
 </div>
 
 <!-- Modal: View Batches -->

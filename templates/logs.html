@@ -1,73 +1,71 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="p-6">
-    <div class="flex justify-between items-center mb-6">
-        <div>
-            <h1 class="text-3xl font-bold text-indigo-600">📋 User Activity Logs</h1>
-            <p class="text-gray-500 text-sm mt-1">🔒 Only accessible by system administrator (oxbee)</p>
-        </div>
-        <div>
-            <button onclick="loadLogs()" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">
-                🔄 Refresh
-            </button>
-        </div>
+<div class="flex justify-between items-center mb-6">
+    <div>
+        <h1 class="text-3xl font-bold text-indigo-600">📋 User Activity Logs</h1>
+        <p class="text-gray-500 text-sm mt-1">🔒 Only accessible by system administrator (oxbee)</p>
     </div>
-
-    <!-- Filters -->
-    <div class="bg-white rounded-xl shadow-md p-4 mb-6">
-        <div class="flex flex-wrap gap-4 items-end">
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Action Filter</label>
-                <select id="actionFilter" class="border rounded-lg px-3 py-2">
-                    <option value="">All Actions</option>
-                    <option value="login">Login</option>
-                    <option value="logout">Logout</option>
-                    <option value="login_failed">Failed Login</option>
-                </select>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">User</label>
-                <select id="userFilter" class="border rounded-lg px-3 py-2">
-                    <option value="">All Users</option>
-                </select>
-            </div>
-            <button onclick="applyFilters()" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">
-                🔍 Apply Filters
-            </button>
-            <button onclick="clearFilters()" class="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg">
-                ✕ Clear
-            </button>
-        </div>
+    <div>
+        <button onclick="loadLogs()" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg">
+            🔄 Refresh
+        </button>
     </div>
+</div>
 
-    <!-- Logs Table -->
-    <div class="bg-white rounded-xl shadow-md overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="w-full">
-                <thead class="bg-gray-100 border-b">
-                    <tr>
-                        <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">Time</th>
-                        <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">User</th>
-                        <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">Action</th>
-                        <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">IP Address</th>
-                        <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">Device</th>
-                    </tr>
-                </thead>
-                <tbody id="logsTableBody">
-                    <tr>
-                        <td colspan="5" class="text-center py-8 text-gray-400">Loading logs...</td>
-                    </tr>
-                </tbody>
-            </table>
+<!-- Filters -->
+<div class="bg-white rounded-xl shadow-md p-4 mb-6">
+    <div class="flex flex-wrap gap-4 items-end">
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Action Filter</label>
+            <select id="actionFilter" class="border rounded-lg px-3 py-2">
+                <option value="">All Actions</option>
+                <option value="login">Login</option>
+                <option value="logout">Logout</option>
+                <option value="login_failed">Failed Login</option>
+            </select>
         </div>
-        <div id="pagination" class="flex justify-between items-center px-4 py-3 border-t bg-gray-50">
-            <span id="totalLogs" class="text-sm text-gray-500">Loading...</span>
-            <div class="flex gap-2">
-                <button onclick="prevPage()" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50" id="prevBtn">Previous</button>
-                <span id="pageInfo" class="px-3 py-1 text-sm text-gray-600">Page 1</span>
-                <button onclick="nextPage()" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50" id="nextBtn">Next</button>
-            </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">User</label>
+            <select id="userFilter" class="border rounded-lg px-3 py-2">
+                <option value="">All Users</option>
+            </select>
+        </div>
+        <button onclick="applyFilters()" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">
+            🔍 Apply Filters
+        </button>
+        <button onclick="clearFilters()" class="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg">
+            ✕ Clear
+        </button>
+    </div>
+</div>
+
+<!-- Logs Table -->
+<div class="bg-white rounded-xl shadow-md overflow-hidden">
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead class="bg-gray-100 border-b">
+                <tr>
+                    <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">Time</th>
+                    <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">User</th>
+                    <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">Action</th>
+                    <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">IP Address</th>
+                    <th class="text-left px-4 py-3 text-sm font-semibold text-gray-600">Device</th>
+                </tr>
+            </thead>
+            <tbody id="logsTableBody">
+                <tr>
+                    <td colspan="5" class="text-center py-8 text-gray-400">Loading logs...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div id="pagination" class="flex justify-between items-center px-4 py-3 border-t bg-gray-50">
+        <span id="totalLogs" class="text-sm text-gray-500">Loading...</span>
+        <div class="flex gap-2">
+            <button onclick="prevPage()" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50" id="prevBtn">Previous</button>
+            <span id="pageInfo" class="px-3 py-1 text-sm text-gray-600">Page 1</span>
+            <button onclick="nextPage()" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50" id="nextBtn">Next</button>
         </div>
     </div>
 </div>

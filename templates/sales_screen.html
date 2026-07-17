@@ -1,80 +1,78 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="p-6">
-    <!-- Offline banner -->
-    <div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
-        ⚠️ You are offline – showing cached screens. Sales will be saved and synced when you reconnect.
-    </div>
+<!-- Offline banner -->
+<div id="offlineBanner" class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded hidden">
+    ⚠️ You are offline – showing cached screens. Sales will be saved and synced when you reconnect.
+</div>
 
-    <!-- No screens banner -->
-    <div id="noProductsBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
-        <strong>⚠️ No screens found.</strong><br>
-        Please ensure your inventory imports are correctly categorised as <strong>Screens</strong> (not Accessories).
-        <br><br>
-        <a href="/inventory/import" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded inline-block">
-            📥 Go to Import Page
-        </a>
-        <button onclick="refreshProducts()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded ml-2">
-            🔄 Refresh
-        </button>
-    </div>
+<!-- No screens banner -->
+<div id="noProductsBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
+    <strong>⚠️ No screens found.</strong><br>
+    Please ensure your inventory imports are correctly categorised as <strong>Screens</strong> (not Accessories).
+    <br><br>
+    <a href="/inventory/import" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded inline-block">
+        📥 Go to Import Page
+    </a>
+    <button onclick="refreshProducts()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded ml-2">
+        🔄 Refresh
+    </button>
+</div>
 
-    <!-- Two-column layout -->
-    <div class="flex flex-wrap -mx-4">
-        <!-- LEFT PANEL: Products & Form -->
-        <div class="w-full lg:w-1/2 px-4 mb-6">
-            <div class="bg-white rounded-xl shadow-md p-4">
-                <div class="flex items-center gap-2 mb-2">
-                    <h2 class="text-xl font-bold text-indigo-600">🛒 Sales Terminal</h2>
-                    <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens</span>
-                </div>
-                
-                <input type="text" id="searchProduct" placeholder="🔍 Search screen..." 
-                       class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3">
-                
-                <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4"></div>
-                
-                <div id="selectedProductInfo" class="text-gray-600 text-sm mb-2">No screen selected</div>
-                
-                <div class="grid grid-cols-2 gap-3 mb-3">
-                    <input type="number" id="quantity" placeholder="Quantity" class="border rounded-lg px-3 py-2">
-                    <input type="number" step="0.01" id="discount" placeholder="Discount (₵)" class="border rounded-lg px-3 py-2">
-                </div>
-                
-                <div class="mb-3">
-                    <label class="block text-sm font-medium text-gray-700">Sale Date</label>
-                    <input type="date" id="saleDate" class="border rounded-lg px-3 py-2 w-full">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-medium text-gray-700">Sale Time (HH:MM with AM/PM or 24h)</label>
-                    <input type="text" id="saleTime" placeholder="e.g. 2:30 PM or 14:30" 
-                           class="border rounded-lg px-3 py-2 w-full">
-                </div>
-                
-                <button id="addToCartBtn" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 rounded-lg">
-                    ➕ Add to Cart
-                </button>
+<!-- Two-column layout -->
+<div class="flex flex-wrap -mx-4">
+    <!-- LEFT PANEL: Products & Form -->
+    <div class="w-full lg:w-1/2 px-4 mb-6">
+        <div class="bg-white rounded-xl shadow-md p-4">
+            <div class="flex items-center gap-2 mb-2">
+                <h2 class="text-xl font-bold text-indigo-600">🛒 Sales Terminal</h2>
+                <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens</span>
             </div>
+            
+            <input type="text" id="searchProduct" placeholder="🔍 Search screen..." 
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3">
+            
+            <div id="productList" class="max-h-80 overflow-y-auto border rounded-lg p-2 mb-4"></div>
+            
+            <div id="selectedProductInfo" class="text-gray-600 text-sm mb-2">No screen selected</div>
+            
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <input type="number" id="quantity" placeholder="Quantity" class="border rounded-lg px-3 py-2">
+                <input type="number" step="0.01" id="discount" placeholder="Discount (₵)" class="border rounded-lg px-3 py-2">
+            </div>
+            
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-gray-700">Sale Date</label>
+                <input type="date" id="saleDate" class="border rounded-lg px-3 py-2 w-full">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-gray-700">Sale Time (HH:MM with AM/PM or 24h)</label>
+                <input type="text" id="saleTime" placeholder="e.g. 2:30 PM or 14:30" 
+                       class="border rounded-lg px-3 py-2 w-full">
+            </div>
+            
+            <button id="addToCartBtn" class="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 rounded-lg">
+                ➕ Add to Cart
+            </button>
         </div>
-        
-        <!-- RIGHT PANEL: Cart & Receipt -->
-        <div class="w-full lg:w-1/2 px-4">
-            <div class="bg-white rounded-xl shadow-md p-4">
-                <h2 class="text-xl font-bold text-indigo-600 mb-3">🧾 Cart</h2>
-                <div id="cartItems" class="max-h-96 overflow-y-auto border rounded-lg p-2 mb-4 space-y-3"></div>
-                <div class="mb-3 text-right">
-                    <span class="text-lg font-bold">Grand Total: </span>
-                    <span id="grandTotal" class="text-2xl font-bold text-green-600">₵0.00</span>
-                </div>
-                <button id="completeSaleBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg mb-3">
-                    💳 Complete Sale
-                </button>
-                <button id="printReceiptBtn" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-lg mb-3" disabled>
-                    🖨 Print Receipt
-                </button>
-                <div id="receiptPreview" class="border rounded-lg p-3 bg-gray-50 font-mono text-sm max-h-60 overflow-y-auto"></div>
+    </div>
+    
+    <!-- RIGHT PANEL: Cart & Receipt -->
+    <div class="w-full lg:w-1/2 px-4">
+        <div class="bg-white rounded-xl shadow-md p-4">
+            <h2 class="text-xl font-bold text-indigo-600 mb-3">🧾 Cart</h2>
+            <div id="cartItems" class="max-h-96 overflow-y-auto border rounded-lg p-2 mb-4 space-y-3"></div>
+            <div class="mb-3 text-right">
+                <span class="text-lg font-bold">Grand Total: </span>
+                <span id="grandTotal" class="text-2xl font-bold text-green-600">₵0.00</span>
             </div>
+            <button id="completeSaleBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg mb-3">
+                💳 Complete Sale
+            </button>
+            <button id="printReceiptBtn" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-lg mb-3" disabled>
+                🖨 Print Receipt
+            </button>
+            <div id="receiptPreview" class="border rounded-lg p-3 bg-gray-50 font-mono text-sm max-h-60 overflow-y-auto"></div>
         </div>
     </div>
 </div>
@@ -472,7 +470,7 @@
         renderProductList(filtered);
     });
 
-    // ========== 🆕 UPDATED BATCH SELECTOR WITH FALLBACKS ==========
+    // ========== BATCH SELECTOR WITH FALLBACKS ==========
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
@@ -480,7 +478,6 @@
 
         console.log('🔍 Opening batch selector for screen:', product.name);
         console.log('📦 Product stock:', product.stock);
-        console.log('📦 Product has batches?', product.batches ? product.batches.length : 0);
 
         // Create a cache key based on product name and brand
         const cacheKey = `batches_${product.name}_${product.brand}`;
@@ -493,39 +490,21 @@
             // ✅ SECOND: Try fetching by name
             try {
                 const url = `/api/sales/batches/by_name?name=${encodeURIComponent(product.name)}&brand=${encodeURIComponent(product.brand)}`;
-                console.log('🔍 Fetching from:', url);
                 const res = await fetch(url);
                 if (res.ok) {
                     batches = await res.json();
-                    console.log('📦 Fetched batches:', batches.length);
                     if (batches.length > 0) {
                         cacheData(cacheKey, batches);
                     }
-                } else {
-                    console.warn('⚠️ API returned error:', res.status);
                 }
             } catch (err) {
                 console.warn('⚠️ Error fetching batches:', err);
             }
             
-            // ✅ THIRD: Try by product ID (fallback)
-            if (batches.length === 0 && product.id) {
-                try {
-                    const res = await fetch(`/api/sales/batches/${product.id}`);
-                    if (res.ok) {
-                        batches = await res.json();
-                        console.log('📦 Fetched by product ID:', batches.length);
-                    }
-                } catch (err) {
-                    console.warn('⚠️ Error fetching by ID:', err);
-                }
-            }
-            
-            // ✅ FOURTH: Try from local cache
+            // ✅ THIRD: Try from local cache
             if (batches.length === 0) {
                 const cached = getCachedData(cacheKey);
                 if (cached && cached.length > 0) {
-                    console.log('📦 Using cached batches:', cached.length);
                     batches = cached;
                 }
             }
@@ -533,9 +512,8 @@
 
         // Filter only batches with remaining stock
         let filteredBatches = batches.filter(b => b.remaining_quantity > 0);
-        console.log(`📊 ${filteredBatches.length} batches with stock available`);
 
-        // ✅ FIFTH: If no batches but product has stock, create a fallback batch
+        // ✅ If no batches but product has stock, create a fallback batch
         if (filteredBatches.length === 0 && product.stock > 0) {
             console.warn('⚠️ No batches found, creating fallback batch from product stock');
             filteredBatches = [{
@@ -633,20 +611,9 @@
             });
             
             qtyInput.addEventListener('input', updateBatchTotals);
-            qtyInput.addEventListener('blur', function() {
-                let val = parseInt(this.value) || 0;
-                const maxStock = parseInt(this.max) || 0;
-                if (val > maxStock) {
-                    this.value = maxStock;
-                    val = maxStock;
-                } else if (val < 0) {
-                    this.value = 0;
-                }
-                updateBatchTotals();
-            });
         }
         
-        // Show total available stock info with warning if fallback
+        // Show total available stock info
         const infoRow = document.createElement('div');
         infoRow.className = `grid grid-cols-6 gap-2 ${isFallback ? 'bg-orange-50' : 'bg-blue-50'} p-2 mt-2 rounded`;
         infoRow.innerHTML = `
@@ -762,7 +729,7 @@
         neededQty = 0;
     };
 
-    // ========== 🔧 FIXED: confirmBatchSelection with correct cost calculation ==========
+    // ========== confirmBatchSelection ==========
     window.confirmBatchSelection = function() {
         let assigned = 0;
         let selected = [];
@@ -806,14 +773,14 @@
         }
         const finalTotal = Math.max(subtotal - discount, 0);
         
-        // ✅ CRITICAL FIX: Create a product copy with the CORRECT cost price from batches
+        // Create a product copy with the CORRECT cost price from batches
         const productWithCorrectCost = {
             ...currentProductForBatch,
-            cost_price: totalCost / neededQty  // Average cost per unit from batches
+            cost_price: totalCost / neededQty
         };
         
         cart.push({
-            product: productWithCorrectCost,  // ✅ Use corrected product
+            product: productWithCorrectCost,
             qty: neededQty,
             discount,
             selectedBatches: selected,
@@ -879,7 +846,6 @@
 
     // ---------- Payment Modal Functions ----------
     function selectPayment(method, event) {
-        console.log("✅ Payment method selected:", method);
         selectedPaymentMethod = method;
         selectedChequeNumber = null;
         document.getElementById('chequeInputContainer').classList.add('hidden');
@@ -895,7 +861,6 @@
     window.selectPayment = selectPayment;
 
     function showChequeInput(event) {
-        console.log("✅ Cheque payment selected");
         selectedPaymentMethod = 'cheque';
         document.getElementById('chequeInputContainer').classList.remove('hidden');
         
@@ -937,9 +902,6 @@
     async function executeSaleWithPayment(paymentMethod, chequeNum) {
         if (!pendingSaleCallback) return;
         
-        console.log("🚀 Executing sale with payment method:", paymentMethod);
-        console.log("🚀 Cheque number:", chequeNum);
-        
         const cartItems = pendingSaleCallback.cart.map(item => ({ 
             product: item.product, 
             qty: item.qty, 
@@ -961,8 +923,6 @@
             cheque_number: chequeNum
         };
         
-        console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
-        
         try {
             const res = await fetch('/api/sales/complete', {
                 method: 'POST',
@@ -976,7 +936,6 @@
             }
             
             const data = await res.json();
-            console.log("📥 Response data:", data);
             
             if (data.success) {
                 lastSale = data;
@@ -992,7 +951,6 @@
         } catch (error) {
             console.warn('Network error, saving sale offline:', error);
             
-            // Only save offline if actually offline
             if (!navigator.onLine) {
                 if (typeof savePendingSale === 'function') {
                     savePendingSale(payload);
@@ -1019,7 +977,6 @@
                 
                 alert('You are offline. Sale saved locally and will be synced later.');
             } else {
-                // Online but error occurred
                 alert('❌ Sale failed: ' + error.message);
             }
         }
@@ -1036,7 +993,6 @@
             return;
         }
         
-        // Check if there are fallback batches in cart
         const hasFallback = cart.some(item => item.isFallback);
         if (hasFallback) {
             if (!confirm('⚠️ One or more items in your cart are using FALLBACK batches (no real inventory batch exists).\n\nThis means the sale will be recorded but stock will NOT be deducted from inventory.\n\nContinue?')) {
@@ -1063,8 +1019,6 @@
 
     // ---------- Confirm Payment Button ----------
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
-        console.log("🔘 Confirm button clicked. Current payment method:", selectedPaymentMethod);
-        
         if (!selectedPaymentMethod) {
             alert('Please select a payment method.');
             return;
@@ -1072,7 +1026,6 @@
         
         if (selectedPaymentMethod === 'cheque') {
             const chequeNumber = document.getElementById('chequeNumber').value.trim();
-            console.log("💰 Cheque number entered:", chequeNumber);
             if (!chequeNumber) {
                 alert('Please enter cheque number.');
                 return;
@@ -1083,8 +1036,6 @@
         const paymentMethodToUse = selectedPaymentMethod;
         const chequeNumberToUse = selectedChequeNumber;
         
-        console.log("✅ Final payment data - Method:", paymentMethodToUse, "Cheque:", chequeNumberToUse);
-        
         closePaymentModal();
         
         const licenseData = await loadLicenseStatus();
@@ -1093,7 +1044,7 @@
         if (licenseData.licensed) {
             canProceed = true;
         } else if (licenseData.trial_active && licenseData.remaining_seconds > 0) {
-            const userChoice = await showLicenseModal(true);
+            await showLicenseModal(true);
             canProceed = true;
         } else {
             const activated = await showLicenseModal(false);
@@ -1109,7 +1060,6 @@
     });
 
     document.getElementById('cancelPaymentBtn').addEventListener('click', () => {
-        console.log("❌ Payment cancelled");
         closePaymentModal();
         pendingSaleCallback = null;
     });
@@ -1146,10 +1096,8 @@
     window.addEventListener('online', function() {
         loadProducts();
         loadLicenseStatus();
-        // Check for pending sales
         const pendingSales = localStorage.getItem('pending_sales');
         if (pendingSales) {
-            console.log('📤 Found pending sales to sync');
             document.getElementById('receiptPreview').innerHTML = `
                 <div class="bg-blue-100 border border-blue-400 text-blue-700 p-3 rounded">
                     <strong>🔄 Syncing pending sales...</strong><br>
@@ -1166,7 +1114,6 @@
         if (typeof updatePendingBadge === 'function') updatePendingBadge();
         setDefaultDateTime();
         
-        // Check for pending sales on load
         const pendingSales = localStorage.getItem('pending_sales');
         if (pendingSales) {
             console.log('📤 Found pending sales on load');

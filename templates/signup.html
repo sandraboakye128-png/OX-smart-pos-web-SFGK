@@ -1,7 +1,12 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="min-h-screen flex items-center justify-center bg-gray-100">
+<!-- Offline banner -->
+<div id="offlineBanner" class="fixed top-0 left-0 w-full bg-red-500 text-white text-center py-2 z-50 hidden">
+    ⚠️ You are offline – cannot sign up. Please connect to the internet.
+</div>
+
+<div class="min-h-[80vh] flex items-center justify-center">
     <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-md">
         <div class="text-center mb-6">
             <h2 class="text-3xl font-bold text-indigo-600">📝 Create Account</h2>
@@ -34,7 +39,7 @@
                 </select>
                 <p id="roleNote" class="text-xs text-gray-500 mt-1"></p>
             </div>
-            <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg transition">
+            <button type="submit" id="signupBtn" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg transition">
                 ✅ Register
             </button>
         </form>
@@ -48,6 +53,25 @@
 </div>
 
 <script>
+    // ----- OFFLINE BANNER -----
+    function updateOfflineBanner() {
+        const banner = document.getElementById('offlineBanner');
+        const signupBtn = document.getElementById('signupBtn');
+        if (!navigator.onLine) {
+            banner.classList.remove('hidden');
+            signupBtn.disabled = true;
+            signupBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            signupBtn.textContent = '🚫 Offline – Cannot Sign Up';
+        } else {
+            banner.classList.add('hidden');
+            signupBtn.disabled = false;
+            signupBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            signupBtn.textContent = '✅ Register';
+        }
+    }
+    window.addEventListener('online', updateOfflineBanner);
+    window.addEventListener('offline', updateOfflineBanner);
+
     // ----- CLEAR FORM FIELDS -----
     function clearFormFields() {
         document.querySelectorAll('#signupForm input[type="text"], #signupForm input[type="password"]').forEach(input => {
@@ -69,6 +93,7 @@
     document.addEventListener('DOMContentLoaded', function() {
         forceClear();
         checkAdminCount();
+        updateOfflineBanner();
     });
 
     // Clear also when page is restored from bfcache (back/forward)
@@ -76,6 +101,7 @@
         if (event.persisted) {
             forceClear();
             checkAdminCount();
+            updateOfflineBanner();
         }
     });
 
@@ -119,6 +145,12 @@
     const signupForm = document.getElementById('signupForm');
     signupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        // Check offline
+        if (!navigator.onLine) {
+            alert('You are offline. Please connect to the internet and try again.');
+            return;
+        }
         
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
