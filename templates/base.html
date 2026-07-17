@@ -55,7 +55,7 @@
             transition: max-height 0.3s ease;
         }
         .dropdown-menu.open {
-            max-height: 500px; /* enough for all items */
+            max-height: 500px;
         }
         .dropdown-menu a {
             padding-left: 2.5rem;
@@ -70,176 +70,332 @@
             border-radius: 10px;
             margin-left: 4px;
         }
+
+        /* Mobile sidebar overlay */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 40;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Sidebar - mobile hidden by default */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: -280px;
+            width: 280px;
+            height: 100vh;
+            z-index: 50;
+            transition: left 0.3s ease;
+            border-radius: 0 1.5rem 1.5rem 0;
+            overflow-y: auto;
+        }
+        .sidebar.open {
+            left: 0;
+        }
+
+        /* Desktop sidebar visible */
+        @media (min-width: 768px) {
+            .sidebar {
+                position: relative;
+                left: 0;
+                width: 224px;
+                height: auto;
+                min-height: 100vh;
+                border-radius: 0 1.5rem 1.5rem 0;
+                overflow-y: auto;
+            }
+            .sidebar-overlay {
+                display: none !important;
+            }
+            .hamburger-btn {
+                display: none !important;
+            }
+            .sidebar-close-btn {
+                display: none !important;
+            }
+        }
+
+        /* Hamburger button styles */
+        .hamburger-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 8px;
+            color: #1E293B;
+            font-size: 1.5rem;
+            display: block;
+        }
+        .hamburger-btn:hover {
+            color: #00CFCF;
+        }
+
+        /* Main content padding for mobile */
+        .main-content {
+            flex: 1;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+
+        @media (min-width: 768px) {
+            .main-content {
+                padding: 1.5rem;
+            }
+        }
+
+        /* Sidebar close button */
+        .sidebar-close-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .sidebar-close-btn:hover {
+            color: white;
+            background: #334155;
+        }
+
+        /* Better mobile scrolling */
+        .sidebar-content {
+            padding-bottom: 20px;
+        }
+
+        @media (max-width: 767px) {
+            .sidebar-content {
+                padding-top: 50px;
+            }
+            footer {
+                padding: 8px;
+                font-size: 0.6rem;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
 
-<div class="flex min-h-screen">
-    <!-- ========== SIDEBAR (dark, narrower) ========== -->
-    <div class="w-56 bg-[#1E293B] shadow-lg rounded-r-2xl flex flex-col">
-        <!-- Brand -->
-        <div class="px-4 py-5">
-            <h2 class="text-xl font-bold text-white">🧾 TOMFRIMP MOBICOM</h2>
-            <p class="text-xs text-gray-400 mt-1">OX SMART INVENTORY & POS SYSTEM</p>
+<!-- ===== SIDEBAR OVERLAY (mobile only) ===== -->
+<div id="sidebarOverlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- ===== SIDEBAR ===== -->
+<div id="sidebar" class="sidebar bg-[#1E293B] shadow-lg flex flex-col">
+    <!-- Close button (mobile only) -->
+    <button onclick="closeSidebar()" class="sidebar-close-btn" aria-label="Close sidebar">
+        <i class="fas fa-times"></i>
+    </button>
+
+    <!-- Brand -->
+    <div class="px-4 py-5 sidebar-content">
+        <h2 class="text-xl font-bold text-white">🧾 TOMFRIMP MOBICOM</h2>
+        <p class="text-xs text-gray-400 mt-1">OX SMART INVENTORY & POS SYSTEM</p>
+    </div>
+
+    <!-- User Info -->
+    {% if current_user %}
+    <div class="mx-3 mb-4 p-2 bg-[#273449] rounded-xl">
+        <div class="flex items-center gap-2 text-white text-sm">
+            <i class="fas fa-user-circle text-lg"></i>
+            <span class="font-semibold truncate">{{ current_user.username }}</span>
+            {% if current_user.username.lower() == 'oxbee' %}
+            <span class="protected-badge">🔒 Admin</span>
+            {% endif %}
+        </div>
+        <div class="text-xs text-[#00CFCF] mt-1">Role: {{ current_user.role }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Navigation -->
+    <nav class="flex-1 px-2 space-y-1 overflow-y-auto">
+
+        <!-- DASHBOARD -->
+        <a href="/" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-tachometer-alt w-5"></i> Dashboard
+        </a>
+
+        <!-- SALES (Accessories) -->
+        <a href="/sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-cash-register w-5"></i> Sales (Accessories)
+        </a>
+
+        <!-- PRODUCTS (Accessories) -->
+        <a href="/products" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-boxes w-5"></i> Products (Accessories)
+        </a>
+
+        <!-- TODAY'S SALES (Accessories) -->
+        <a href="/today-sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-chart-line w-5"></i> Today's Sales (Accessories)
+        </a>
+
+        <!-- ANALYTICS -->
+        <a href="/analytics" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-chart-pie w-5"></i> Analytics
+        </a>
+
+        <!-- ARCHIVE -->
+        <a href="/archive" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-archive w-5"></i> Archive
+        </a>
+
+        <!-- ===== SCREENS DROPDOWN (Public) ===== -->
+        <div class="mt-2">
+            <div class="dropdown-toggle flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm" onclick="toggleDropdown(this)">
+                <span class="flex items-center gap-3">
+                    <i class="fas fa-mobile-alt w-5"></i> Screens
+                </span>
+                <i class="fas fa-chevron-down text-xs"></i>
+            </div>
+            <div class="dropdown-menu space-y-1 pl-2">
+                <a href="/sales/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                    <i class="fas fa-cash-register w-5"></i> Sales (Screens)
+                </a>
+                <a href="/products/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                    <i class="fas fa-boxes w-5"></i> Products (Screens)
+                </a>
+                <a href="/today-sales/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                    <i class="fas fa-chart-line w-5"></i> Today's Sales (Screens)
+                </a>
+            </div>
         </div>
 
-        <!-- User Info -->
+        <!-- ===== ADMIN-ONLY LINKS ===== -->
+        {% if current_user and current_user.role == 'admin' %}
+        <div class="border-t border-gray-700 my-2"></div>
+        <div class="text-xs text-gray-500 uppercase px-3 py-1">Admin</div>
+
+        <!-- USER LOGS (Only oxbee can see this) -->
+        {% if current_user.username.lower() == 'oxbee' %}
+        <a href="/logs" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-history w-5"></i> User Logs
+            <span class="text-xs text-red-400 ml-auto">🔒</span>
+        </a>
+        {% endif %}
+
+        <!-- Purchases (Accessories) -->
+        <a href="/purchases" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-shopping-cart w-5"></i> Purchases (Accessories)
+        </a>
+
+        <!-- Purchases (Screens) -->
+        <a href="/purchases/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-shopping-cart w-5"></i> Purchases (Screens)
+        </a>
+
+        <!-- Import Data (opens in new tab) -->
+        <a href="/inventory/import" target="_blank" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-file-import w-5"></i> Import Data
+        </a>
+
+        <!-- Users Management -->
+        <a href="/admin/users" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+            <i class="fas fa-users-cog w-5"></i> Users
+        </a>
+        {% endif %}
+
+        <!-- ===== PENDING BADGE & SYNC / CLEAR BUTTONS ===== -->
         {% if current_user %}
-        <div class="mx-3 mb-4 p-2 bg-[#273449] rounded-xl">
-            <div class="flex items-center gap-2 text-white text-sm">
-                <i class="fas fa-user-circle text-lg"></i>
-                <span class="font-semibold truncate">{{ current_user.username }}</span>
-                {% if current_user.username.lower() == 'oxbee' %}
-                <span class="protected-badge">🔒 Admin</span>
-                {% endif %}
+        <div class="mt-4 flex flex-col gap-2 px-3 py-1">
+            <div class="flex items-center gap-2">
+                <span id="pending-badge" class="text-xs text-yellow-300 bg-gray-700 px-2 py-0.5 rounded-full" style="display:none;"></span>
+                <button onclick="syncPendingSales()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition">
+                    <i class="fas fa-cloud-upload-alt mr-1"></i> Sync Offline
+                </button>
             </div>
-            <div class="text-xs text-[#00CFCF] mt-1">Role: {{ current_user.role }}</div>
+            <button onclick="clearOfflineData()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-md transition">
+                <i class="fas fa-trash mr-1"></i> Clear Offline Data
+            </button>
         </div>
         {% endif %}
 
-        <!-- Navigation -->
-        <nav class="flex-1 px-2 space-y-1 overflow-y-auto">
-
-            <!-- DASHBOARD -->
-            <a href="/" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-tachometer-alt w-5"></i> Dashboard
-            </a>
-
-            <!-- SALES (Accessories) -->
-            <a href="/sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-cash-register w-5"></i> Sales (Accessories)
-            </a>
-
-            <!-- PRODUCTS (Accessories) -->
-            <a href="/products" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-boxes w-5"></i> Products (Accessories)
-            </a>
-
-            <!-- TODAY'S SALES (Accessories) -->
-            <a href="/today-sales" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-chart-line w-5"></i> Today's Sales (Accessories)
-            </a>
-
-            <!-- ANALYTICS -->
-            <a href="/analytics" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-chart-pie w-5"></i> Analytics
-            </a>
-
-            <!-- ARCHIVE -->
-            <a href="/archive" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-archive w-5"></i> Archive
-            </a>
-
-            <!-- ===== SCREENS DROPDOWN (Public) ===== -->
-            <div class="mt-2">
-                <div class="dropdown-toggle flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm" onclick="toggleDropdown(this)">
-                    <span class="flex items-center gap-3">
-                        <i class="fas fa-mobile-alt w-5"></i> Screens
-                    </span>
-                    <i class="fas fa-chevron-down text-xs"></i>
-                </div>
-                <div class="dropdown-menu space-y-1 pl-2">
-                    <a href="/sales/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                        <i class="fas fa-cash-register w-5"></i> Sales (Screens)
-                    </a>
-                    <a href="/products/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                        <i class="fas fa-boxes w-5"></i> Products (Screens)
-                    </a>
-                    <a href="/today-sales/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                        <i class="fas fa-chart-line w-5"></i> Today's Sales (Screens)
-                    </a>
-                </div>
-            </div>
-
-            <!-- ===== ADMIN-ONLY LINKS ===== -->
-            {% if current_user and current_user.role == 'admin' %}
-            <div class="border-t border-gray-700 my-2"></div>
-            <div class="text-xs text-gray-500 uppercase px-3 py-1">Admin</div>
-
-            <!-- USER LOGS (Only oxbee can see this) -->
-            {% if current_user.username.lower() == 'oxbee' %}
-            <a href="/logs" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-history w-5"></i> User Logs
-                <span class="text-xs text-red-400 ml-auto">🔒</span>
-            </a>
-            {% endif %}
-
-            <!-- Purchases (Accessories) -->
-            <a href="/purchases" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-shopping-cart w-5"></i> Purchases (Accessories)
-            </a>
-
-            <!-- Purchases (Screens) -->
-            <a href="/purchases/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-shopping-cart w-5"></i> Purchases (Screens)
-            </a>
-
-            <!-- Import Data (opens in new tab) -->
-            <a href="/inventory/import" target="_blank" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-file-import w-5"></i> Import Data
-            </a>
-
-            <!-- Users Management -->
-            <a href="/admin/users" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-users-cog w-5"></i> Users
-            </a>
-            {% endif %}
-
-            <!-- ===== PENDING BADGE & SYNC / CLEAR BUTTONS (stacked vertically) ===== -->
-            {% if current_user %}
-            <div class="mt-4 flex flex-col gap-2 px-3 py-1">
-                <!-- First row: badge + Sync button -->
-                <div class="flex items-center gap-2">
-                    <span id="pending-badge" class="text-xs text-yellow-300 bg-gray-700 px-2 py-0.5 rounded-full" style="display:none;"></span>
-                    <button onclick="syncPendingSales()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition">
-                        <i class="fas fa-cloud-upload-alt mr-1"></i> Sync Offline
-                    </button>
-                </div>
-                <!-- Second row: Clear Offline Data button -->
-                <button onclick="clearOfflineData()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-md transition">
-                    <i class="fas fa-trash mr-1"></i> Clear Offline Data
-                </button>
-            </div>
-            {% endif %}
-
-            <!-- ===== LOGOUT BUTTON ===== -->
-            {% if current_user %}
-            <div class="pt-4 pb-2">
-                <button onclick="logout()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2 text-sm">
-                    <i class="fas fa-sign-out-alt"></i> Logout
-                </button>
-            </div>
-            {% endif %}
-
-        </nav>
-        <!-- end of nav -->
-
-    </div>
-    <!-- end of sidebar -->
-
-    <!-- ========== MAIN CONTENT AREA ========== -->
-    <div class="flex-1 flex flex-col">
-        <!-- Dynamic content -->
-        <div class="flex-1 p-6 overflow-y-auto">
-            {% block content %}{% endblock %}
+        <!-- ===== LOGOUT BUTTON ===== -->
+        {% if current_user %}
+        <div class="pt-4 pb-2">
+            <button onclick="logout()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
         </div>
+        {% endif %}
 
-        <!-- Footer -->
-        <footer class="bg-[#1E293B] text-gray-300 text-center py-3 text-xs">
-            TOMFRIMP MOBICOM SOLUTIONS  | HOME OF COMPUTER, PHONES, AND ACCESSORIES<br>
-            Developed by HUMMNINGBIRD DIGITAL SOLUTIONS © 2026 - All Rights Reserved
-            <span class="block mt-1">
-                <a href="/offline" class="text-gray-400 hover:text-white underline">📶 Offline</a>
-            </span>
-        </footer>
+    </nav>
+</div>
+
+<!-- ========== MAIN CONTENT AREA ========== -->
+<div class="flex-1 flex flex-col min-h-screen">
+    <!-- Mobile Header with Hamburger -->
+    <div class="md:hidden bg-white shadow-sm sticky top-0 z-30 px-4 py-3 flex items-center gap-3">
+        <button onclick="toggleSidebar()" class="hamburger-btn" aria-label="Toggle sidebar">
+            <i class="fas fa-bars text-2xl"></i>
+        </button>
+        <div class="flex-1">
+            <h1 class="text-lg font-bold text-indigo-600">OX Smart POS</h1>
+        </div>
+        {% if current_user %}
+        <div class="flex items-center gap-2 text-sm">
+            <i class="fas fa-user-circle text-indigo-600 text-xl"></i>
+            <span class="text-gray-700 truncate max-w-[80px]">{{ current_user.username }}</span>
+        </div>
+        {% endif %}
     </div>
+
+    <!-- Dynamic content -->
+    <div class="main-content flex-1">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-[#1E293B] text-gray-300 text-center py-3 text-xs">
+        <div class="px-2">
+            TOMFRIMP MOBICOM SOLUTIONS | HOME OF COMPUTER, PHONES, AND ACCESSORIES
+        </div>
+        <div class="mt-1">
+            Developed by HUMMNINGBIRD DIGITAL SOLUTIONS © <span id="footerYear">2026</span> - All Rights Reserved
+        </div>
+        <div class="mt-1">
+            <a href="/offline" class="text-gray-400 hover:text-white underline">📶 Offline</a>
+        </div>
+    </footer>
 </div>
 
 <!-- ===== OFFLINE HELPERS ===== -->
 <script src="{{ url_for('static', filename='js/offline.js') }}"></script>
 
 <script>
-    // Dropdown toggle function
+    // ===== SIDEBAR TOGGLE FUNCTIONS =====
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('active');
+        document.body.style.overflow = sidebar.classList.contains('open') ? 'hidden' : '';
+    }
+
+    function closeSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        sidebar.classList.remove('open');
+        overlay.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    // Close sidebar on escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeSidebar();
+        }
+    });
+
+    // ===== DROPDOWN TOGGLE =====
     function toggleDropdown(element) {
         const parent = element.closest('.dropdown-toggle');
         const menu = parent.nextElementSibling;
@@ -247,17 +403,18 @@
         menu.classList.toggle('open');
     }
 
-    // Helper: refresh the current page's data
-    function refreshPageData() {
-        window.dispatchEvent(new CustomEvent('refresh-request'));
-        if (window.refreshCurrentPage && typeof window.refreshCurrentPage === 'function') {
-            window.refreshCurrentPage();
-        } else {
-            location.reload();
+    // Auto-close dropdown if clicked outside
+    document.addEventListener('click', function(e) {
+        const dropdown = e.target.closest('.dropdown-toggle');
+        if (!dropdown) {
+            document.querySelectorAll('.dropdown-toggle.open').forEach(el => {
+                el.classList.remove('open');
+                el.nextElementSibling.classList.remove('open');
+            });
         }
-    }
+    });
 
-    // Logout function with logging
+    // ===== LOGOUT FUNCTION =====
     async function logout() {
         try {
             const res = await fetch('/api/auth/logout', { method: 'POST' });
@@ -272,20 +429,13 @@
         }
     }
 
-    // Clear all offline storage (pending sales, imports, badge counts)
+    // ===== CLEAR OFFLINE DATA =====
     function clearOfflineData() {
         if (!confirm('⚠️ This will clear all pending offline sales and import data. Proceed?')) return;
         
-        // 1. Remove all known localStorage & sessionStorage keys
         const keysToRemove = [
-            'pendingCount', 
-            'pendingSales', 
-            'offlineQueue', 
-            'importPending',
-            'pendingImports',
-            'offlineSales',
-            'pendingJobId',
-            'pendingJobStatus',
+            'pendingCount', 'pendingSales', 'offlineQueue', 'importPending',
+            'pendingImports', 'offlineSales', 'pendingJobId', 'pendingJobStatus',
             'pendingPurchases'
         ];
         keysToRemove.forEach(key => {
@@ -293,42 +443,27 @@
             sessionStorage.removeItem(key);
         });
         
-        // 2. Delete IndexedDB databases (common names used in offline.js)
-        const dbNames = [
-            'OfflineSalesDB', 
-            'SalesDB', 
-            'offlineDB', 
-            'PendingDB',
-            'ImportQueueDB'
-        ];
+        const dbNames = ['OfflineSalesDB', 'SalesDB', 'offlineDB', 'PendingDB', 'ImportQueueDB'];
         dbNames.forEach(name => {
             try {
                 const request = indexedDB.deleteDatabase(name);
-                request.onerror = function() { 
-                    console.warn('Could not delete DB:', name); 
-                };
-                request.onsuccess = function() { 
-                    console.log('✅ Deleted DB:', name); 
-                };
+                request.onerror = function() { console.warn('Could not delete DB:', name); };
+                request.onsuccess = function() { console.log('✅ Deleted DB:', name); };
             } catch(e) {
                 console.warn('Error deleting DB:', name, e);
             }
         });
         
-        // 3. Hide the pending badge immediately
         const badge = document.getElementById('pending-badge');
         if (badge) {
             badge.style.display = 'none';
             badge.textContent = '';
         }
         
-        // 4. Refresh the page after a short delay
-        setTimeout(() => {
-            location.reload();
-        }, 600);
+        setTimeout(() => { location.reload(); }, 600);
     }
 
-    // Sync pending sales (placeholder - actual implementation may vary)
+    // ===== SYNC PENDING SALES =====
     async function syncPendingSales() {
         if (!navigator.onLine) {
             alert('You are offline. Please connect to the internet to sync.');
@@ -338,33 +473,24 @@
         const badge = document.getElementById('pending-badge');
         if (badge && badge.style.display !== 'none') {
             alert('Syncing pending sales... This may take a moment.');
-            // In a real implementation, you would call your sync function here
-            // For now, we'll just refresh the page
-            setTimeout(() => {
-                location.reload();
-            }, 1000);
+            setTimeout(() => { location.reload(); }, 1500);
         } else {
             alert('No pending sales to sync.');
         }
     }
 
-    // Auto-close dropdown if clicked outside (optional)
-    document.addEventListener('click', function(e) {
-        const dropdown = e.target.closest('.dropdown-toggle');
-        if (!dropdown) {
-            document.querySelectorAll('.dropdown-toggle.open').forEach(el => {
-                el.classList.remove('open');
-                el.nextElementSibling.classList.remove('open');
-            });
+    // ===== UPDATE FOOTER YEAR =====
+    document.addEventListener('DOMContentLoaded', function() {
+        const yearSpan = document.getElementById('footerYear');
+        if (yearSpan) {
+            yearSpan.textContent = new Date().getFullYear();
         }
     });
 
-    // Display current year in footer dynamically (optional)
-    document.addEventListener('DOMContentLoaded', function() {
-        const footer = document.querySelector('footer');
-        if (footer) {
-            const year = new Date().getFullYear();
-            footer.innerHTML = footer.innerHTML.replace('© 2026', `© ${year}`);
+    // Close sidebar when window resizes to desktop
+    window.addEventListener('resize', function() {
+        if (window.innerWidth >= 768) {
+            closeSidebar();
         }
     });
 </script>
