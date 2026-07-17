@@ -817,42 +817,6 @@ def api_get_purchases():
     
     return jsonify([serialize_purchase(p) for p in purchases])
 
-@app.route('/api/purchases', methods=['POST'])
-@login_required
-def api_add_purchase():
-    data = request.json
-    try:
-        batch_id = add_purchase(
-            name=data['name'],
-            brand=data['brand'],
-            category=data['category'],
-            quantity=int(data['quantity']),
-            cost_price=float(data['cost_price']),
-            discount=float(data.get('discount', 0)),
-            selling_price=float(data['selling_price'])
-        )
-        return jsonify({'success': True, 'batch_id': batch_id})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-@app.route('/api/purchases/<int:batch_id>', methods=['PUT'])
-@login_required
-def api_update_purchase(batch_id):
-    data = request.json
-    try:
-        update_product(
-            batch_id=batch_id,
-            name=data['name'],
-            brand=data['brand'],
-            category=data['category'],
-            quantity=int(data['quantity']),
-            cost_price=float(data['cost_price']),
-            discount=float(data.get('discount', 0)),
-            selling_price=float(data['selling_price'])
-        )
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route('/api/purchases/filter', methods=['GET'])
 @login_required
@@ -1033,6 +997,58 @@ def api_purchases_pdf():
                      download_name=f"Purchases_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
 
+
+@app.route('/api/purchases', methods=['POST'])
+@login_required
+def api_add_purchase():
+    data = request.json
+    try:
+        batch_id = add_purchase(
+            name=data['name'],
+            brand=data['brand'],
+            category=data['category'],
+            quantity=int(data['quantity']),
+            cost_price=float(data['cost_price']),
+            discount=float(data.get('discount', 0)),
+            selling_price=float(data['selling_price']),
+            source=data.get('source', 'Unknown')  # ✅ Added source
+        )
+        return jsonify({'success': True, 'batch_id': batch_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/purchases/<int:batch_id>', methods=['PUT'])
+@login_required
+def api_update_purchase(batch_id):
+    data = request.json
+    try:
+        update_product(
+            batch_id=batch_id,
+            name=data['name'],
+            brand=data['brand'],
+            category=data['category'],
+            quantity=int(data['quantity']),
+            cost_price=float(data['cost_price']),
+            discount=float(data.get('discount', 0)),
+            selling_price=float(data['selling_price']),
+            source=data.get('source', 'Unknown')  # ✅ Added source
+        )
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ✅ Add source suggestions endpoint
+@app.route('/api/purchases/suggestions/source', methods=['GET'])
+@login_required
+def api_suggest_source():
+    q = request.args.get('q', '')
+    if not q:
+        return jsonify([])
+    from services.purchase_service import get_source_suggestions
+    suggestions = get_source_suggestions(q)
+    return jsonify(suggestions)
 # ===================== PRODUCT API =====================
 @app.route('/api/products', methods=['GET'])
 @login_required

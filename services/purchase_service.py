@@ -17,11 +17,12 @@ def update_product_stock(cursor, product_id):
 
 
 # --------------------------- ADD PURCHASE (BATCH-AWARE) ---------------------------
-def add_purchase(name, brand, category, quantity, cost_price, discount, selling_price, purchase_date=None):
+def add_purchase(name, brand, category, quantity, cost_price, discount, selling_price, purchase_date=None, source=None):
     quantity = int(quantity)
     cost_price = float(cost_price)
     discount = float(discount or 0)
     selling_price = float(selling_price)
+    source = source or 'Unknown'
 
     # Use provided date or current time
     if purchase_date is None:
@@ -36,9 +37,9 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
         # Save purchase record
         cursor.execute("""
             INSERT INTO purchases
-            (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (name, brand, category, quantity, cost_price, discount, total, selling_price, purchase_date))
+            (product_name, brand, category, quantity, cost_price, discount, total, selling_price, date, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (name, brand, category, quantity, cost_price, discount, total, selling_price, purchase_date, source))
 
         # Get or create product (check if not permanently deleted)
         cursor.execute("""
@@ -68,10 +69,10 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
         # Create batch with the provided date
         cursor.execute("""
             INSERT INTO purchase_batches
-            (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (product_id, quantity, remaining_quantity, cost_price, selling_price, discount, date, action, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (product_id, quantity, quantity, cost_price, selling_price, discount, purchase_date, "added"))
+        """, (product_id, quantity, quantity, cost_price, selling_price, discount, purchase_date, "added", source))
 
         batch_id = cursor.fetchone()[0]
 
@@ -86,15 +87,16 @@ def add_purchase(name, brand, category, quantity, cost_price, discount, selling_
 
 
 # --------------------------- UPDATE BATCH (FIXED) ---------------------------
-def update_product(batch_id, name, brand, category, quantity, cost_price, discount, selling_price):
+def update_product(batch_id, name, brand, category, quantity, cost_price, discount, selling_price, source=None):
     """
     Update a batch and its associated product.
-    FIXED: Now updates ALL product fields (name, brand, category, cost_price, selling_price, discount)
+    FIXED: Now updates ALL product fields (name, brand, category, cost_price, selling_price, discount, source)
     """
     quantity = int(quantity)
     cost_price = float(cost_price)
     discount = float(discount or 0)
     selling_price = float(selling_price)
+    source = source or 'Unknown'
 
     conn = get_connection()
     try:
@@ -102,7 +104,7 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
 
         # Get linked product_id and current product data
         cursor.execute("""
-            SELECT pb.product_id, p.name, p.brand, p.category, p.cost_price, p.selling_price, p.discount
+            SELECT pb.product_id, p.name, p.brand, p.category, p.cost_price, p.selling_price, p.discount, pb.source
             FROM purchase_batches pb
             JOIN products p ON p.id = pb.product_id
             WHERE pb.id = %s
@@ -119,10 +121,11 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
         old_cost_price = result[4]
         old_selling_price = result[5]
         old_discount = result[6]
+        old_source = result[7] if len(result) > 7 else 'Unknown'
 
         # Archive old batch data
         cursor.execute("""
-            SELECT quantity, remaining_quantity, cost_price, selling_price, discount, date, action
+            SELECT quantity, remaining_quantity, cost_price, selling_price, discount, date, action, source
             FROM purchase_batches
             WHERE id = %s
         """, (batch_id,))
@@ -134,14 +137,14 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
                 (name, brand, cost_price, selling_price, stock, category, discount, action, product_id, source, batch_id, batch_quantity, batch_remaining)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (old_product_name, old_product_brand, old_batch[2], old_batch[3], old_batch[1], 
-                  old_category, old_batch[4], "updated", product_id, "product", batch_id, old_batch[0], old_batch[1]))
+                  old_category, old_batch[4], "updated", product_id, old_source, batch_id, old_batch[0], old_batch[1]))
 
         # Update the batch record
         cursor.execute("""
             UPDATE purchase_batches
-            SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s
+            SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s, source = %s
             WHERE id = %s
-        """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", batch_id))
+        """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", source, batch_id))
 
         # ✅ FIXED: Update ALL product fields, not just category
         cursor.execute("""
@@ -172,7 +175,7 @@ def get_all_purchases():
                    b.quantity, b.remaining_quantity,
                    b.cost_price, b.discount, b.selling_price,
                    (b.cost_price * b.quantity - b.discount) AS total,
-                   b.date, b.action
+                   b.date, b.action, b.source
             FROM purchase_batches b
             JOIN products p ON p.id = b.product_id
             WHERE NOT EXISTS (
@@ -197,7 +200,8 @@ def get_all_purchases():
                 "selling_price": r[8],
                 "total_cost": r[9],
                 "date": r[10],
-                "action": r[11]
+                "action": r[11],
+                "source": r[12] if len(r) > 12 else 'Unknown'
             }
             for r in rows
         ]
@@ -215,7 +219,7 @@ def get_purchases_by_date_range(start_date, end_date):
                    b.quantity, b.remaining_quantity,
                    b.cost_price, b.discount, b.selling_price,
                    (b.cost_price * b.quantity - b.discount) AS total,
-                   b.date, b.action
+                   b.date, b.action, b.source
             FROM purchase_batches b
             JOIN products p ON p.id = b.product_id
             WHERE b.date::date BETWEEN %s AND %s
@@ -241,7 +245,8 @@ def get_purchases_by_date_range(start_date, end_date):
                 "selling_price": r[8],
                 "total_cost": r[9],
                 "date": r[10],
-                "action": r[11]
+                "action": r[11],
+                "source": r[12] if len(r) > 12 else 'Unknown'
             }
             for r in rows
         ]
@@ -296,6 +301,29 @@ def get_category_suggestions(keyword):
         results = cursor.fetchall()
         return [
             {"category": r[0]} for r in results if r[0]
+        ]
+    finally:
+        conn.close()
+
+
+# --------------------------- GET SOURCE SUGGESTIONS ---------------------------
+def get_source_suggestions(keyword):
+    """Get distinct source suggestions for autocomplete"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT source
+            FROM purchase_batches
+            WHERE source ILIKE %s 
+            AND source IS NOT NULL
+            AND source != ''
+            ORDER BY source ASC
+            LIMIT 5
+        """, (f"%{keyword}%",))
+        results = cursor.fetchall()
+        return [
+            {"source": r[0]} for r in results if r[0]
         ]
     finally:
         conn.close()

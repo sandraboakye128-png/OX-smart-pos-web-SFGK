@@ -7,7 +7,7 @@
         ⚠️ You are offline – showing cached screen purchases. New purchases will be saved and synced when you reconnect.
     </div>
 
-    <!-- Cache banner (shows when using cached data while online) -->
+    <!-- Cache banner -->
     <div id="cacheBanner" class="mb-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded hidden">
         ⚠️ Showing cached data (last updated: <span id="cacheTimestamp"></span>). 
         <button onclick="refreshData()" class="underline font-bold">Click here to refresh</button>
@@ -19,7 +19,7 @@
             <h2 class="text-xl font-bold" id="formTitle">➕ Add Screen Purchase</h2>
             <span class="bg-purple-100 text-purple-800 text-xs font-semibold px-2.5 py-0.5 rounded">Screens Only</span>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-8 gap-3">
             <div>
                 <label class="block text-sm font-medium text-gray-700">Product Name</label>
                 <input type="text" id="name" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" autocomplete="off" placeholder="Screen name">
@@ -50,6 +50,11 @@
                 <label class="block text-sm font-medium text-gray-700">Selling Price (₵)</label>
                 <input type="number" step="0.01" id="selling_price" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2">
             </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Source</label>
+                <input type="text" id="source" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Supplier, Wholesaler" autocomplete="off">
+                <div id="sourceSuggestions" class="absolute z-10 bg-white border rounded-lg shadow-lg hidden"></div>
+            </div>
         </div>
         <div class="mt-4 flex gap-3">
             <button id="submitBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-6 py-2 rounded-lg">➕ Add Screen Purchase</button>
@@ -60,7 +65,7 @@
     <!-- SEARCH & FILTER BAR -->
     <div class="bg-white rounded-xl shadow-md p-4 mb-6 flex flex-wrap gap-4 items-end">
         <div class="flex-1 min-w-[200px]">
-            <label class="block text-sm font-medium text-gray-700">Search (screen name/brand/category)</label>
+            <label class="block text-sm font-medium text-gray-700">Search (name/brand/category/source)</label>
             <input type="text" id="searchInput" placeholder="🔍 Type to filter screens..." class="w-full border border-gray-300 rounded-lg px-3 py-2">
         </div>
         <div>
@@ -72,8 +77,8 @@
             <input type="date" id="toDate" class="border border-gray-300 rounded-lg px-3 py-2">
         </div>
         <button id="filterBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg">🔍 Filter</button>
+        <button id="clearFilterBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-5 py-2 rounded-lg">✕ Clear</button>
         <button id="pdfBtn" class="bg-teal-500 hover:bg-teal-600 text-white px-5 py-2 rounded-lg">🧾 PDF Report</button>
-        <!-- Pending Button -->
         <button id="viewPendingBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg flex items-center gap-2">
             <span>⏳ Pending</span>
             <span id="pendingCount" class="bg-red-500 text-white text-xs rounded-full px-2 py-0.5 hidden">0</span>
@@ -271,6 +276,7 @@
                                 ${p.data.discount ? `| Discount: ₵${p.data.discount.toFixed(2)}` : ''}
                             </p>
                             <p class="text-sm text-gray-500">Category: ${p.data.category || 'Screen'}</p>
+                            <p class="text-sm text-gray-500">Source: ${p.data.source || 'Unknown'}</p>
                         </div>
                         <div class="flex flex-col gap-1">
                             <button onclick="syncPendingItem(${index})" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm">
@@ -460,7 +466,6 @@
                     isDataFresh = true;
                     console.log('✅ Data loaded from API (fresh)');
                     
-                    // Auto-sync pending items when online
                     const pending = getPendingPurchases();
                     if (pending.length > 0) {
                         console.log(`📦 ${pending.length} pending purchases found - syncing automatically...`);
@@ -501,7 +506,6 @@
         checkForBatchEdit();
     }
 
-    // Silent sync for pending items (used on reconnect)
     async function syncAllPendingSilently() {
         const pending = getPendingPurchases();
         if (pending.length === 0) return;
@@ -561,20 +565,21 @@
         container.innerHTML = purchases.map(p => `
             <div class="border rounded-lg p-4 hover:shadow transition">
                 <div class="flex justify-between items-start">
-                    <div>
+                    <div class="flex-1">
                         <h3 class="font-bold text-lg">${escapeHtml(p.name)} (${escapeHtml(p.brand)})</h3>
                         <p class="text-sm text-gray-600">Batch #${p.batch_id} | Qty: ${p.quantity} | Stock: ${p.remaining_quantity}</p>
                         <p class="text-sm">Cost: ₵${p.cost_price.toFixed(2)} | Discount: ₵${p.discount.toFixed(2)} | Selling: ₵${p.selling_price.toFixed(2)}</p>
                         <p class="text-sm">Total: ₵${p.total_cost.toFixed(2)} | Date: ${formatDate(p.date)}</p>
+                        <p class="text-sm text-gray-500 mt-1"><span class="font-medium">Source:</span> ${escapeHtml(p.source || 'Unknown')}</p>
                     </div>
-                    <button onclick="editPurchase(${p.batch_id})" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1 rounded">✏️ Update</button>
+                    <button onclick="editPurchase(${p.batch_id})" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1 rounded ml-2">✏️ Update</button>
                 </div>
             </div>
         `).join('');
         updateSummary(purchases);
     }
 
-    // ---------- Update summary with Grand Total, Capital, and Profit ----------
+    // ---------- Update summary ----------
     function updateSummary(purchases) {
         let totalQty = 0;
         let totalCost = 0;
@@ -595,11 +600,8 @@
             totalDiscount += itemDiscount;
             totalSelling += itemSelling * itemQty;
             
-            // Profit = (Selling Price - Cost Price) * Quantity - Discount
             const itemProfit = (itemSelling - itemCost) * itemQty - itemDiscount;
             totalProfit += itemProfit;
-            
-            // Capital = Total Cost - Discount
             totalCapital += (itemCost * itemQty) - itemDiscount;
         });
         
@@ -665,7 +667,8 @@
             quantity: parseInt(document.getElementById('quantity').value),
             cost_price: parseFloat(document.getElementById('cost_price').value),
             discount: parseFloat(document.getElementById('discount').value) || 0,
-            selling_price: parseFloat(document.getElementById('selling_price').value)
+            selling_price: parseFloat(document.getElementById('selling_price').value),
+            source: document.getElementById('source').value.trim() || 'Unknown'
         };
         
         if (!payload.name || !payload.brand || !payload.quantity || !payload.cost_price || !payload.selling_price) {
@@ -706,7 +709,6 @@
                 alert(editMode ? '✅ Screen purchase updated!' : '✅ Screen purchase added!');
                 resetForm();
                 
-                // Clear the URL parameter if coming from edit
                 if (window.history && window.history.pushState) {
                     const newUrl = window.location.pathname;
                     window.history.pushState({}, '', newUrl);
@@ -744,6 +746,7 @@
         document.getElementById('cost_price').value = purchase.cost_price;
         document.getElementById('discount').value = purchase.discount;
         document.getElementById('selling_price').value = purchase.selling_price;
+        document.getElementById('source').value = purchase.source || 'Unknown';
         
         editMode = true;
         editBatchId = batchId;
@@ -771,6 +774,7 @@
         document.getElementById('cost_price').value = '';
         document.getElementById('discount').value = '';
         document.getElementById('selling_price').value = '';
+        document.getElementById('source').value = '';
         
         editMode = false;
         editBatchId = null;
@@ -784,7 +788,6 @@
             form.style.border = 'none';
         }
         
-        // Clear URL parameter
         if (window.history && window.history.pushState) {
             const newUrl = window.location.pathname;
             window.history.pushState({}, '', newUrl);
@@ -795,6 +798,7 @@
     async function filterPurchases() {
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
+        
         if (fromDate && toDate) {
             try {
                 const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}&category=Screen`);
@@ -816,8 +820,15 @@
         applySearch();
     }
 
+    function clearFilters() {
+        document.getElementById('fromDate').value = '';
+        document.getElementById('toDate').value = '';
+        document.getElementById('searchInput').value = '';
+        loadPurchases(true);
+    }
+
     function applySearch() {
-        const keyword = document.getElementById('searchInput').value.toLowerCase();
+        const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
         if (!keyword) {
             renderList(currentPurchases, !isDataFresh);
             return;
@@ -825,7 +836,8 @@
         const filtered = currentPurchases.filter(p =>
             (p.name && p.name.toLowerCase().includes(keyword)) ||
             (p.brand && p.brand.toLowerCase().includes(keyword)) ||
-            (p.category && p.category.toLowerCase().includes(keyword))
+            (p.category && p.category.toLowerCase().includes(keyword)) ||
+            (p.source && p.source.toLowerCase().includes(keyword))
         );
         renderList(filtered, !isDataFresh);
     }
@@ -838,6 +850,8 @@
         }
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
+        
+        // Get current displayed data (after search/filter)
         const purchasesToExport = currentPurchases;
 
         // Calculate totals for the report
@@ -872,7 +886,6 @@
                     purchases: purchasesToExport,
                     from_date: fromDate,
                     to_date: toDate,
-                    // Send calculated totals for the PDF
                     totals: {
                         total_qty: totalQty,
                         total_cost: totalCost,
@@ -900,7 +913,7 @@
     }
 
     // ---------- Autocomplete ----------
-    let nameTimeout, catTimeout;
+    let nameTimeout, catTimeout, sourceTimeout;
 
     async function fetchNameSuggestions() {
         if (!navigator.onLine) {
@@ -950,6 +963,30 @@
         }
     }
 
+    async function fetchSourceSuggestions() {
+        if (!navigator.onLine) {
+            document.getElementById('sourceSuggestions').classList.add('hidden');
+            return;
+        }
+        const q = document.getElementById('source').value.trim();
+        if (!q) { document.getElementById('sourceSuggestions').classList.add('hidden'); return; }
+        try {
+            const res = await fetch(`/api/purchases/suggestions/source?q=${encodeURIComponent(q)}`);
+            if (!res.ok) throw new Error();
+            const suggestions = await res.json();
+            const box = document.getElementById('sourceSuggestions');
+            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectSourceSuggestion('${escapeHtml(s.source)}')">${escapeHtml(s.source)}</div>`).join('');
+            box.classList.remove('hidden');
+            const rect = document.getElementById('source').getBoundingClientRect();
+            box.style.top = rect.bottom + window.scrollY + 'px';
+            box.style.left = rect.left + 'px';
+            box.style.width = rect.width + 'px';
+        } catch (err) {
+            document.getElementById('sourceSuggestions').classList.add('hidden');
+        }
+    }
+
     window.selectNameSuggestion = function(name, brand, category) {
         document.getElementById('name').value = name;
         document.getElementById('brand').value = brand;
@@ -960,6 +997,11 @@
     window.selectCategorySuggestion = function(cat) {
         document.getElementById('category').value = cat;
         document.getElementById('categorySuggestions').classList.add('hidden');
+    };
+
+    window.selectSourceSuggestion = function(source) {
+        document.getElementById('source').value = source;
+        document.getElementById('sourceSuggestions').classList.add('hidden');
     };
 
     // ---------- Event listeners ----------
@@ -977,13 +1019,29 @@
         document.getElementById('submitBtn').addEventListener('click', submitPurchase);
         document.getElementById('cancelBtn').addEventListener('click', resetForm);
         document.getElementById('filterBtn').addEventListener('click', filterPurchases);
+        document.getElementById('clearFilterBtn').addEventListener('click', clearFilters);
         document.getElementById('pdfBtn').addEventListener('click', generatePDF);
         document.getElementById('searchInput').addEventListener('input', applySearch);
-        document.getElementById('name').addEventListener('input', () => { clearTimeout(nameTimeout); nameTimeout = setTimeout(fetchNameSuggestions, 300); });
-        document.getElementById('category').addEventListener('input', () => { clearTimeout(catTimeout); catTimeout = setTimeout(fetchCategorySuggestions, 300); });
+        
+        // Autocomplete listeners
+        document.getElementById('name').addEventListener('input', () => { 
+            clearTimeout(nameTimeout); 
+            nameTimeout = setTimeout(fetchNameSuggestions, 300); 
+        });
+        document.getElementById('category').addEventListener('input', () => { 
+            clearTimeout(catTimeout); 
+            catTimeout = setTimeout(fetchCategorySuggestions, 300); 
+        });
+        document.getElementById('source').addEventListener('input', () => { 
+            clearTimeout(sourceTimeout); 
+            sourceTimeout = setTimeout(fetchSourceSuggestions, 300); 
+        });
+        
+        // Close suggestions on click outside
         document.addEventListener('click', function(e) {
             if (!e.target.closest('#name')) document.getElementById('nameSuggestions').classList.add('hidden');
             if (!e.target.closest('#category')) document.getElementById('categorySuggestions').classList.add('hidden');
+            if (!e.target.closest('#source')) document.getElementById('sourceSuggestions').classList.add('hidden');
         });
     });
 
