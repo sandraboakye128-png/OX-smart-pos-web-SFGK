@@ -887,8 +887,8 @@ def api_purchases_pdf():
         elements.append(Paragraph(f"Date Range: {from_date} → {to_date}", styles["Normal"]))
     elements.append(Spacer(1, 12))
 
-    # Table data
-    table_data = [["ID", "Name", "Brand", "Qty", "Stock", "Cost", "Discount", "Total", "Selling", "Date/Time"]]
+    # Table data with SOURCE column included
+    table_data = [["ID", "Name", "Brand", "Qty", "Stock", "Cost", "Discount", "Total", "Selling", "Source", "Date/Time"]]
     total_qty = total_cost = total_discount = total_selling = 0
     row_colors = [colors.whitesmoke, colors.lightgrey]
 
@@ -902,12 +902,16 @@ def api_purchases_pdf():
                 date_str = str(date_str)[:16]
 
         table_data.append([
-            p["batch_id"], p["name"], p["brand"],
-            p["quantity"], p["remaining_quantity"],
+            p["batch_id"], 
+            p["name"], 
+            p["brand"],
+            p["quantity"], 
+            p["remaining_quantity"],
             f"₵{p.get('cost_price', 0):.2f}",
             f"₵{p.get('discount', 0):.2f}",
             f"₵{p.get('total_cost', 0):.2f}",
             f"₵{p.get('selling_price', 0):.2f}",
+            p.get('source', 'Unknown'),  # ✅ SOURCE COLUMN ADDED
             date_str
         ])
         total_qty += p.get("quantity", 0)
@@ -915,15 +919,16 @@ def api_purchases_pdf():
         total_discount += p.get("discount", 0)
         total_selling += p.get("selling_price", 0) * p.get("quantity", 0)
 
+    # Adjusted column widths to include Source
     table = Table(table_data, repeatRows=1, hAlign='LEFT',
-                  colWidths=[1.8*cm, 4.5*cm, 4*cm, 2*cm, 2*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3.5*cm])
+                  colWidths=[1.8*cm, 4.5*cm, 3.5*cm, 1.8*cm, 1.8*cm, 2.2*cm, 2.2*cm, 2.5*cm, 2.5*cm, 3*cm, 3.5*cm])
     style = TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#00CFCF")),
         ("TEXTCOLOR", (0,0), (-1,0), colors.whitesmoke),
         ("ALIGN", (3,1), (-2,-1), "CENTER"),
         ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
         ("GRID", (0,0), (-1,-1), 0.4, colors.black),
-        ("FONTSIZE", (0,0), (-1,-1), 8.5),
+        ("FONTSIZE", (0,0), (-1,-1), 7.5),
     ])
     for i in range(1, len(table_data)):
         style.add("BACKGROUND", (0,i), (-1,i), row_colors[i%2])
@@ -996,7 +1001,6 @@ def api_purchases_pdf():
     return send_file(buffer, as_attachment=True,
                      download_name=f"Purchases_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                      mimetype='application/pdf')
-
 
 @app.route('/api/purchases', methods=['POST'])
 @login_required
