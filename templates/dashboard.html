@@ -118,7 +118,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let pieChart = null;
-    let lowStockShown = false;
+    let lowStockShown = false;  // ✅ Track if alert has been shown
     let startDate = null;
     let endDate = null;
     let startTime = null;
@@ -424,6 +424,23 @@
 
             lowStockProducts = summary.low_stock_products || [];
             
+            // ✅ SHOW LOW STOCK ALERT (only once per page load)
+            if (!summaryError && !lowStockShown && summary.low_stock_count > 0 && lowStockProducts.length > 0) {
+                let productList = lowStockProducts.slice(0, 10).map(item => {
+                    const name = Array.isArray(item) ? item[0] : item.name;
+                    const brand = Array.isArray(item) ? item[1] : item.brand;
+                    const stock = Array.isArray(item) ? item[3] : item.stock;
+                    const batchIds = Array.isArray(item) ? item[4] : (item.batch_ids || []);
+                    const batchInfo = batchIds && batchIds.length > 0 ? ` (Batch: #${batchIds.slice(0,3).join(', #')}${batchIds.length > 3 ? '...' : ''})` : ' (No batches)';
+                    return `• ${name} (${brand}) - ${stock} left${batchInfo}`;
+                }).join('\n');
+                if (lowStockProducts.length > 10) {
+                    productList += `\n\n... and ${lowStockProducts.length - 10} more items`;
+                }
+                alert(`⚠️ LOW STOCK ALERT ⚠️\n\n${summary.low_stock_count} product(s) are running low:\n\n${productList}\n\nPlease restock soon!`);
+                lowStockShown = true;
+            }
+
             if (lowStockProducts.length > 0) {
                 renderLowStockList(lowStockProducts);
             } else {
@@ -663,6 +680,11 @@
     calendarYear = now.getFullYear();
     calendarMonth = now.getMonth();
     renderCalendar(calendarYear, calendarMonth);
+
+    // ✅ Reset lowStockShown when page is reloaded
+    window.addEventListener('beforeunload', function() {
+        lowStockShown = false;
+    });
 
     // Initial load
     loadDashboard();

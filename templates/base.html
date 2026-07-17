@@ -78,13 +78,13 @@
             margin-left: 4px;
         }
 
-        /* ===== SIDEBAR LAYOUT ===== */
+        /* ===== MAIN LAYOUT ===== */
         .app-container {
             display: flex;
             min-height: 100vh;
         }
 
-        /* Sidebar overlay (mobile) */
+        /* Sidebar overlay (mobile only) */
         .sidebar-overlay {
             display: none;
             position: fixed;
@@ -96,29 +96,30 @@
             display: block;
         }
 
-        /* Sidebar */
+        /* Sidebar - always visible on desktop, hidden on mobile */
         .sidebar {
             position: fixed;
             top: 0;
-            left: -280px;
-            width: 280px;
+            left: 0;
+            width: 240px;
             height: 100vh;
             z-index: 50;
-            transition: left 0.3s ease;
             background: #1E293B;
             box-shadow: 4px 0 15px rgba(0,0,0,0.2);
             overflow-y: auto;
             flex-shrink: 0;
+            transition: transform 0.3s ease;
+            transform: translateX(-100%);
         }
         .sidebar.open {
-            left: 0;
+            transform: translateX(0);
         }
 
-        /* Desktop sidebar */
+        /* Desktop: sidebar always visible */
         @media (min-width: 768px) {
             .sidebar {
                 position: relative;
-                left: 0;
+                transform: translateX(0) !important;
                 width: 224px;
                 height: 100vh;
                 border-radius: 0 1.5rem 1.5rem 0;
@@ -140,22 +141,29 @@
                 display: flex;
                 flex-direction: column;
                 min-height: 100vh;
-                width: 0; /* Prevents overflow */
+                width: 0; /* Forces flex to take remaining space */
             }
         }
 
-        /* Mobile */
+        /* Mobile: sidebar slides in from left */
         @media (max-width: 767px) {
             .app-container {
                 flex-direction: column;
             }
             .sidebar {
                 border-radius: 0 1.5rem 1.5rem 0;
+                transform: translateX(-100%);
+            }
+            .sidebar.open {
+                transform: translateX(0);
             }
             .sidebar-content {
                 padding-top: 50px;
             }
             .sidebar-close-btn {
+                display: block !important;
+            }
+            .hamburger-btn {
                 display: block !important;
             }
         }
@@ -261,7 +269,7 @@
 
 <div class="app-container">
 
-    <!-- SIDEBAR OVERLAY -->
+    <!-- SIDEBAR OVERLAY (mobile only) -->
     <div id="sidebarOverlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
 
     <!-- SIDEBAR -->
