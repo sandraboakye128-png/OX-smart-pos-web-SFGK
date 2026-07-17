@@ -50,8 +50,8 @@
     </div>
 </div>
 
-<!-- Sales List (cards) – scrollable area -->
-<div id="salesList" class="space-y-3 md:space-y-4">
+<!-- Sales List (cards) – scrollable area with visible scrollbar -->
+<div id="salesList" class="space-y-3 md:space-y-4 scrollable-area" style="max-height: 60vh; overflow-y: auto; padding-right: 4px;">
     <div class="text-center text-gray-400 py-8">Loading screen sales data...</div>
 </div>
 
@@ -80,6 +80,50 @@
         </div>
     </div>
 </div>
+
+<style>
+    /* ===== VISIBLE SCROLLBAR FOR MOBILE & DESKTOP ===== */
+    .scrollable-area {
+        scrollbar-width: thin;
+        scrollbar-color: #cbd5e1 #f1f1f1;
+    }
+    
+    .scrollable-area::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    .scrollable-area::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+    }
+    
+    .scrollable-area::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 10px;
+        border: 2px solid #f1f1f1;
+    }
+    
+    .scrollable-area::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+    }
+    
+    /* Mobile scrollbar - slightly larger for touch */
+    @media (max-width: 767px) {
+        .scrollable-area::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        .scrollable-area::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 10px;
+            border: 2px solid #f1f1f1;
+        }
+        .scrollable-area {
+            scrollbar-color: #94a3b8 #f1f1f1;
+        }
+    }
+</style>
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {

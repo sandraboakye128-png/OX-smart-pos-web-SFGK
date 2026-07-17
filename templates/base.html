@@ -412,6 +412,7 @@
             padding: 1rem;
             overflow-y: auto;
             overflow-x: hidden;
+            min-height: 0; /* Important for flex children */
         }
 
         @media (min-width: 768px) {
@@ -431,6 +432,8 @@
             border-top: 1px solid #334155;
             line-height: 1.4;
             font-weight: 500;
+            position: relative;
+            z-index: 5;
         }
 
         footer a {
