@@ -60,6 +60,16 @@
         .dropdown-menu a {
             padding-left: 2.5rem;
         }
+
+        /* Protected user badge in sidebar */
+        .protected-badge {
+            background-color: #ef4444;
+            color: white;
+            font-size: 0.6rem;
+            padding: 1px 6px;
+            border-radius: 10px;
+            margin-left: 4px;
+        }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
@@ -79,6 +89,9 @@
             <div class="flex items-center gap-2 text-white text-sm">
                 <i class="fas fa-user-circle text-lg"></i>
                 <span class="font-semibold truncate">{{ current_user.username }}</span>
+                {% if current_user.username.lower() == 'oxbee' %}
+                <span class="protected-badge">🔒 Admin</span>
+                {% endif %}
             </div>
             <div class="text-xs text-[#00CFCF] mt-1">Role: {{ current_user.role }}</div>
         </div>
@@ -142,21 +155,33 @@
             {% if current_user and current_user.role == 'admin' %}
             <div class="border-t border-gray-700 my-2"></div>
             <div class="text-xs text-gray-500 uppercase px-3 py-1">Admin</div>
+
+            <!-- USER LOGS (Only oxbee can see this) -->
+            {% if current_user.username.lower() == 'oxbee' %}
+            <a href="/logs" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
+                <i class="fas fa-history w-5"></i> User Logs
+                <span class="text-xs text-red-400 ml-auto">🔒</span>
+            </a>
+            {% endif %}
+
             <!-- Purchases (Accessories) -->
             <a href="/purchases" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-shopping-cart w-5"></i> Purchases (Accessories)
             </a>
+
             <!-- Purchases (Screens) -->
             <a href="/purchases/screens" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-shopping-cart w-5"></i> Purchases (Screens)
             </a>
+
             <!-- Import Data (opens in new tab) -->
             <a href="/inventory/import" target="_blank" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
                 <i class="fas fa-file-import w-5"></i> Import Data
             </a>
-            <!-- Users -->
+
+            <!-- Users Management -->
             <a href="/admin/users" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-300 hover:bg-[#334155] transition text-sm">
-                <i class="fas fa-users w-5"></i> Users
+                <i class="fas fa-users-cog w-5"></i> Users
             </a>
             {% endif %}
 
@@ -177,7 +202,7 @@
             </div>
             {% endif %}
 
-            <!-- ===== LOGOUT BUTTON (now placed here, after all nav items) ===== -->
+            <!-- ===== LOGOUT BUTTON ===== -->
             {% if current_user %}
             <div class="pt-4 pb-2">
                 <button onclick="logout()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2 text-sm">
@@ -199,7 +224,7 @@
             {% block content %}{% endblock %}
         </div>
 
-        <!-- Footer with offline link -->
+        <!-- Footer -->
         <footer class="bg-[#1E293B] text-gray-300 text-center py-3 text-xs">
             TOMFRIMP MOBICOM SOLUTIONS  | HOME OF COMPUTER, PHONES, AND ACCESSORIES<br>
             Developed by HUMMNINGBIRD DIGITAL SOLUTIONS © 2026 - All Rights Reserved
@@ -232,14 +257,18 @@
         }
     }
 
-    // Logout function
+    // Logout function with logging
     async function logout() {
-        const res = await fetch('/api/auth/logout', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            window.location.href = '/login';
-        } else {
-            alert('Logout failed');
+        try {
+            const res = await fetch('/api/auth/logout', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                window.location.href = '/login';
+            } else {
+                alert('Logout failed');
+            }
+        } catch (error) {
+            alert('Logout failed: ' + error.message);
         }
     }
 
@@ -256,7 +285,8 @@
             'pendingImports',
             'offlineSales',
             'pendingJobId',
-            'pendingJobStatus'
+            'pendingJobStatus',
+            'pendingPurchases'
         ];
         keysToRemove.forEach(key => {
             localStorage.removeItem(key);
@@ -298,6 +328,26 @@
         }, 600);
     }
 
+    // Sync pending sales (placeholder - actual implementation may vary)
+    async function syncPendingSales() {
+        if (!navigator.onLine) {
+            alert('You are offline. Please connect to the internet to sync.');
+            return;
+        }
+        
+        const badge = document.getElementById('pending-badge');
+        if (badge && badge.style.display !== 'none') {
+            alert('Syncing pending sales... This may take a moment.');
+            // In a real implementation, you would call your sync function here
+            // For now, we'll just refresh the page
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+        } else {
+            alert('No pending sales to sync.');
+        }
+    }
+
     // Auto-close dropdown if clicked outside (optional)
     document.addEventListener('click', function(e) {
         const dropdown = e.target.closest('.dropdown-toggle');
@@ -306,6 +356,15 @@
                 el.classList.remove('open');
                 el.nextElementSibling.classList.remove('open');
             });
+        }
+    });
+
+    // Display current year in footer dynamically (optional)
+    document.addEventListener('DOMContentLoaded', function() {
+        const footer = document.querySelector('footer');
+        if (footer) {
+            const year = new Date().getFullYear();
+            footer.innerHTML = footer.innerHTML.replace('© 2026', `© ${year}`);
         }
     });
 </script>

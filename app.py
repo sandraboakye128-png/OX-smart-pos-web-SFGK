@@ -461,7 +461,12 @@ def api_auth_login():
     data = request.json
     username = data.get('username')
     password = data.get('password')
-    user = login_user(username, password)
+    
+    # Get client info
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+    
+    user = login_user(username, password, ip_address, user_agent)
     if user:
         session['user_id'] = user['id']
         session['username'] = user['username']
@@ -470,6 +475,20 @@ def api_auth_login():
     else:
         return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
+
+@app.route('/api/auth/logout', methods=['POST'])
+@login_required
+def api_auth_logout():
+    user_id = session.get('user_id')
+    username = session.get('username')
+    
+    # Log logout
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+    logout_user(user_id, username, ip_address, user_agent)
+    
+    session.clear()
+    return jsonify({'success': True})
 @app.route('/api/auth/signup', methods=['POST'])
 def api_auth_signup():
     data = request.json
@@ -496,10 +515,6 @@ def api_auth_signup():
     else:
         return jsonify({'success': False, 'error': 'Username already exists'}), 400
 
-@app.route('/api/auth/logout', methods=['POST'])
-def api_auth_logout():
-    session.clear()
-    return jsonify({'success': True})
 
 @app.route('/api/auth/check', methods=['GET'])
 def api_auth_check():
@@ -521,6 +536,123 @@ def api_auth_admin_exists():
 def api_auth_admin_count():
     count = count_admins()
     return jsonify({'admin_count': count})
+
+@app.route("/admin/users/<int:user_id>/edit")
+@admin_required
+def admin_edit_user(user_id):
+    """Edit user page - admin only"""
+    from services.auth_service import get_user_by_id, is_protected_user
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return render_template("error.html", message="User not found"), 404
+    
+    is_oxbee = is_protected_user(user_id)
+    
+    return render_template("edit_user.html", user_id=user_id, is_oxbee=is_oxbee)
+# ===================== USER LOGS API (OXBEE ONLY) =====================
+@app.route('/api/user/logs', methods=['GET'])
+@login_required
+def api_user_logs():
+    """Get user logs - ONLY accessible by oxbee"""
+    current_user_id = session.get('user_id')
+    current_username = session.get('username')
+    
+    # Only oxbee can view logs
+    if current_username.lower() != 'oxbee':
+        return jsonify({'success': False, 'error': 'Unauthorized - Only system administrator can view logs'}), 403
+    
+    user_id = request.args.get('user_id', type=int)
+    action = request.args.get('action')
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    
+    from services.auth_service import get_user_logs
+    
+    logs = get_user_logs(user_id, limit, offset, action)
+    
+    # Get total count
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        query = "SELECT COUNT(*) FROM user_logs"
+        params = []
+        conditions = []
+        
+        if user_id:
+            conditions.append("user_id = %s")
+            params.append(user_id)
+        if action:
+            conditions.append("action = %s")
+            params.append(action)
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        cursor.execute(query, params)
+        total = cursor.fetchone()[0]
+    finally:
+        conn.close()
+    
+    return jsonify({
+        'success': True,
+        'logs': logs,
+        'total': total,
+        'limit': limit,
+        'offset': offset
+    })
+
+
+# ===================== LOGS PAGE (OXBEE ONLY) =====================
+@app.route("/logs")
+@login_required
+def logs():
+    """Logs page - ONLY accessible by oxbee"""
+    current_username = session.get('username')
+    
+    # Only oxbee can view logs
+    if current_username.lower() != 'oxbee':
+        return render_template("error.html", message="Unauthorized - Only system administrator can view logs"), 403
+    
+    return render_template("logs.html")
+
+
+# ===================== GET SINGLE USER (Admin) =====================
+@app.route('/api/admin/users/<int:user_id>', methods=['GET'])
+@admin_required
+def api_admin_get_user(user_id):
+    """Get a single user's details (for editing)"""
+    from services.auth_service import get_user_by_id
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    
+    return jsonify({'success': True, 'user': user})
+
+
+# ===================== UPDATE USER PASSWORD (Admin) =====================
+@app.route('/api/admin/users/<int:user_id>/password', methods=['PUT'])
+@admin_required
+def api_admin_update_user_password(user_id):
+    """Admin can update a user's password"""
+    from services.auth_service import update_user_password, is_protected_user
+    
+    # Prevent modifying oxbee
+    if is_protected_user(user_id):
+        return jsonify({'success': False, 'error': 'Cannot modify the system administrator (oxbee)'}), 403
+    
+    data = request.json
+    new_password = data.get('password')
+    
+    if not new_password or len(new_password) < 4:
+        return jsonify({'success': False, 'error': 'Password must be at least 4 characters'}), 400
+    
+    success = update_user_password(user_id, new_password)
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'error': 'Update failed'}), 400
 
 # ===================== ADMIN USER MANAGEMENT API =====================
 @app.route('/api/admin/users', methods=['GET'])
@@ -547,17 +679,31 @@ def api_admin_create_user():
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def api_admin_delete_user(user_id):
+    from services.auth_service import is_protected_user
+    
     if user_id == session.get('user_id'):
         return jsonify({'success': False, 'error': 'Cannot delete your own account'}), 400
+    
+    # Prevent deleting oxbee
+    if is_protected_user(user_id):
+        return jsonify({'success': False, 'error': 'Cannot delete the system administrator (oxbee)'}), 400
+    
     success = delete_user(user_id)
     if success:
         return jsonify({'success': True})
     else:
         return jsonify({'success': False, 'error': 'Delete failed'}), 400
 
+
 @app.route('/api/admin/users/<int:user_id>/role', methods=['PUT'])
 @admin_required
 def api_admin_update_role(user_id):
+    from services.auth_service import is_protected_user
+    
+    # Prevent modifying oxbee
+    if is_protected_user(user_id):
+        return jsonify({'success': False, 'error': 'Cannot modify the system administrator (oxbee)'}), 400
+    
     data = request.json
     new_role = data.get('role')
     if new_role not in ['admin', 'user']:
@@ -567,7 +713,6 @@ def api_admin_update_role(user_id):
         return jsonify({'success': True})
     else:
         return jsonify({'success': False, 'error': 'Update failed'}), 400
-
 # ===================== DASHBOARD API =====================
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required

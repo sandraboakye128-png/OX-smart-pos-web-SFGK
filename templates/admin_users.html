@@ -2,10 +2,19 @@
 
 {% block content %}
 <div class="container mx-auto p-6">
-    <h1 class="text-3xl font-bold text-gray-800 mb-6">👥 User Management</h1>
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800">👥 User Management</h1>
+            <p class="text-sm text-gray-500 mt-1">Manage system users and their permissions</p>
+        </div>
+        <div class="text-sm text-gray-500">
+            <span class="bg-green-100 text-green-800 px-2 py-1 rounded">👤 You: {{ current_user.username }}</span>
+        </div>
+    </div>
 
     <!-- Hidden input to store current user ID -->
     <input type="hidden" id="currentUserId" value="{{ current_user.id|default(0) }}">
+    <input type="hidden" id="currentUsername" value="{{ current_user.username|default('') }}">
 
     <!-- Create User Form -->
     <div class="bg-white rounded-lg shadow p-6 mb-8">
@@ -14,12 +23,12 @@
             <div>
                 <label class="block text-sm font-medium text-gray-700">Username</label>
                 <input type="text" id="newUsername" required autocomplete="off"
-                       class="mt-1 px-3 py-2 border border-gray-300 rounded-md focus:ring focus:ring-indigo-200">
+                       class="mt-1 px-3 py-2 border border-gray-300 rounded-md focus:ring focus:ring-indigo-200 w-48">
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700">Password</label>
                 <input type="password" id="newPassword" required autocomplete="new-password"
-                       class="mt-1 px-3 py-2 border border-gray-300 rounded-md focus:ring focus:ring-indigo-200">
+                       class="mt-1 px-3 py-2 border border-gray-300 rounded-md focus:ring focus:ring-indigo-200 w-48">
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700">Role</label>
@@ -28,7 +37,7 @@
                     <option value="admin">Admin</option>
                 </select>
             </div>
-            <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-md">
+            <button type="submit" class="bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-md transition">
                 Create User
             </button>
         </form>
@@ -55,13 +64,24 @@
 </div>
 
 <script>
-    // Get the logged-in user's ID from the hidden input
+    // Get the logged-in user's ID and username from the hidden input
     const currentUserId = parseInt(document.getElementById('currentUserId').value) || 0;
+    const currentUsername = document.getElementById('currentUsername').value || '';
 
     async function fetchUsers() {
         const res = await fetch('/api/admin/users');
         if (!res.ok) throw new Error('Failed to fetch users');
         return res.json();
+    }
+
+    function getStatusBadge(role, isProtected) {
+        if (isProtected) {
+            return '<span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">🔒 Protected</span>';
+        }
+        if (role === 'admin') {
+            return '<span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Admin</span>';
+        }
+        return '<span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">User</span>';
     }
 
     function renderUsers(users) {
@@ -74,27 +94,40 @@
         users.forEach(user => {
             const tr = document.createElement('tr');
             const isCurrentUser = user.id === currentUserId;
-            const roleBadgeClass = user.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+            const isProtected = user.username && user.username.toLowerCase() === 'oxbee';
+            const statusBadge = getStatusBadge(user.role, isProtected);
+            
             tr.innerHTML = `
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${user.id}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${escapeHtml(user.username)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    ${escapeHtml(user.username)}
+                    ${isCurrentUser ? ' <span class="text-xs text-gray-400">(You)</span>' : ''}
+                    ${isProtected ? ' <span class="text-xs text-red-500 font-bold">🔒</span>' : ''}
+                </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm">
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${roleBadgeClass}">
-                        ${user.role}
-                    </span>
+                    ${statusBadge}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${user.created_at ? new Date(user.created_at).toLocaleString() : '—'}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    ${!isCurrentUser ? `
-                        <button class="role-toggle text-indigo-600 hover:text-indigo-900" 
+                    <!-- Edit Button (all users except protected) -->
+                    <a href="/admin/users/${user.id}/edit" 
+                       class="text-blue-600 hover:text-blue-900 ${isProtected ? 'opacity-50 cursor-not-allowed' : ''}"
+                       ${isProtected ? 'onclick="return false;" title="Cannot edit system administrator"' : ''}>
+                        ✏️ Edit
+                    </a>
+                    
+                    ${!isCurrentUser && !isProtected ? `
+                        <button class="role-toggle text-indigo-600 hover:text-indigo-900 ml-2" 
                                 data-id="${user.id}" 
                                 data-role="${user.role === 'admin' ? 'user' : 'admin'}">
-                            ${user.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
+                            ${user.role === 'admin' ? 'Demote' : 'Promote'}
                         </button>
-                        <button class="delete-user text-red-600 hover:text-red-900" data-id="${user.id}">Delete</button>
-                    ` : `
-                        <span class="text-gray-400">(You)</span>
-                    `}
+                        <button class="delete-user text-red-600 hover:text-red-900 ml-2" data-id="${user.id}">Delete</button>
+                    ` : ''}
+                    
+                    ${isProtected && !isCurrentUser ? `
+                        <span class="text-gray-400 text-xs ml-2">🔒 System Protected</span>
+                    ` : ''}
                 </td>
             `;
             tbody.appendChild(tr);
@@ -129,6 +162,7 @@
             btn.addEventListener('click', async function() {
                 const userId = this.dataset.id;
                 if (!confirm('Delete this user? This cannot be undone.')) return;
+                if (!confirm('Are you sure? This action is permanent.')) return;
                 try {
                     const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
                     const data = await res.json();

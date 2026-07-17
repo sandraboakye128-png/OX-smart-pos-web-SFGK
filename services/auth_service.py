@@ -1,12 +1,28 @@
-# services/auth_service.py
-
 from database.db import get_connection, return_connection
 import hashlib
+from datetime import datetime
 
 # ---------------- HASH PASSWORD ----------------
 def hash_password(password: str) -> str:
     """Return a SHA-256 hash of the password."""
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+# ---------------- LOG USER ACTION ----------------
+def log_user_action(user_id, username, action, ip_address=None, user_agent=None):
+    """Log user actions for audit"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO user_logs (user_id, username, action, ip_address, user_agent, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id, username, action, ip_address, user_agent, datetime.now()))
+        conn.commit()
+    except Exception as e:
+        print(f"❌ Error logging user action: {e}")
+    finally:
+        return_connection(conn)
 
 
 # ---------------- CREATE USER ----------------
@@ -30,21 +46,90 @@ def create_user(username: str, password: str, role: str = "user") -> bool:
 
 
 # ---------------- LOGIN USER ----------------
-def login_user(username: str, password: str):
+def login_user(username: str, password: str, ip_address=None, user_agent=None):
     """Return user dict if credentials are correct, else None."""
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
+        # Case-insensitive username lookup
         cursor.execute(
-            "SELECT id, username, role, password FROM users WHERE username = %s",
+            "SELECT id, username, role, password FROM users WHERE LOWER(username) = LOWER(%s)",
             (username,)
         )
         row = cursor.fetchone()
         
         if row and row[3] == hash_password(password):
-            return {"id": row[0], "username": row[1], "role": row[2]}
+            user = {"id": row[0], "username": row[1], "role": row[2]}
+            # Log successful login
+            log_user_action(row[0], row[1], 'login', ip_address, user_agent)
+            return user
+        
+        # Log failed login attempt (if user exists)
+        if row:
+            log_user_action(row[0], row[1], 'login_failed', ip_address, user_agent)
+        
         return None
+    finally:
+        return_connection(conn)
+
+
+# ---------------- LOGOUT USER ----------------
+def logout_user(user_id, username, ip_address=None, user_agent=None):
+    """Log a user logout event"""
+    log_user_action(user_id, username, 'logout', ip_address, user_agent)
+
+
+# ---------------- GET USER LOGS (ADMIN ONLY) ----------------
+def get_user_logs(user_id=None, limit=100, offset=0, action_filter=None):
+    """Get user logs for admin viewing"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        query = """
+            SELECT 
+                ul.id,
+                ul.user_id,
+                ul.username,
+                ul.action,
+                ul.ip_address,
+                ul.user_agent,
+                ul.timestamp
+            FROM user_logs ul
+        """
+        params = []
+        conditions = []
+        
+        if user_id:
+            conditions.append("ul.user_id = %s")
+            params.append(user_id)
+        
+        if action_filter:
+            conditions.append("ul.action = %s")
+            params.append(action_filter)
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        query += " ORDER BY ul.timestamp DESC LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        return [
+            {
+                "id": r[0],
+                "user_id": r[1],
+                "username": r[2],
+                "action": r[3],
+                "ip_address": r[4],
+                "user_agent": r[5],
+                "timestamp": r[6].isoformat() if r[6] else None
+            }
+            for r in rows
+        ]
     finally:
         return_connection(conn)
 
@@ -62,7 +147,7 @@ def admin_exists() -> bool:
         return_connection(conn)
 
 
-# ===================== NEW FUNCTION =====================
+# ---------------- COUNT ADMINS ----------------
 def count_admins() -> int:
     """Return the total number of admin users in the system."""
     conn = get_connection()
@@ -73,7 +158,6 @@ def count_admins() -> int:
         return count
     finally:
         return_connection(conn)
-# ========================================================
 
 
 # ---------------- GET ALL USERS ----------------
@@ -86,6 +170,22 @@ def get_all_users():
         cursor.execute("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC")
         rows = cursor.fetchall()
         return [{"id": r[0], "username": r[1], "role": r[2], "created_at": r[3]} for r in rows]
+    finally:
+        return_connection(conn)
+
+
+# ---------------- GET USER BY ID ----------------
+def get_user_by_id(user_id: int):
+    """Get a single user by ID."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT id, username, role, created_at FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        if row:
+            return {"id": row[0], "username": row[1], "role": row[2], "created_at": row[3]}
+        return None
     finally:
         return_connection(conn)
 
@@ -103,6 +203,27 @@ def update_user_role(user_id: int, new_role: str) -> bool:
     except Exception as e:
         conn.rollback()
         print(f"Error updating user role: {e}")
+        return False
+    finally:
+        return_connection(conn)
+
+
+# ---------------- UPDATE USER PASSWORD ----------------
+def update_user_password(user_id: int, new_password: str) -> bool:
+    """Update a user's password (admin action)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            "UPDATE users SET password = %s WHERE id = %s",
+            (hash_password(new_password), user_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"Error updating user password: {e}")
         return False
     finally:
         return_connection(conn)
@@ -126,9 +247,9 @@ def delete_user(user_id: int) -> bool:
         return_connection(conn)
 
 
-# ---------------- CHANGE PASSWORD ----------------
+# ---------------- CHANGE PASSWORD (Self) ----------------
 def change_password(user_id: int, old_password: str, new_password: str) -> bool:
-    """Change user's password."""
+    """Change user's own password."""
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -147,6 +268,21 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
     except Exception as e:
         conn.rollback()
         print(f"Error changing password: {e}")
+        return False
+    finally:
+        return_connection(conn)
+
+
+# ---------------- IS PROTECTED USER ----------------
+def is_protected_user(user_id: int) -> bool:
+    """Check if user is the protected admin (oxbee)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        if row and row[0].lower() == 'oxbee':
+            return True
         return False
     finally:
         return_connection(conn)
