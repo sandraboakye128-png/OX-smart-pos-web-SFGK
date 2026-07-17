@@ -51,12 +51,12 @@
 </div>
 
 <!-- Sales List (cards) – scrollable area -->
-<div id="salesList" class="space-y-3 md:space-y-4 pb-4">
+<div id="salesList" class="space-y-3 md:space-y-4">
     <div class="text-center text-gray-400 py-8">Loading sales data...</div>
 </div>
 
-<!-- ========== SUMMARY BAR – Fixed at bottom with proper spacing ========== -->
-<div id="summaryBar" class="fixed bottom-0 left-0 right-0 bg-gray-900 text-teal-400 rounded-t-lg p-2 md:p-3 text-center font-bold shadow-lg z-50 text-xs md:text-sm">
+<!-- ========== SUMMARY – Now inside the content flow (not fixed) ========== -->
+<div id="summaryBar" class="mt-6 p-3 md:p-4 bg-gray-900 rounded-xl text-teal-400 text-center font-bold shadow-lg text-xs md:text-sm">
     <!-- totals will appear here -->
 </div>
 
@@ -80,7 +80,6 @@
         </div>
     </div>
 </div>
-
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         console.log("DOM loaded – initializing Today Sales (Accessories & Phones)");

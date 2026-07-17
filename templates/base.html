@@ -26,6 +26,7 @@
         body { 
             background: #f3f4f6; 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
         }
 
         /* Custom scrollbar */
@@ -81,8 +82,8 @@
         /* ===== MAIN LAYOUT ===== */
         .app-container {
             display: flex;
-            min-height: 100vh;
-            height: 100%;
+            height: 100vh;
+            overflow: hidden;
         }
 
         /* Sidebar overlay (mobile only) */
@@ -143,8 +144,7 @@
                 flex: 1;
                 display: flex;
                 flex-direction: column;
-                min-height: 100vh;
-                height: 100%;
+                height: 100vh;
                 width: 0;
             }
         }
@@ -363,19 +363,54 @@
             }
         }
 
+        /* ===== FIXED HEADER ===== */
+        .mobile-header {
+            display: none;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            padding: 8px 12px;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        @media (max-width: 767px) {
+            .mobile-header {
+                display: flex !important;
+                padding: 6px 10px !important;
+            }
+            .mobile-header h1 {
+                font-size: 0.85rem !important;
+            }
+            .mobile-header .text-sm {
+                font-size: 0.6rem !important;
+            }
+            .mobile-header .text-xl {
+                font-size: 1rem !important;
+            }
+            .mobile-header .hamburger-btn {
+                font-size: 1.2rem !important;
+                padding: 4px !important;
+            }
+        }
+
         /* Main content wrapper */
         .main-content-wrapper {
             flex: 1;
             display: flex;
             flex-direction: column;
-            min-height: 100vh;
-            height: 100%;
+            height: 100vh;
             width: 100%;
+            overflow: hidden;
         }
 
         .main-content {
             flex: 1;
             padding: 1rem;
+            overflow-y: auto;
             overflow-x: hidden;
         }
 
@@ -385,54 +420,43 @@
             }
         }
 
-        /* Mobile header */
-        .mobile-header {
-            display: none;
-            background: white;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            position: sticky;
-            top: 0;
-            z-index: 30;
-            padding: 12px 16px;
-            align-items: center;
-            gap: 12px;
-        }
-
-        @media (max-width: 767px) {
-            .mobile-header {
-                display: flex !important;
-                padding: 8px 12px !important;
-            }
-            .mobile-header h1 {
-                font-size: 0.9rem !important;
-            }
-            .mobile-header .text-sm {
-                font-size: 0.65rem !important;
-            }
-            .mobile-header .text-xl {
-                font-size: 1.1rem !important;
-            }
-        }
-
-        /* Footer */
+        /* ===== FIXED FOOTER - SMALLER ===== */
         footer {
             background: #1E293B;
             color: #9ca3af;
             text-align: center;
-            padding: 12px;
-            font-size: 0.75rem;
+            padding: 4px 8px;
+            font-size: 0.55rem;
             flex-shrink: 0;
-            margin-top: auto;
+            border-top: 1px solid #334155;
+            line-height: 1.4;
+            font-weight: 500;
+        }
+
+        footer a {
+            color: #6b8cae;
+            text-decoration: underline;
+            font-weight: 600;
+        }
+        footer a:hover {
+            color: #ffffff;
+        }
+
+        @media (min-width: 768px) {
+            footer {
+                padding: 6px 12px;
+                font-size: 0.6rem;
+            }
         }
 
         @media (max-width: 767px) {
             footer {
-                padding: 6px;
-                font-size: 0.5rem !important;
-                line-height: 1.4 !important;
+                padding: 3px 6px;
+                font-size: 0.45rem !important;
+                line-height: 1.3 !important;
             }
             footer .mt-1 {
-                margin-top: 0.2rem !important;
+                margin-top: 0.1rem !important;
             }
         }
     </style>
@@ -576,6 +600,7 @@
             {% block content %}{% endblock %}
         </div>
 
+        <!-- FIXED FOOTER - SMALL AND BOLD -->
         <footer>
             <div class="px-2">
                 TOMFRIMP MOBICOM SOLUTIONS | HOME OF COMPUTER, PHONES, AND ACCESSORIES
@@ -584,7 +609,7 @@
                 Developed by HUMMNINGBIRD DIGITAL SOLUTIONS © <span id="footerYear">2026</span> - All Rights Reserved
             </div>
             <div class="mt-1">
-                <a href="/offline" class="text-gray-400 hover:text-white underline">📶 Offline</a>
+                <a href="/offline">📶 Offline</a>
             </div>
         </footer>
     </div>
