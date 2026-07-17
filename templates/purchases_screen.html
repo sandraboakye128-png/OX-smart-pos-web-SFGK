@@ -131,6 +131,7 @@
 
     // ---------- Main variables ----------
     let currentPurchases = [];
+    let currentFilteredData = [];  // ✅ NEW: Track filtered data for PDF
     let editMode = false;
     let editBatchId = null;
     let isDataFresh = false;
@@ -462,6 +463,7 @@
                     purchases = await res.json();
                     cachePurchases(purchases);
                     isDataFresh = true;
+                    currentFilteredData = purchases;  // ✅ Store loaded data
                     console.log('✅ Data loaded from API (fresh)');
                     
                     const pending = getPendingPurchases();
@@ -478,9 +480,11 @@
                 const cached = loadCachedPurchases();
                 if (cached) {
                     purchases = cached;
+                    currentFilteredData = cached;  // ✅ Store cached data
                     isDataFresh = false;
                 } else {
                     purchases = [];
+                    currentFilteredData = [];
                     isDataFresh = false;
                 }
             }
@@ -489,9 +493,11 @@
             const cached = loadCachedPurchases();
             if (cached) {
                 purchases = cached;
+                currentFilteredData = cached;  // ✅ Store cached data
                 isDataFresh = false;
             } else {
                 purchases = [];
+                currentFilteredData = [];
                 isDataFresh = false;
             }
         }
@@ -802,32 +808,39 @@
                 const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}&category=Screen`);
                 if (!res.ok) throw new Error();
                 currentPurchases = await res.json();
+                currentFilteredData = currentPurchases;  // ✅ Store filtered data
                 cachePurchases(currentPurchases);
                 isDataFresh = true;
                 updateCacheBanner();
             } catch (err) {
                 alert('Filter is unavailable offline. Showing cached data.');
                 const cached = loadCachedPurchases();
-                if (cached) currentPurchases = cached;
+                if (cached) {
+                    currentPurchases = cached;
+                    currentFilteredData = cached;  // ✅ Store cached data
+                }
                 isDataFresh = false;
                 updateCacheBanner();
             }
         } else {
             await loadPurchases();
+            currentFilteredData = currentPurchases;  // ✅ Store all data
         }
-        applySearch();
+        applySearch();  // This will filter further if search term exists
     }
 
     function clearFilters() {
         document.getElementById('fromDate').value = '';
         document.getElementById('toDate').value = '';
         document.getElementById('searchInput').value = '';
+        currentFilteredData = currentPurchases;  // ✅ Reset filtered data
         loadPurchases(true);
     }
 
     function applySearch() {
         const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
         if (!keyword) {
+            currentFilteredData = currentPurchases;  // ✅ Store all data
             renderList(currentPurchases, !isDataFresh);
             return;
         }
@@ -837,6 +850,7 @@
             (p.category && p.category.toLowerCase().includes(keyword)) ||
             (p.source && p.source.toLowerCase().includes(keyword))
         );
+        currentFilteredData = filtered;  // ✅ Store filtered data
         renderList(filtered, !isDataFresh);
     }
 
@@ -849,8 +863,13 @@
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
         
-        // Get current displayed data (after search/filter)
-        const purchasesToExport = currentPurchases;
+        // ✅ Get current displayed data (after search/filter)
+        const purchasesToExport = currentFilteredData;
+        
+        if (!purchasesToExport || purchasesToExport.length === 0) {
+            alert('No data to export. Please adjust your filters.');
+            return;
+        }
 
         // Calculate totals for the report
         let totalQty = 0;
@@ -881,7 +900,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    purchases: purchasesToExport,
+                    purchases: purchasesToExport,  // ✅ Send filtered data
                     from_date: fromDate,
                     to_date: toDate,
                     totals: {
