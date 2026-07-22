@@ -23,7 +23,7 @@ def handle_timeout(func):
     return wrapper
 
 # ---------------------------
-# GET PRODUCTS FOR SALE (includes category)
+# GET PRODUCTS FOR SALE
 # ---------------------------
 def get_products_for_sale():
     conn = get_connection()
@@ -58,17 +58,31 @@ def get_products_for_sale():
         return_connection(conn)
 
 # ---------------------------
-# GET BATCHES FOR PRODUCT (FIFO order)
+# GET BATCHES FOR PRODUCT (WITH CLAIM INFO)
 # ---------------------------
 def get_batches_for_product(product_id, limit=100):
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT id, quantity, remaining_quantity, cost_price, selling_price, discount, date
-            FROM purchase_batches
-            WHERE product_id = %s AND remaining_quantity > 0
-            ORDER BY date ASC
+            SELECT 
+                pb.id, 
+                pb.quantity, 
+                pb.remaining_quantity, 
+                pb.cost_price, 
+                pb.selling_price, 
+                pb.discount, 
+                pb.date,
+                pb.is_faulty,
+                pb.claimed_quantity,
+                COALESCE((
+                    SELECT SUM(quantity) 
+                    FROM claims 
+                    WHERE batch_id = pb.id AND status = 'active'
+                ), 0) as active_claims_qty
+            FROM purchase_batches pb
+            WHERE pb.product_id = %s AND pb.remaining_quantity > 0
+            ORDER BY pb.date ASC
             LIMIT %s
         """, (product_id, limit))
         rows = cursor.fetchall()
@@ -81,6 +95,9 @@ def get_batches_for_product(product_id, limit=100):
                 "selling_price": float(r[4] or 0),
                 "discount": float(r[5] or 0),
                 "date": r[6],
+                "is_faulty": r[7] or False,
+                "claimed_quantity": r[8] or 0,
+                "active_claims": r[9] if len(r) > 9 else 0
             }
             for r in rows
         ]
@@ -89,15 +106,22 @@ def get_batches_for_product(product_id, limit=100):
         return_connection(conn)
 
 # ---------------------------
-# GET SINGLE BATCH BY ID
+# GET SINGLE BATCH BY ID (WITH CLAIM INFO)
 # ---------------------------
 def get_batch_by_id(batch_id):
-    """Get a single batch by its ID"""
+    """Get a single batch by its ID with claim info"""
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT id, product_id, remaining_quantity, cost_price, selling_price
+            SELECT 
+                id, 
+                product_id, 
+                remaining_quantity, 
+                cost_price, 
+                selling_price,
+                is_faulty,
+                claimed_quantity
             FROM purchase_batches
             WHERE id = %s
         """, (batch_id,))
@@ -109,6 +133,8 @@ def get_batch_by_id(batch_id):
                 "remaining_quantity": int(row[2] or 0),
                 "cost_price": float(row[3] or 0),
                 "selling_price": float(row[4] or 0),
+                "is_faulty": row[5] or False,
+                "claimed_quantity": row[6] or 0
             }
         return None
     finally:
@@ -116,21 +142,27 @@ def get_batch_by_id(batch_id):
         return_connection(conn)
 
 # ---------------------------
-# GET MULTIPLE BATCHES IN SINGLE QUERY
+# GET MULTIPLE BATCHES IN SINGLE QUERY (WITH CLAIM INFO)
 # ---------------------------
 def get_batches_by_ids(batch_ids):
-    """Fetch multiple batches in one query for better performance"""
+    """Fetch multiple batches in one query with claim info"""
     if not batch_ids:
         return {}
     
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Use a simpler approach with better error handling
         result = {}
         for batch_id in batch_ids:
             cursor.execute("""
-                SELECT id, product_id, remaining_quantity, cost_price, selling_price
+                SELECT 
+                    id, 
+                    product_id, 
+                    remaining_quantity, 
+                    cost_price, 
+                    selling_price,
+                    is_faulty,
+                    claimed_quantity
                 FROM purchase_batches
                 WHERE id = %s
             """, (batch_id,))
@@ -142,6 +174,8 @@ def get_batches_by_ids(batch_ids):
                     "remaining_quantity": int(row[2] or 0),
                     "cost_price": float(row[3] or 0),
                     "selling_price": float(row[4] or 0),
+                    "is_faulty": row[5] or False,
+                    "claimed_quantity": row[6] or 0
                 }
             else:
                 print(f"⚠️ Batch {batch_id} not found in database")
@@ -173,7 +207,7 @@ def bulk_update_product_stocks(cursor, product_ids):
         update_product_stock(cursor, product_id)
 
 # ---------------------------
-# MAIN SALE CREATION FUNCTION (WITH PAYMENT METHOD & USER)
+# MAIN SALE CREATION FUNCTION (WITH FAULTY BATCH HANDLING)
 # ---------------------------
 @handle_timeout
 def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, payment_method='cash', cheque_number=None, user_id=None):
@@ -232,6 +266,7 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
             subtotal = 0
             profit = 0
             batches_used = []
+            has_faulty_batch = False
             
             if selected_batches:
                 # FIX: Filter selected batches for this specific product
@@ -248,11 +283,17 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
                         if batch["remaining_quantity"] < sb["qty"]:
                             raise ValueError(f"Batch {sb['batch_id']} has only {batch['remaining_quantity']} left, requested {sb['qty']} for {product['name']}")
                         
+                        # Check if batch is faulty
+                        if batch.get("is_faulty", False) or (batch.get("claimed_quantity", 0) > 0):
+                            has_faulty_batch = True
+                        
                         product_batches.append({
                             "batch_id": sb["batch_id"],
                             "qty": sb["qty"],
                             "cost_price": batch["cost_price"],
-                            "selling_price": batch.get("selling_price", selling_price)
+                            "selling_price": batch.get("selling_price", selling_price),
+                            "is_faulty": batch.get("is_faulty", False),
+                            "claimed_quantity": batch.get("claimed_quantity", 0)
                         })
                 
                 # Verify quantity
@@ -273,13 +314,23 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
                         sale_id, product_id, b["batch_id"], b["qty"],
                         b["cost_price"], b["selling_price"], batch_profit
                     ))
-                    batches_used.append({"batch_id": b["batch_id"], "qty": b["qty"]})
+                    batches_used.append({
+                        "batch_id": b["batch_id"], 
+                        "qty": b["qty"],
+                        "is_faulty": b.get("is_faulty", False)
+                    })
                     affected_products.add(product_id)
             
             else:
-                # FIFO: Get batches in single query
+                # FIFO: Get batches with claim info
                 cursor.execute("""
-                    SELECT id, remaining_quantity, cost_price, selling_price
+                    SELECT 
+                        id, 
+                        remaining_quantity, 
+                        cost_price, 
+                        selling_price,
+                        is_faulty,
+                        claimed_quantity
                     FROM purchase_batches
                     WHERE product_id = %s AND remaining_quantity > 0
                     ORDER BY date ASC
@@ -297,6 +348,11 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
                     batch_remaining = int(batch[1] or 0)
                     batch_cost = float(batch[2] or 0)
                     batch_selling = float(batch[3] or selling_price)
+                    is_faulty = batch[4] or False
+                    claimed_qty = batch[5] or 0
+                    
+                    if is_faulty or claimed_qty > 0:
+                        has_faulty_batch = True
                     
                     sell_qty = min(batch_remaining, remaining_qty)
                     batch_total = batch_selling * sell_qty
@@ -311,7 +367,11 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
                         sale_id, product_id, batch_id, sell_qty,
                         batch_cost, batch_selling, batch_profit
                     ))
-                    batches_used.append({"batch_id": batch_id, "qty": sell_qty})
+                    batches_used.append({
+                        "batch_id": batch_id, 
+                        "qty": sell_qty,
+                        "is_faulty": is_faulty
+                    })
                     affected_products.add(product_id)
                 
                 if remaining_qty > 0:
@@ -328,7 +388,8 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
                 "batches": batches_used,
                 "subtotal": subtotal,
                 "discount": discount,
-                "total": final_total
+                "total": final_total,
+                "has_faulty": has_faulty_batch
             })
         
         # 5. Execute batch updates
@@ -375,7 +436,8 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
             "date": sale_date_str,
             "payment_method": payment_method,
             "cheque_number": cheque_number,
-            "user_id": user_id
+            "user_id": user_id,
+            "has_faulty_items": any(item.get("has_faulty", False) for item in receipt_data)
         }
         
         # Return connection to pool AFTER preparing result
@@ -411,7 +473,7 @@ def get_sale_details(sale_id):
         if not sale:
             return None
         
-        # Get sale items with product names
+        # Get sale items with product names and batch info
         cursor.execute("""
             SELECT 
                 si.product_id,
@@ -420,9 +482,12 @@ def get_sale_details(sale_id):
                 si.selling_price,
                 si.cost_price,
                 si.profit,
-                si.batch_id
+                si.batch_id,
+                pb.is_faulty,
+                pb.claimed_quantity
             FROM sales_items si
             JOIN products p ON si.product_id = p.id
+            LEFT JOIN purchase_batches pb ON si.batch_id = pb.id
             WHERE si.sale_id = %s
         """, (sale_id,))
         
@@ -446,7 +511,9 @@ def get_sale_details(sale_id):
                     "selling_price": float(item[3] or 0),
                     "cost_price": float(item[4] or 0),
                     "profit": float(item[5] or 0),
-                    "batch_id": item[6]
+                    "batch_id": item[6],
+                    "is_faulty": item[7] if len(item) > 7 else False,
+                    "claimed_quantity": item[8] if len(item) > 8 else 0
                 }
                 for item in items
             ]
@@ -580,7 +647,7 @@ def import_sale_bulk(product_name, quantity, selling_price, discount, sale_date,
 
         # 2. Get batches with remaining_quantity > 0, ordered by date (oldest first)
         cursor.execute("""
-            SELECT id, remaining_quantity, cost_price
+            SELECT id, remaining_quantity, cost_price, is_faulty, claimed_quantity
             FROM purchase_batches
             WHERE product_id = %s AND remaining_quantity > 0
             ORDER BY date ASC
@@ -593,14 +660,16 @@ def import_sale_bulk(product_name, quantity, selling_price, discount, sale_date,
         # 3. Allocate quantity from batches (FIFO)
         remaining_to_allocate = quantity
         allocations = []
-        for batch_id, batch_qty, cost_price in batches:
+        for batch_id, batch_qty, cost_price, is_faulty, claimed_qty in batches:
             if remaining_to_allocate <= 0:
                 break
             take = min(batch_qty, remaining_to_allocate)
             allocations.append({
                 'batch_id': batch_id,
                 'qty': take,
-                'cost_price': cost_price
+                'cost_price': cost_price,
+                'is_faulty': is_faulty or False,
+                'claimed_quantity': claimed_qty or 0
             })
             remaining_to_allocate -= take
 

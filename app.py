@@ -5,6 +5,117 @@ import os
 import uuid
 import threading
 
+# ===================== CLAIM API =====================
+
+# Import claim services
+from services.claim_service import (
+    create_claim,
+    get_all_claims,
+    get_claims_by_product,
+    get_claim_by_id,
+    update_claim,
+    delete_claim,
+    resolve_claim,
+    search_products_for_claims,
+    get_product_batches_for_claim
+)
+
+@app.route('/claims')
+@login_required
+def claims_page():
+    """Claims management page"""
+    return render_template('claims.html')
+
+# API: Get all claims
+@app.route('/api/claims', methods=['GET'])
+@login_required
+def api_get_claims():
+    try:
+        claims = get_all_claims()
+        return jsonify({'success': True, 'claims': claims})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# API: Search products for claims
+@app.route('/api/claims/search', methods=['GET'])
+@login_required
+def api_search_products_for_claims():
+    keyword = request.args.get('q', '')
+    if not keyword or len(keyword) < 2:
+        return jsonify({'success': True, 'products': []})
+    
+    try:
+        products = search_products_for_claims(keyword)
+        return jsonify({'success': True, 'products': products})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# API: Get product batches for claim
+@app.route('/api/claims/product/<int:product_id>/batches', methods=['GET'])
+@login_required
+def api_get_product_batches_for_claim(product_id):
+    try:
+        batches = get_product_batches_for_claim(product_id)
+        return jsonify({'success': True, 'batches': batches})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# API: Create claim
+@app.route('/api/claims', methods=['POST'])
+@login_required
+def api_create_claim():
+    data = request.json
+    try:
+        claim_id = create_claim(
+            product_id=data['product_id'],
+            batch_id=data['batch_id'],
+            product_name=data['product_name'],
+            brand=data.get('brand', ''),
+            category=data.get('category', ''),
+            issue_type=data['issue_type'],
+            description=data.get('description', ''),
+            quantity=int(data['quantity'])
+        )
+        return jsonify({'success': True, 'claim_id': claim_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+# API: Update claim
+@app.route('/api/claims/<int:claim_id>', methods=['PUT'])
+@login_required
+def api_update_claim(claim_id):
+    data = request.json
+    try:
+        success = update_claim(
+            claim_id=claim_id,
+            issue_type=data['issue_type'],
+            description=data.get('description', ''),
+            quantity=int(data['quantity'])
+        )
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+# API: Delete claim
+@app.route('/api/claims/<int:claim_id>', methods=['DELETE'])
+@login_required
+def api_delete_claim(claim_id):
+    try:
+        success = delete_claim(claim_id)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+# API: Resolve claim
+@app.route('/api/claims/<int:claim_id>/resolve', methods=['POST'])
+@login_required
+def api_resolve_claim(claim_id):
+    try:
+        success = resolve_claim(claim_id)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 # ---------- IMPORT PURCHASE SERVICES ----------
 from services.purchase_service import (
     add_purchase,
@@ -1093,7 +1204,9 @@ def api_get_products():
                 'cost_price': p['cost_price'],
                 'selling_price': p['selling_price'],
                 'discount': p['discount'],
-                'date': p['date']
+                'date': p['date'],
+                'is_faulty': p.get('is_faulty', False),  # ✅ Added
+                'claimed_quantity': p.get('claimed_quantity', 0)  # ✅ Added
             })
     result = list(products_dict.values())
     return jsonify({
@@ -1218,7 +1331,7 @@ def api_sales_batches(product_id):
 @login_required
 def api_sales_batches_by_name():
     name = request.args.get('name')
-    brand = request.args.get('brand', '')  # Brand is optional
+    brand = request.args.get('brand', '')
     
     if not name:
         return jsonify([])
@@ -1226,63 +1339,71 @@ def api_sales_batches_by_name():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # If brand is provided, match both name and brand
-    # If brand is empty, match only name
-    if brand:
-        cursor.execute("""
-            SELECT pb.id, pb.product_id, pb.quantity, pb.remaining_quantity, 
-                   pb.cost_price, pb.selling_price, pb.discount, pb.date,
-                   p.name, p.brand
-            FROM purchase_batches pb
-            JOIN products p ON p.id = pb.product_id
-            WHERE p.name = %s AND p.brand = %s
-            AND pb.remaining_quantity > 0
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = p.id 
-                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
-                AND dp.source = 'product'
-            )
-            ORDER BY pb.date ASC
-        """, (name, brand))
-    else:
-        cursor.execute("""
-            SELECT pb.id, pb.product_id, pb.quantity, pb.remaining_quantity, 
-                   pb.cost_price, pb.selling_price, pb.discount, pb.date,
-                   p.name, p.brand
-            FROM purchase_batches pb
-            JOIN products p ON p.id = pb.product_id
-            WHERE p.name = %s
-            AND pb.remaining_quantity > 0
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = p.id 
-                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
-                AND dp.source = 'product'
-            )
-            ORDER BY pb.date ASC
-        """, (name,))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    result = []
-    for r in rows:
-        result.append({
-            'batch_id': r[0],
-            'product_id': r[1],
-            'batch_quantity': r[2],
-            'remaining_quantity': r[3],
-            'cost_price': float(r[4]),
-            'selling_price': float(r[5]),
-            'discount': float(r[6]),
-            'date': r[7].isoformat() if r[7] else None,
-            'product_name': r[8],
-            'product_brand': r[9]
-        })
-    
-    return jsonify(result)
-
+    try:
+        # If brand is provided, match both name and brand
+        if brand:
+            cursor.execute("""
+                SELECT pb.id, pb.product_id, pb.quantity, pb.remaining_quantity, 
+                       pb.cost_price, pb.selling_price, pb.discount, pb.date,
+                       pb.is_faulty, pb.claimed_quantity,
+                       p.name, p.brand
+                FROM purchase_batches pb
+                JOIN products p ON p.id = pb.product_id
+                WHERE p.name = %s AND p.brand = %s
+                AND pb.remaining_quantity > 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+                ORDER BY pb.date ASC
+            """, (name, brand))
+        else:
+            cursor.execute("""
+                SELECT pb.id, pb.product_id, pb.quantity, pb.remaining_quantity, 
+                       pb.cost_price, pb.selling_price, pb.discount, pb.date,
+                       pb.is_faulty, pb.claimed_quantity,
+                       p.name, p.brand
+                FROM purchase_batches pb
+                JOIN products p ON p.id = pb.product_id
+                WHERE p.name = %s
+                AND pb.remaining_quantity > 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+                ORDER BY pb.date ASC
+            """, (name,))
+        
+        rows = cursor.fetchall()
+        
+        result = []
+        for r in rows:
+            result.append({
+                'batch_id': r[0],
+                'product_id': r[1],
+                'batch_quantity': r[2],
+                'remaining_quantity': r[3],
+                'cost_price': float(r[4]),
+                'selling_price': float(r[5]),
+                'discount': float(r[6]),
+                'date': r[7].isoformat() if r[7] else None,
+                'is_faulty': r[8] or False,
+                'claimed_quantity': r[9] or 0,
+                'product_name': r[10],
+                'product_brand': r[11]
+            })
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"❌ Error fetching batches by name: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 @app.route('/api/sales/complete', methods=['POST'])
 @login_required

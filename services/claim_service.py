@@ -1,0 +1,431 @@
+from database.db import get_connection, return_connection
+from datetime import datetime
+
+# --------------------------- CREATE CLAIM ---------------------------
+def create_claim(product_id, batch_id, product_name, brand, category, issue_type, description, quantity):
+    """Create a new claim for a product batch"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Check if batch exists and has enough stock
+        cursor.execute("""
+            SELECT remaining_quantity, quantity 
+            FROM purchase_batches 
+            WHERE id = %s AND product_id = %s
+        """, (batch_id, product_id))
+        batch = cursor.fetchone()
+        if not batch:
+            raise ValueError("Batch not found")
+        
+        remaining_qty = batch[0]
+        if remaining_qty < quantity:
+            raise ValueError(f"Insufficient stock in batch. Available: {remaining_qty}, Requested: {quantity}")
+        
+        # Create claim
+        cursor.execute("""
+            INSERT INTO claims 
+            (product_id, batch_id, product_name, brand, category, issue_type, description, quantity, remaining_good, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (product_id, batch_id, product_name, brand, category, issue_type, description, quantity, remaining_qty - quantity, 'active'))
+        
+        claim_id = cursor.fetchone()[0]
+        
+        # Update batch - mark as faulty and update claimed quantity
+        cursor.execute("""
+            UPDATE purchase_batches 
+            SET claimed_quantity = claimed_quantity + %s,
+                is_faulty = TRUE,
+                remaining_quantity = remaining_quantity - %s
+            WHERE id = %s
+        """, (quantity, quantity, batch_id))
+        
+        # Update product stock
+        cursor.execute("""
+            UPDATE products 
+            SET stock = stock - %s 
+            WHERE id = %s
+        """, (quantity, product_id))
+        
+        conn.commit()
+        return claim_id
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+# --------------------------- GET ALL CLAIMS ---------------------------
+def get_all_claims():
+    """Get all claims with product and batch info"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT 
+                c.id,
+                c.product_id,
+                c.batch_id,
+                c.product_name,
+                c.brand,
+                c.category,
+                c.issue_type,
+                c.description,
+                c.quantity,
+                c.remaining_good,
+                c.status,
+                c.created_at,
+                c.updated_at,
+                pb.remaining_quantity as batch_stock,
+                pb.is_faulty
+            FROM claims c
+            LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
+            ORDER BY c.created_at DESC
+        """)
+        rows = cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "product_id": r[1],
+                "batch_id": r[2],
+                "product_name": r[3],
+                "brand": r[4] or '',
+                "category": r[5] or '',
+                "issue_type": r[6],
+                "description": r[7] or '',
+                "quantity": r[8],
+                "remaining_good": r[9],
+                "status": r[10],
+                "created_at": r[11],
+                "updated_at": r[12],
+                "batch_stock": r[13] if len(r) > 13 else 0,
+                "is_faulty": r[14] if len(r) > 14 else False
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+# --------------------------- GET CLAIMS BY PRODUCT ---------------------------
+def get_claims_by_product(product_id):
+    """Get all claims for a specific product"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT 
+                c.id,
+                c.batch_id,
+                c.product_name,
+                c.brand,
+                c.category,
+                c.issue_type,
+                c.description,
+                c.quantity,
+                c.remaining_good,
+                c.status,
+                c.created_at,
+                pb.remaining_quantity as batch_stock
+            FROM claims c
+            LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
+            WHERE c.product_id = %s
+            ORDER BY c.created_at DESC
+        """, (product_id,))
+        rows = cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "batch_id": r[1],
+                "product_name": r[2],
+                "brand": r[3] or '',
+                "category": r[4] or '',
+                "issue_type": r[5],
+                "description": r[6] or '',
+                "quantity": r[7],
+                "remaining_good": r[8],
+                "status": r[9],
+                "created_at": r[10],
+                "batch_stock": r[11] if len(r) > 11 else 0
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+# --------------------------- GET CLAIM BY ID ---------------------------
+def get_claim_by_id(claim_id):
+    """Get a single claim by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT 
+                c.id,
+                c.product_id,
+                c.batch_id,
+                c.product_name,
+                c.brand,
+                c.category,
+                c.issue_type,
+                c.description,
+                c.quantity,
+                c.remaining_good,
+                c.status,
+                c.created_at,
+                c.updated_at
+            FROM claims c
+            WHERE c.id = %s
+        """, (claim_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "product_id": row[1],
+                "batch_id": row[2],
+                "product_name": row[3],
+                "brand": row[4] or '',
+                "category": row[5] or '',
+                "issue_type": row[6],
+                "description": row[7] or '',
+                "quantity": row[8],
+                "remaining_good": row[9],
+                "status": row[10],
+                "created_at": row[11],
+                "updated_at": row[12]
+            }
+        return None
+    finally:
+        conn.close()
+
+
+# --------------------------- UPDATE CLAIM ---------------------------
+def update_claim(claim_id, issue_type, description, quantity):
+    """Update an existing claim"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Get current claim data
+        cursor.execute("""
+            SELECT product_id, batch_id, quantity, remaining_good
+            FROM claims WHERE id = %s
+        """, (claim_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise ValueError("Claim not found")
+        
+        old_quantity = current[2]
+        diff = quantity - old_quantity
+        
+        # Update claim
+        cursor.execute("""
+            UPDATE claims 
+            SET issue_type = %s, description = %s, quantity = %s, 
+                remaining_good = remaining_good - %s,
+                updated_at = %s
+            WHERE id = %s
+        """, (issue_type, description, quantity, diff, datetime.now(), claim_id))
+        
+        # Update batch quantities if quantity changed
+        if diff != 0:
+            batch_id = current[1]
+            cursor.execute("""
+                UPDATE purchase_batches 
+                SET claimed_quantity = claimed_quantity + %s,
+                    remaining_quantity = remaining_quantity - %s
+                WHERE id = %s
+            """, (diff, diff, batch_id))
+            
+            # Update product stock
+            cursor.execute("""
+                UPDATE products 
+                SET stock = stock - %s 
+                WHERE id = %s
+            """, (diff, current[0]))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+# --------------------------- DELETE CLAIM ---------------------------
+def delete_claim(claim_id):
+    """Delete a claim and restore stock"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Get claim data
+        cursor.execute("""
+            SELECT product_id, batch_id, quantity
+            FROM claims WHERE id = %s
+        """, (claim_id,))
+        claim = cursor.fetchone()
+        if not claim:
+            raise ValueError("Claim not found")
+        
+        product_id, batch_id, quantity = claim
+        
+        # Restore stock to batch
+        cursor.execute("""
+            UPDATE purchase_batches 
+            SET claimed_quantity = claimed_quantity - %s,
+                remaining_quantity = remaining_quantity + %s
+            WHERE id = %s
+        """, (quantity, quantity, batch_id))
+        
+        # Restore product stock
+        cursor.execute("""
+            UPDATE products 
+            SET stock = stock + %s 
+            WHERE id = %s
+        """, (quantity, product_id))
+        
+        # Delete claim
+        cursor.execute("DELETE FROM claims WHERE id = %s", (claim_id,))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+# --------------------------- RESOLVE CLAIM ---------------------------
+def resolve_claim(claim_id):
+    """Mark a claim as resolved"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE claims 
+            SET status = 'resolved', updated_at = %s
+            WHERE id = %s
+        """, (datetime.now(), claim_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+# --------------------------- SEARCH PRODUCTS FOR CLAIMS ---------------------------
+def search_products_for_claims(keyword):
+    """Search products by name, brand, category, or source for claim selection"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT DISTINCT 
+                p.id,
+                p.name,
+                p.brand,
+                p.category,
+                p.stock,
+                p.selling_price,
+                p.cost_price,
+                (
+                    SELECT COALESCE(SUM(remaining_quantity), 0)
+                    FROM purchase_batches
+                    WHERE product_id = p.id
+                ) as total_stock,
+                (
+                    SELECT json_agg(
+                        json_build_object(
+                            'batch_id', pb.id,
+                            'remaining_quantity', pb.remaining_quantity,
+                            'selling_price', pb.selling_price,
+                            'cost_price', pb.cost_price,
+                            'quantity', pb.quantity,
+                            'date', pb.date,
+                            'is_faulty', pb.is_faulty,
+                            'claimed_quantity', pb.claimed_quantity
+                        )
+                    )
+                    FROM purchase_batches pb
+                    WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+                ) as batches
+            FROM products p
+            WHERE p.stock > 0
+            AND (
+                p.name ILIKE %s OR 
+                p.brand ILIKE %s OR 
+                p.category ILIKE %s
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                AND dp.source = 'product'
+            )
+            LIMIT 20
+        """, (f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"))
+        
+        rows = cursor.fetchall()
+        results = []
+        for r in rows:
+            results.append({
+                "id": r[0],
+                "name": r[1],
+                "brand": r[2] or '',
+                "category": r[3] or '',
+                "stock": r[4] or 0,
+                "selling_price": float(r[5] or 0),
+                "cost_price": float(r[6] or 0),
+                "total_stock": r[7] or 0,
+                "batches": r[8] or []
+            })
+        return results
+    finally:
+        conn.close()
+
+
+# --------------------------- GET PRODUCT BATCHES FOR CLAIM ---------------------------
+def get_product_batches_for_claim(product_id):
+    """Get all batches for a product with claim info"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT 
+                id,
+                quantity,
+                remaining_quantity,
+                cost_price,
+                selling_price,
+                discount,
+                date,
+                is_faulty,
+                claimed_quantity,
+                (SELECT COALESCE(SUM(quantity), 0) FROM claims WHERE batch_id = purchase_batches.id AND status = 'active') as active_claims
+            FROM purchase_batches
+            WHERE product_id = %s AND remaining_quantity > 0
+            ORDER BY date ASC
+        """, (product_id,))
+        rows = cursor.fetchall()
+        return [
+            {
+                "batch_id": r[0],
+                "quantity": r[1],
+                "remaining_quantity": r[2],
+                "cost_price": float(r[3] or 0),
+                "selling_price": float(r[4] or 0),
+                "discount": float(r[5] or 0),
+                "date": r[6],
+                "is_faulty": r[7] or False,
+                "claimed_quantity": r[8] or 0,
+                "active_claims": r[9] or 0
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()

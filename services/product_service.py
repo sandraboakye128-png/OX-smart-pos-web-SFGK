@@ -110,17 +110,18 @@ def delete_product_clean_all(product_id):
     conn.close()
 
 # ---------------- UPDATE BATCH ----------------
-def update_product(batch_id, name, brand, category, quantity, cost_price, discount, selling_price):
+def update_product(batch_id, name, brand, category, quantity, cost_price, discount, selling_price, source=None):
     quantity = int(quantity)
     cost_price = float(cost_price)
     discount = float(discount or 0)
     selling_price = float(selling_price)
+    source = source or 'Unknown'
     conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT pb.product_id, pb.quantity, pb.remaining_quantity, pb.cost_price, pb.selling_price, pb.discount,
-                   p.name, p.brand, p.category
+                   p.name, p.brand, p.category, pb.source
             FROM purchase_batches pb
             JOIN products p ON p.id = pb.product_id
             WHERE pb.id = %s
@@ -129,7 +130,7 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
         if not old:
             raise ValueError("Batch not found")
         (product_id, old_qty, old_rem, old_cost, old_selling, old_disc,
-         old_name, old_brand, old_category) = old
+         old_name, old_brand, old_category, old_source) = old
         cursor.execute("""
             INSERT INTO deleted_products
             (name, brand, cost_price, selling_price, stock, category, discount, action, source, batch_id, batch_quantity, batch_remaining, product_id)
@@ -137,9 +138,9 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
         """, (old_name, old_brand, old_cost, old_selling, old_rem, old_category, old_disc, "UPDATED", "product", batch_id, old_qty, old_rem, product_id))
         cursor.execute("""
             UPDATE purchase_batches
-            SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s
+            SET quantity = %s, remaining_quantity = %s, cost_price = %s, selling_price = %s, discount = %s, date = %s, action = %s, source = %s
             WHERE id = %s
-        """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", batch_id))
+        """, (quantity, quantity, cost_price, selling_price, discount, datetime.now(), "updated", source, batch_id))
         cursor.execute("UPDATE products SET category = %s WHERE id = %s", (category, product_id))
         recalc_stock(cursor, product_id)
         conn.commit()
@@ -149,40 +150,91 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     finally:
         conn.close()
 
-# ---------------- GET ALL PRODUCTS (ONLY products with active batches/stock > 0) ----------------
+# ---------------- GET ALL PRODUCTS (WITH CLAIM INFO) ----------------
 def get_all_products():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT DISTINCT p.id, p.name, p.brand, p.cost_price, p.selling_price, p.stock, p.category, p.discount
-        FROM products p
-        WHERE EXISTS (
-            SELECT 1 FROM purchase_batches pb 
-            WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
-        )
-        AND NOT EXISTS (
-            SELECT 1 FROM deleted_products dp 
-            WHERE dp.product_id = p.id 
-            AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
-            AND dp.source = 'product'
-        )
-        ORDER BY p.id ASC
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    products = []
-    for r in rows:
-        products.append({
-            "product_id": r[0],
-            "name": r[1] or "-",
-            "brand": r[2] or "-",
-            "cost_price": r[3] or 0.0,
-            "selling_price": r[4] or 0.0,
-            "stock": r[5] or 0,
-            "category": r[6] or "-",
-            "discount": r[7] or 0.0
-        })
-    return products
+    try:
+        cursor.execute("""
+            SELECT DISTINCT p.id, p.name, p.brand, p.cost_price, p.selling_price, p.stock, p.category, p.discount
+            FROM products p
+            WHERE EXISTS (
+                SELECT 1 FROM purchase_batches pb 
+                WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                AND dp.source = 'product'
+            )
+            ORDER BY p.id ASC
+        """)
+        rows = cursor.fetchall()
+        
+        products = []
+        for r in rows:
+            product_id = r[0]
+            
+            # Get batches with claim info for this product
+            cursor.execute("""
+                SELECT 
+                    pb.id,
+                    pb.quantity,
+                    pb.remaining_quantity,
+                    pb.cost_price,
+                    pb.selling_price,
+                    pb.discount,
+                    pb.date,
+                    pb.is_faulty,
+                    pb.claimed_quantity,
+                    COALESCE((
+                        SELECT SUM(quantity) 
+                        FROM claims 
+                        WHERE batch_id = pb.id AND status = 'active'
+                    ), 0) as active_claims_qty
+                FROM purchase_batches pb
+                WHERE pb.product_id = %s AND pb.remaining_quantity > 0
+                ORDER BY pb.date ASC
+            """, (product_id,))
+            batch_rows = cursor.fetchall()
+            
+            batches = []
+            total_claimed = 0
+            for b in batch_rows:
+                claimed = b[9] if len(b) > 9 else 0  # active_claims_qty
+                is_faulty = b[7] if len(b) > 7 else False
+                claimed_qty = b[8] if len(b) > 8 else 0
+                total_claimed += claimed
+                
+                batches.append({
+                    "batch_id": b[0],
+                    "quantity": int(b[1] or 0),
+                    "remaining_quantity": int(b[2] or 0),
+                    "cost_price": float(b[3] or 0),
+                    "selling_price": float(b[4] or 0),
+                    "discount": float(b[5] or 0),
+                    "date": b[6],
+                    "is_faulty": is_faulty or False,
+                    "claimed_quantity": claimed,
+                    "active_claims": claimed
+                })
+            
+            products.append({
+                "product_id": r[0],
+                "name": r[1] or "-",
+                "brand": r[2] or "-",
+                "cost_price": r[3] or 0.0,
+                "selling_price": r[4] or 0.0,
+                "stock": r[5] or 0,
+                "category": r[6] or "-",
+                "discount": r[7] or 0.0,
+                "batches": batches,
+                "total_claimed": total_claimed
+            })
+        return products
+    finally:
+        conn.close()
 
 # ---------------- GET DELETED PRODUCTS ----------------
 def get_deleted_products():

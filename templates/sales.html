@@ -423,7 +423,7 @@
         }
     }
 
-    // ✅ Renders grouped products with batch count
+    // ✅ Renders grouped products with batch count and status
     function renderProductList(prods) {
         const container = document.getElementById('productList');
         if (!prods.length) {
@@ -434,11 +434,32 @@
         prods.forEach(p => {
             const btn = document.createElement('button');
             btn.className = 'w-full text-left px-3 py-2 hover:bg-gray-100 rounded-lg border-b';
+            
+            // Check if product has faulty batches
+            let hasFaulty = false;
+            let faultyCount = 0;
+            if (p.batches && p.batches.length > 0) {
+                p.batches.forEach(batch => {
+                    if (batch.is_faulty || (batch.claimed_quantity && batch.claimed_quantity > 0)) {
+                        hasFaulty = true;
+                        faultyCount += batch.claimed_quantity || 0;
+                    }
+                });
+            }
+            
             const batchCount = p.batches ? p.batches.length : 0;
             const batchLabel = batchCount > 0 ? ` (${batchCount} batches)` : '';
-            btn.innerText = `${p.name} (${p.brand}) - Stock: ${p.stock}${batchLabel}`;
-            btn.title = `Click to select ${p.name}`;
+            const faultyLabel = hasFaulty ? ` ⚠️ ${faultyCount} claimed` : '';
+            
+            btn.innerText = `${p.name} (${p.brand}) - Stock: ${p.stock}${batchLabel}${faultyLabel}`;
+            btn.title = hasFaulty ? `⚠️ ${faultyCount} units claimed as faulty for this product` : `Click to select ${p.name}`;
             btn.onclick = () => selectProduct(p);
+            
+            // Add visual indicator for faulty products
+            if (hasFaulty) {
+                btn.style.borderLeft = '3px solid #ef4444';
+            }
+            
             container.appendChild(btn);
         });
     }
@@ -448,12 +469,30 @@
     }
     window.refreshProducts = refreshProducts;
 
-    // ✅ Shows batch count in selection info
+    // ✅ Shows batch count and status in selection info
     function selectProduct(product) {
         currentProduct = product;
         const batchCount = product.batches ? product.batches.length : 0;
-        document.getElementById('selectedProductInfo').innerHTML = 
-            `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)} - Stock: ${product.stock} (${batchCount} batches)`;
+        
+        // Check for faulty batches
+        let hasFaulty = false;
+        let faultyCount = 0;
+        let faultyBatches = [];
+        if (product.batches && product.batches.length > 0) {
+            product.batches.forEach(batch => {
+                if (batch.is_faulty || (batch.claimed_quantity && batch.claimed_quantity > 0)) {
+                    hasFaulty = true;
+                    faultyCount += batch.claimed_quantity || 0;
+                    faultyBatches.push(batch.batch_id);
+                }
+            });
+        }
+        
+        let statusHtml = `<strong>Selected:</strong> ${product.name} (${product.brand}) - ₵${product.selling_price.toFixed(2)} - Stock: ${product.stock} (${batchCount} batches)`;
+        if (hasFaulty) {
+            statusHtml += `<br><span class="text-red-500 text-xs">⚠️ ${faultyCount} units claimed as faulty in batches: #${faultyBatches.join(', #')}</span>`;
+        }
+        document.getElementById('selectedProductInfo').innerHTML = statusHtml;
         document.getElementById('quantity').value = '';
         document.getElementById('discount').value = '';
     }
@@ -468,7 +507,7 @@
         renderProductList(filtered);
     });
 
-    // ========== 🆕 UPDATED BATCH SELECTOR WITH FALLBACKS ==========
+    // ========== UPDATED BATCH SELECTOR WITH FAULTY INDICATORS ==========
     async function openBatchSelector(product, qty) {
         currentProductForBatch = product;
         neededQty = qty;
@@ -540,7 +579,9 @@
                 selling_price: product.selling_price,
                 cost_price: product.cost_price || 0,
                 batch_quantity: product.stock,
-                is_fallback: true
+                is_fallback: true,
+                is_faulty: false,
+                claimed_quantity: 0
             }];
         }
 
@@ -551,15 +592,15 @@
             return false;
         }
 
-        // Build the batch selection UI
+        // Build the batch selection UI with status indicators
         const container = document.getElementById('batchList');
         container.innerHTML = '';
         batchSelection = [];
         
         // Header row
         const header = document.createElement('div');
-        header.className = 'grid grid-cols-6 gap-2 bg-gray-100 p-2 font-bold sticky top-0 border-b-2 border-gray-300';
-        header.innerHTML = `<div>Select</div><div>Batch ID</div><div>Stock</div><div>Selling Price</div><div>Cost Price</div><div>Qty to Sell</div>`;
+        header.className = 'grid grid-cols-7 gap-2 bg-gray-100 p-2 font-bold sticky top-0 border-b-2 border-gray-300';
+        header.innerHTML = `<div>Select</div><div>Batch ID</div><div>Stock</div><div>Selling Price</div><div>Cost Price</div><div>Status</div><div>Qty to Sell</div>`;
         container.appendChild(header);
         
         let totalAvailableStock = 0;
@@ -570,7 +611,7 @@
             if (batch.is_fallback) isFallback = true;
             
             const row = document.createElement('div');
-            row.className = 'grid grid-cols-6 gap-2 items-center border-b py-2 hover:bg-gray-50';
+            row.className = 'grid grid-cols-7 gap-2 items-center border-b py-2 hover:bg-gray-50';
             
             const cb = document.createElement('input');
             cb.type = 'checkbox';
@@ -595,6 +636,16 @@
             costSpan.innerText = `₵${batch.cost_price.toFixed(2)}`;
             costSpan.className = 'text-gray-500 text-sm';
             
+            // Status column - shows if batch has claims
+            const statusSpan = document.createElement('span');
+            const isFaulty = batch.is_faulty || (batch.claimed_quantity && batch.claimed_quantity > 0);
+            if (isFaulty) {
+                statusSpan.innerHTML = `<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded font-bold">⚠️ ${batch.claimed_quantity || 0} Claimed</span>`;
+                statusSpan.title = `${batch.claimed_quantity || 0} units claimed as faulty`;
+            } else {
+                statusSpan.innerHTML = `<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">✅ Good</span>`;
+            }
+            
             const qtyInput = document.createElement('input');
             qtyInput.type = 'number';
             qtyInput.className = 'border rounded px-1 py-1 w-20 text-center';
@@ -608,6 +659,7 @@
             row.appendChild(stockSpan);
             row.appendChild(priceSpan);
             row.appendChild(costSpan);
+            row.appendChild(statusSpan);
             row.appendChild(qtyInput);
             container.appendChild(row);
             
@@ -615,7 +667,8 @@
                 batch, 
                 checkbox: cb, 
                 qtyInput, 
-                batchId: batch.batch_id 
+                batchId: batch.batch_id,
+                isFaulty: isFaulty
             });
             
             cb.addEventListener('change', () => {
@@ -642,12 +695,14 @@
             });
         }
         
-        // Show total available stock info with warning if fallback
+        // Show total available stock info with warnings
+        const faultyBatchesCount = currentBatches.filter(b => b.is_faulty || (b.claimed_quantity && b.claimed_quantity > 0)).length;
         const infoRow = document.createElement('div');
-        infoRow.className = `grid grid-cols-6 gap-2 ${isFallback ? 'bg-orange-50' : 'bg-blue-50'} p-2 mt-2 rounded`;
+        infoRow.className = `grid grid-cols-7 gap-2 ${isFallback || faultyBatchesCount > 0 ? 'bg-orange-50' : 'bg-blue-50'} p-2 mt-2 rounded`;
         infoRow.innerHTML = `
-            <div class="col-span-6 text-sm ${isFallback ? 'text-orange-700' : 'text-blue-700'}">
-                ${isFallback ? '⚠️ ' : '📦 '}
+            <div class="col-span-7 text-sm ${isFallback || faultyBatchesCount > 0 ? 'text-orange-700' : 'text-blue-700'}">
+                ${isFallback ? '⚠️ ' : ''}
+                ${faultyBatchesCount > 0 ? `⚠️ ${faultyBatchesCount} batch(es) have claimed/faulty items. ` : ''}
                 Total available stock: <strong>${totalAvailableStock}</strong> units across ${currentBatches.length} batches
                 ${neededQty > totalAvailableStock ? `<span class="text-red-600 ml-2">⚠️ Needed ${neededQty} units, only ${totalAvailableStock} available</span>` : ''}
                 ${isFallback ? `<br><span class="text-xs text-orange-500">⚠️ FALLBACK BATCH: This product has stock but no specific batch. Selling from this will not deduct from a real batch.</span>` : ''}
@@ -686,7 +741,7 @@
         }
         
         document.getElementById('batchModalTitle').innerHTML = 
-            `Select batches for <strong>${product.name}</strong> (need ${qty} units, ${totalAvailableStock} available)`;
+            `Select batches for <strong>${product.name}</strong> (need ${qty} units, ${totalAvailableStock} available) ${faultyBatchesCount > 0 ? '⚠️ Contains faulty batches' : ''}`;
         document.getElementById('assignedQty').innerText = 'Assigned: 0';
         document.getElementById('remainingQty').innerText = `Remaining: ${neededQty}`;
         document.getElementById('batchModal').classList.remove('hidden');
@@ -758,10 +813,12 @@
         neededQty = 0;
     };
 
-    // ========== 🔧 FIXED: confirmBatchSelection with correct cost calculation ==========
+    // ========== confirmBatchSelection with faulty batch warnings ==========
     window.confirmBatchSelection = function() {
         let assigned = 0;
         let selected = [];
+        let faultySelected = false;
+        
         for (const sel of batchSelection) {
             if (sel.checkbox.checked) {
                 let qty = parseInt(sel.qtyInput.value) || 0;
@@ -771,11 +828,14 @@
                         batch_id: sel.batchId, 
                         qty: qty, 
                         batch: sel.batch,
-                        is_fallback: sel.batch.is_fallback || false
+                        is_fallback: sel.batch.is_fallback || false,
+                        is_faulty: sel.isFaulty || false
                     });
+                    if (sel.isFaulty) faultySelected = true;
                 }
             }
         }
+        
         if (assigned !== neededQty) {
             alert(`Please assign exactly ${neededQty} units. Currently assigned: ${assigned}`);
             return;
@@ -783,6 +843,13 @@
         if (selected.length === 0) {
             alert('Please select at least one batch.');
             return;
+        }
+        
+        // Warning for faulty batches
+        if (faultySelected) {
+            if (!confirm('⚠️ You are selecting batches that have claimed/faulty items.\n\nSelling faulty items may affect customer satisfaction and inventory tracking.\n\nContinue with sale?')) {
+                return;
+            }
         }
         
         // Check if using fallback batch
@@ -802,21 +869,22 @@
         }
         const finalTotal = Math.max(subtotal - discount, 0);
         
-        // ✅ CRITICAL FIX: Create a product copy with the CORRECT cost price from batches
+        // Create a product copy with the CORRECT cost price from batches
         const productWithCorrectCost = {
             ...currentProductForBatch,
-            cost_price: totalCost / neededQty  // Average cost per unit from batches
+            cost_price: totalCost / neededQty
         };
         
         cart.push({
-            product: productWithCorrectCost,  // ✅ Use corrected product
+            product: productWithCorrectCost,
             qty: neededQty,
             discount,
             selectedBatches: selected,
             subtotal,
             final: finalTotal,
             isFallback: hasFallback,
-            totalCost: totalCost
+            totalCost: totalCost,
+            hasFaulty: faultySelected
         });
         updateCart();
         closeBatchModal();
@@ -824,7 +892,7 @@
         document.getElementById('discount').value = '';
     };
 
-    // ---------- Cart management ----------
+    // ---------- Cart management with fault indicators ----------
     function updateCart() {
         const container = document.getElementById('cartItems');
         if (!cart.length) {
@@ -840,14 +908,17 @@
             card.className = 'border rounded-lg p-3 bg-gray-50';
             const fallbackWarning = item.isFallback ? 
                 '<span class="text-orange-500 text-xs font-bold ml-2">⚠️ FALLBACK</span>' : '';
+            const faultyWarning = item.hasFaulty ? 
+                '<span class="text-red-500 text-xs font-bold ml-2">⚠️ FAULTY</span>' : '';
             card.innerHTML = `
                 <div class="flex justify-between items-start">
                     <div>
                         <strong>${item.product.name} (${item.product.brand})</strong>
                         ${fallbackWarning}
+                        ${faultyWarning}
                         <div class="text-sm text-gray-600">Qty: ${item.qty} | Discount: ${formatMoney(item.discount)}</div>
                         <div class="text-xs text-gray-500">Batches:</div>
-                        <div class="text-xs">${item.selectedBatches.map(b => `Batch #${b.batch_id}: ${b.qty} @ ${formatMoney(b.batch.selling_price)}`).join('<br>')}</div>
+                        <div class="text-xs">${item.selectedBatches.map(b => `Batch #${b.batch_id}: ${b.qty} @ ${formatMoney(b.batch.selling_price)}${b.is_faulty ? ' ⚠️' : ''}`).join('<br>')}</div>
                     </div>
                     <div class="text-right">
                         <div class="font-bold">${formatMoney(item.final)}</div>
@@ -1032,10 +1103,16 @@
             return;
         }
         
-        // Check if there are fallback batches in cart
+        // Check if there are fallback or faulty batches in cart
         const hasFallback = cart.some(item => item.isFallback);
-        if (hasFallback) {
-            if (!confirm('⚠️ One or more items in your cart are using FALLBACK batches (no real inventory batch exists).\n\nThis means the sale will be recorded but stock will NOT be deducted from inventory.\n\nContinue?')) {
+        const hasFaulty = cart.some(item => item.hasFaulty);
+        
+        if (hasFallback || hasFaulty) {
+            let warningMsg = '⚠️ ';
+            if (hasFallback) warningMsg += 'One or more items are using FALLBACK batches (no real inventory batch exists). Stock will NOT be deducted. ';
+            if (hasFaulty) warningMsg += 'One or more items are from FAULTY batches (claimed as damaged/defective). ';
+            warningMsg += '\n\nContinue with sale?';
+            if (!confirm(warningMsg)) {
                 return;
             }
         }
