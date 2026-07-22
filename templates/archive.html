@@ -46,6 +46,20 @@
     </div>
 </div>
 
+<!-- Modal: View Claims -->
+<div id="claimsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl w-11/12 max-w-2xl max-h-[80vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white p-4 border-b flex justify-between items-center">
+            <h3 class="text-xl font-bold" id="claimsModalTitle">Claims</h3>
+            <button onclick="closeClaimsModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+        <div id="claimsList" class="p-4 space-y-3"></div>
+        <div class="sticky bottom-0 bg-white p-4 border-t text-right">
+            <button onclick="closeClaimsModal()" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">Close</button>
+        </div>
+    </div>
+</div>
+
 <script>
     // ---------- Offline banner ----------
     function updateOfflineBanner() {
@@ -121,6 +135,16 @@
         }
     }
 
+    // Get claim status color
+    function getClaimStatusColor(status) {
+        const colors = {
+            'active': '#EF4444',
+            'resolved': '#22C55E',
+            'pending': '#F59E0B'
+        };
+        return colors[status] || '#6B7280';
+    }
+
     // Load archive data from API or cache
     async function loadArchive() {
         updateOfflineBanner();
@@ -151,7 +175,6 @@
         currentArchiveData = data;
         applySearchAndRender();
         if (fromCache) {
-            // Show a note at the bottom
             const note = document.createElement('div');
             note.className = 'text-xs text-gray-400 text-center mt-2';
             note.innerText = '⚠️ Data may be outdated (offline)';
@@ -185,12 +208,19 @@
             const card = document.createElement('div');
             card.className = 'bg-white rounded-xl shadow-md border p-4';
 
-            // Header row
+            // Header row with claims badge
             const headerDiv = document.createElement('div');
             headerDiv.className = 'flex justify-between items-start mb-2';
+            
+            let claimsBadge = '';
+            if (item.has_claims && item.total_claimed > 0) {
+                claimsBadge = `<span class="ml-2 text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">⚠️ ${item.total_claimed} Claimed</span>`;
+            }
+            
             headerDiv.innerHTML = `
                 <div>
                     <span class="font-bold text-lg text-indigo-700">${escapeHtml(item.name)} (${escapeHtml(item.brand)})</span>
+                    ${claimsBadge}
                 </div>
                 <div>
                     <span class="text-sm font-semibold" style="color: ${getStatusColor(item.action)}">● ${item.action}</span>
@@ -204,6 +234,7 @@
             if (item.action === 'ACTIVE') {
                 detailsDiv.innerHTML = `
                     📦 Stock: ${item.stock} | ${formatMoney(item.cost)} | ${formatMoney(item.price)} | 💰 Disc: ${formatMoney(item.discount)} | 📂 ${escapeHtml(item.category)}
+                    ${item.has_claims ? `<br><span class="text-red-500">⚠️ ${item.total_claimed} units claimed as faulty</span>` : ''}
                 `;
             } else {
                 let details = `
@@ -217,13 +248,25 @@
                 if (item.action === 'PRODUCT DELETED' && item.product_id) {
                     details += `<br>Product ID: #${item.product_id} | All batches archived`;
                 }
+                if (item.has_claims) {
+                    details += `<br><span class="text-red-500">⚠️ ${item.total_claimed} units were claimed as faulty</span>`;
+                }
                 detailsDiv.innerHTML = details;
             }
             card.appendChild(detailsDiv);
 
             // Buttons
             const btnDiv = document.createElement('div');
-            btnDiv.className = 'flex justify-end gap-2';
+            btnDiv.className = 'flex justify-end gap-2 flex-wrap';
+            
+            // View Claims button (if has claims)
+            if (item.has_claims && item.claims && item.claims.length > 0) {
+                const claimsBtn = document.createElement('button');
+                claimsBtn.textContent = `⚠️ View Claims (${item.total_claimed})`;
+                claimsBtn.className = 'bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm';
+                claimsBtn.onclick = () => viewClaims(item.claims, item.name, item.brand);
+                btnDiv.appendChild(claimsBtn);
+            }
             
             // View Batches button for ACTIVE items
             if (item.action === 'ACTIVE') {
@@ -234,9 +277,7 @@
                 btnDiv.appendChild(viewBtn);
             }
             
-            // ✅ FIXED: Restore button logic
-            // Only show restore for DELETED, BATCH DELETED, PRODUCT DELETED
-            // EXCLUDE "UPDATED" records
+            // Restore button logic
             const canRestore = ['DELETED', 'BATCH DELETED', 'PRODUCT DELETED'].includes(item.action);
             const isPermanent = item.action === 'PERMANENTLY DELETED';
             
@@ -253,7 +294,6 @@
                 restoreBtn.onclick = () => restoreItem(item.id);
                 btnDiv.appendChild(restoreBtn);
             } else if (item.action === 'UPDATED') {
-                // "UPDATED" records show this special message
                 const infoBtn = document.createElement('button');
                 infoBtn.textContent = 'ℹ️ Update History';
                 infoBtn.className = 'bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-sm';
@@ -266,7 +306,50 @@
         }
     }
 
-    // View batches modal (uses fetch, with fallback to cache if needed)
+    // View Claims modal
+    function viewClaims(claims, productName, brand) {
+        const modalTitle = document.getElementById('claimsModalTitle');
+        const container = document.getElementById('claimsList');
+        container.innerHTML = '';
+        modalTitle.innerText = `Claims – ${productName} (${brand})`;
+        document.getElementById('claimsModal').classList.remove('hidden');
+
+        if (!claims || claims.length === 0) {
+            container.innerHTML = '<div class="text-gray-400 text-center py-4">No claims found.</div>';
+            return;
+        }
+
+        claims.forEach(claim => {
+            const div = document.createElement('div');
+            div.className = 'border rounded p-3 mb-2';
+            const statusColor = getClaimStatusColor(claim.status);
+            div.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div>
+                        <span class="font-semibold">Claim #${claim.claim_id}</span>
+                        <span class="text-xs ml-2" style="color: ${statusColor}">● ${claim.status}</span>
+                    </div>
+                    <span class="text-xs text-gray-500">${formatDate(claim.created_at)}</span>
+                </div>
+                <div class="mt-1">
+                    <span class="font-medium">Issue:</span> ${escapeHtml(claim.issue_type)}
+                </div>
+                <div>
+                    <span class="font-medium">Quantity:</span> ${claim.quantity} units
+                </div>
+                ${claim.batch_id ? `<div><span class="font-medium">Batch:</span> #${claim.batch_id}</div>` : ''}
+                ${claim.description ? `<div class="text-sm text-gray-600 mt-1">${escapeHtml(claim.description)}</div>` : ''}
+                ${claim.batch_identifier ? `<div class="text-xs text-gray-400 mt-1">Batch Identifier: ${claim.batch_identifier}</div>` : ''}
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function closeClaimsModal() {
+        document.getElementById('claimsModal').classList.add('hidden');
+    }
+
+    // View batches modal
     async function viewBatches(name, brand) {
         const modalTitle = document.getElementById('batchModalTitle');
         const container = document.getElementById('batchList');
@@ -294,8 +377,11 @@
             batches.forEach(b => {
                 const div = document.createElement('div');
                 div.className = 'border rounded p-2 mb-2';
+                const faultyBadge = (b.is_faulty || b.claimed_quantity > 0) 
+                    ? `<span class="text-red-500 text-xs font-bold ml-2">⚠️ FAULTY (${b.claimed_quantity || 0} claimed)</span>` 
+                    : '';
                 div.innerHTML = `
-                    <strong>Batch #${b.batch_id}</strong><br>
+                    <strong>Batch #${b.batch_id}</strong> ${faultyBadge}<br>
                     Qty: ${b.quantity} | Remaining: ${b.remaining_quantity}<br>
                     Cost: ${formatMoney(b.cost_price)} | Selling: ${formatMoney(b.selling_price)} | Disc: ${formatMoney(b.discount)}<br>
                     Date: ${formatDate(b.date)}
