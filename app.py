@@ -3305,10 +3305,52 @@ def api_import_verify(job_id):
 
     return jsonify({'success': True, 'result': result})
 
+# ===================== INITIALIZE CLAIMS TABLE =====================
+def init_claims_table():
+    """Create the claims table if it doesn't exist"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS claims (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL,
+                batch_id INTEGER NOT NULL,
+                product_name VARCHAR(255) NOT NULL,
+                brand VARCHAR(100) DEFAULT '',
+                category VARCHAR(100) DEFAULT '',
+                issue_type VARCHAR(100) NOT NULL,
+                description TEXT DEFAULT '',
+                quantity INTEGER NOT NULL DEFAULT 0,
+                remaining_good INTEGER DEFAULT 0,
+                status VARCHAR(20) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_claims_product_id ON claims(product_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_claims_batch_id ON claims(batch_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_claims_created_at ON claims(created_at)")
+        
+        conn.commit()
+        print("✅ Claims table initialized successfully!")
+    except Exception as e:
+        print(f"❌ Error initializing claims table: {str(e)}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+# ===================== CALL THE FUNCTION =====================
+init_claims_table()
+
 # ===================== PING =====================
 @app.route('/api/ping', methods=['GET'])
 def ping():
     return jsonify({"status": "ok", "message": "Deployed version is current"})
+
 
 # ---------------------- RUN THE APP ----------------------
 if __name__ == "__main__":

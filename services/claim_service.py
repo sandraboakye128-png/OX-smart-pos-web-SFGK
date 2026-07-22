@@ -34,7 +34,7 @@ def create_claim(product_id, batch_id, product_name, brand, category, issue_type
         # Update batch - mark as faulty and update claimed quantity
         cursor.execute("""
             UPDATE purchase_batches 
-            SET claimed_quantity = claimed_quantity + %s,
+            SET claimed_quantity = COALESCE(claimed_quantity, 0) + %s,
                 is_faulty = TRUE,
                 remaining_quantity = remaining_quantity - %s
             WHERE id = %s
@@ -56,7 +56,7 @@ def create_claim(product_id, batch_id, product_name, brand, category, issue_type
         conn.close()
 
 
-# --------------------------- GET ALL CLAIMS ---------------------------
+# --------------------------- GET ALL CLAIMS (FIXED) ---------------------------
 def get_all_claims():
     """Get all claims with product and batch info"""
     conn = get_connection()
@@ -77,8 +77,8 @@ def get_all_claims():
                 c.status,
                 c.created_at,
                 c.updated_at,
-                pb.remaining_quantity as batch_stock,
-                pb.is_faulty
+                COALESCE(pb.remaining_quantity, 0) as batch_stock,
+                COALESCE(pb.is_faulty, FALSE) as is_faulty
             FROM claims c
             LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
             ORDER BY c.created_at DESC
@@ -104,6 +104,9 @@ def get_all_claims():
             }
             for r in rows
         ]
+    except Exception as e:
+        print(f"❌ Error in get_all_claims: {str(e)}")
+        return []
     finally:
         conn.close()
 
@@ -127,7 +130,7 @@ def get_claims_by_product(product_id):
                 c.remaining_good,
                 c.status,
                 c.created_at,
-                pb.remaining_quantity as batch_stock
+                COALESCE(pb.remaining_quantity, 0) as batch_stock
             FROM claims c
             LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
             WHERE c.product_id = %s
@@ -151,6 +154,9 @@ def get_claims_by_product(product_id):
             }
             for r in rows
         ]
+    except Exception as e:
+        print(f"❌ Error in get_claims_by_product: {str(e)}")
+        return []
     finally:
         conn.close()
 
@@ -197,6 +203,9 @@ def get_claim_by_id(claim_id):
                 "updated_at": row[12]
             }
         return None
+    except Exception as e:
+        print(f"❌ Error in get_claim_by_id: {str(e)}")
+        return None
     finally:
         conn.close()
 
@@ -233,7 +242,7 @@ def update_claim(claim_id, issue_type, description, quantity):
             batch_id = current[1]
             cursor.execute("""
                 UPDATE purchase_batches 
-                SET claimed_quantity = claimed_quantity + %s,
+                SET claimed_quantity = COALESCE(claimed_quantity, 0) + %s,
                     remaining_quantity = remaining_quantity - %s
                 WHERE id = %s
             """, (diff, diff, batch_id))
@@ -274,7 +283,7 @@ def delete_claim(claim_id):
         # Restore stock to batch
         cursor.execute("""
             UPDATE purchase_batches 
-            SET claimed_quantity = claimed_quantity - %s,
+            SET claimed_quantity = GREATEST(COALESCE(claimed_quantity, 0) - %s, 0),
                 remaining_quantity = remaining_quantity + %s
             WHERE id = %s
         """, (quantity, quantity, batch_id))
@@ -322,61 +331,105 @@ def resolve_claim(claim_id):
 def search_products_for_claims(keyword):
     """
     Search products by name, brand, or category for claim selection.
-    ✅ FIXED: Removed stock > 0 filter so ALL products can be searched,
-    including those with 0 stock (for claiming faulty items).
+    ✅ FIXED: Shows ALL products, including those with 0 stock.
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("""
-            SELECT DISTINCT 
-                p.id,
-                p.name,
-                p.brand,
-                p.category,
-                p.stock,
-                p.selling_price,
-                p.cost_price,
-                (
-                    SELECT COALESCE(SUM(remaining_quantity), 0)
-                    FROM purchase_batches
-                    WHERE product_id = p.id
-                ) as total_stock,
-                (
-                    SELECT json_agg(
-                        json_build_object(
-                            'batch_id', pb.id,
-                            'remaining_quantity', pb.remaining_quantity,
-                            'selling_price', pb.selling_price,
-                            'cost_price', pb.cost_price,
-                            'quantity', pb.quantity,
-                            'date', pb.date,
-                            'is_faulty', pb.is_faulty,
-                            'claimed_quantity', pb.claimed_quantity
-                        )
-                    )
-                    FROM purchase_batches pb
-                    WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
-                ) as batches
-            FROM products p
-            WHERE (
-                p.name ILIKE %s OR 
-                p.brand ILIKE %s OR 
-                p.category ILIKE %s
-            )
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = p.id 
-                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
-                AND dp.source = 'product'
-            )
-            ORDER BY p.name ASC
-            LIMIT 20
-        """, (f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"))
+        # First, check if we have any products
+        cursor.execute("SELECT COUNT(*) FROM products")
+        count = cursor.fetchone()[0]
+        print(f"🔍 Total products in database: {count}")
+        
+        # Build the search query
+        if keyword and len(keyword) >= 2:
+            cursor.execute("""
+                SELECT DISTINCT 
+                    p.id,
+                    p.name,
+                    p.brand,
+                    p.category,
+                    p.stock,
+                    p.selling_price,
+                    p.cost_price,
+                    COALESCE((
+                        SELECT SUM(remaining_quantity) 
+                        FROM purchase_batches 
+                        WHERE product_id = p.id
+                    ), 0) as total_stock
+                FROM products p
+                WHERE (
+                    p.name ILIKE %s OR 
+                    p.brand ILIKE %s OR 
+                    p.category ILIKE %s
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+                ORDER BY p.name ASC
+                LIMIT 20
+            """, (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%'))
+        else:
+            # If no keyword, return some products
+            cursor.execute("""
+                SELECT DISTINCT 
+                    p.id,
+                    p.name,
+                    p.brand,
+                    p.category,
+                    p.stock,
+                    p.selling_price,
+                    p.cost_price,
+                    COALESCE((
+                        SELECT SUM(remaining_quantity) 
+                        FROM purchase_batches 
+                        WHERE product_id = p.id
+                    ), 0) as total_stock
+                FROM products p
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM deleted_products dp 
+                    WHERE dp.product_id = p.id 
+                    AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                    AND dp.source = 'product'
+                )
+                ORDER BY p.name ASC
+                LIMIT 20
+            """)
         
         rows = cursor.fetchall()
+        print(f"🔍 Found {len(rows)} products matching search")
+        
         results = []
         for r in rows:
+            # Get batches for this product
+            cursor.execute("""
+                SELECT 
+                    id,
+                    remaining_quantity,
+                    selling_price,
+                    cost_price,
+                    COALESCE(is_faulty, FALSE) as is_faulty,
+                    COALESCE(claimed_quantity, 0) as claimed_quantity
+                FROM purchase_batches
+                WHERE product_id = %s AND remaining_quantity > 0
+                ORDER BY date ASC
+            """, (r[0],))
+            batches = cursor.fetchall()
+            
+            batch_list = []
+            for b in batches:
+                batch_list.append({
+                    "batch_id": b[0],
+                    "remaining_quantity": b[1],
+                    "selling_price": float(b[2] or 0),
+                    "cost_price": float(b[3] or 0),
+                    "is_faulty": b[4] or False,
+                    "claimed_quantity": b[5] or 0
+                })
+            
             results.append({
                 "id": r[0],
                 "name": r[1],
@@ -386,11 +439,15 @@ def search_products_for_claims(keyword):
                 "selling_price": float(r[5] or 0),
                 "cost_price": float(r[6] or 0),
                 "total_stock": r[7] or 0,
-                "batches": r[8] or []
+                "batches": batch_list
             })
+        
+        print(f"✅ Returning {len(results)} products with batches")
         return results
     except Exception as e:
         print(f"❌ Error searching products: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
     finally:
         conn.close()
@@ -411,9 +468,13 @@ def get_product_batches_for_claim(product_id):
                 selling_price,
                 discount,
                 date,
-                is_faulty,
-                claimed_quantity,
-                (SELECT COALESCE(SUM(quantity), 0) FROM claims WHERE batch_id = purchase_batches.id AND status = 'active') as active_claims
+                COALESCE(is_faulty, FALSE) as is_faulty,
+                COALESCE(claimed_quantity, 0) as claimed_quantity,
+                COALESCE((
+                    SELECT SUM(quantity) 
+                    FROM claims 
+                    WHERE batch_id = purchase_batches.id AND status = 'active'
+                ), 0) as active_claims
             FROM purchase_batches
             WHERE product_id = %s AND remaining_quantity > 0
             ORDER BY date ASC
@@ -434,5 +495,8 @@ def get_product_batches_for_claim(product_id):
             }
             for r in rows
         ]
+    except Exception as e:
+        print(f"❌ Error in get_product_batches_for_claim: {str(e)}")
+        return []
     finally:
         conn.close()

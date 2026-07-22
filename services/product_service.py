@@ -109,7 +109,7 @@ def delete_product_clean_all(product_id):
     conn.commit()
     conn.close()
 
-# ---------------- UPDATE BATCH ----------------
+# ---------------- UPDATE BATCH (WITH SOURCE PARAMETER) ----------------
 def update_product(batch_id, name, brand, category, quantity, cost_price, discount, selling_price, source=None):
     quantity = int(quantity)
     cost_price = float(cost_price)
@@ -150,8 +150,12 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     finally:
         conn.close()
 
-# ---------------- GET ALL PRODUCTS (WITH CLAIM INFO) ----------------
+# ---------------- GET ALL PRODUCTS (WITH BATCH AND CLAIM INFO) ----------------
 def get_all_products():
+    """
+    Get all products with their batches and claim information.
+    Includes is_faulty and claimed_quantity for each batch.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -186,8 +190,8 @@ def get_all_products():
                     pb.selling_price,
                     pb.discount,
                     pb.date,
-                    pb.is_faulty,
-                    pb.claimed_quantity,
+                    COALESCE(pb.is_faulty, FALSE) as is_faulty,
+                    COALESCE(pb.claimed_quantity, 0) as claimed_quantity,
                     COALESCE((
                         SELECT SUM(quantity) 
                         FROM claims 
@@ -233,6 +237,9 @@ def get_all_products():
                 "total_claimed": total_claimed
             })
         return products
+    except Exception as e:
+        print(f"❌ Error in get_all_products: {str(e)}")
+        return []
     finally:
         conn.close()
 
