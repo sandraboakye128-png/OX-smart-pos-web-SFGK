@@ -318,9 +318,13 @@ def resolve_claim(claim_id):
         conn.close()
 
 
-# --------------------------- SEARCH PRODUCTS FOR CLAIMS ---------------------------
+# --------------------------- SEARCH PRODUCTS FOR CLAIMS (FIXED) ---------------------------
 def search_products_for_claims(keyword):
-    """Search products by name, brand, category, or source for claim selection"""
+    """
+    Search products by name, brand, or category for claim selection.
+    ✅ FIXED: Removed stock > 0 filter so ALL products can be searched,
+    including those with 0 stock (for claiming faulty items).
+    """
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -355,8 +359,7 @@ def search_products_for_claims(keyword):
                     WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
                 ) as batches
             FROM products p
-            WHERE p.stock > 0
-            AND (
+            WHERE (
                 p.name ILIKE %s OR 
                 p.brand ILIKE %s OR 
                 p.category ILIKE %s
@@ -367,6 +370,7 @@ def search_products_for_claims(keyword):
                 AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                 AND dp.source = 'product'
             )
+            ORDER BY p.name ASC
             LIMIT 20
         """, (f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"))
         
@@ -385,6 +389,9 @@ def search_products_for_claims(keyword):
                 "batches": r[8] or []
             })
         return results
+    except Exception as e:
+        print(f"❌ Error searching products: {str(e)}")
+        return []
     finally:
         conn.close()
 

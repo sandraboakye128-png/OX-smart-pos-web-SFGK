@@ -156,6 +156,7 @@
     let selectedProduct = null;
     let selectedBatch = null;
     let claimProductSearchTimeout = null;
+    let searchResultsCache = []; // Store search results for quick selection
 
     // ---------- Offline banner ----------
     function updateOfflineBanner() {
@@ -459,6 +460,7 @@
         document.getElementById('batchInfoDisplay').classList.add('hidden');
         selectedProduct = null;
         selectedBatch = null;
+        searchResultsCache = [];
         document.getElementById('claimModal').classList.remove('hidden');
     }
 
@@ -467,6 +469,7 @@
         editClaimId = null;
         selectedProduct = null;
         selectedBatch = null;
+        searchResultsCache = [];
     }
 
     // ---------- Display selected product ----------
@@ -487,21 +490,27 @@
         document.getElementById('claimSearchResults').classList.add('hidden');
         document.getElementById('claimBatchSelect').innerHTML = '<option value="">Select a batch...</option>';
         document.getElementById('batchInfoDisplay').classList.add('hidden');
+        searchResultsCache = [];
     }
 
-    // ---------- Search products ----------
+    // ---------- Search products (FIXED) ----------
     async function searchProducts(keyword) {
         if (!keyword || keyword.length < 2) {
             document.getElementById('claimSearchResults').classList.add('hidden');
+            searchResultsCache = [];
             return;
         }
 
         try {
             const res = await fetch(`/api/claims/search?q=${encodeURIComponent(keyword)}`);
             const data = await res.json();
-            if (data.success && data.products.length > 0) {
+            
+            // Store results in cache for quick selection
+            searchResultsCache = data.success ? (data.products || []) : [];
+            
+            if (data.success && searchResultsCache.length > 0) {
                 const results = document.getElementById('claimSearchResults');
-                results.innerHTML = data.products.map(p => `
+                results.innerHTML = searchResultsCache.map(p => `
                     <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b" onclick="selectProduct(${p.id})">
                         <div class="font-medium text-indigo-700">${escapeHtml(p.name)}</div>
                         <div class="text-xs text-gray-500">${escapeHtml(p.brand)} | ${escapeHtml(p.category)} | Stock: ${p.stock}</div>
@@ -510,34 +519,57 @@
                 results.classList.remove('hidden');
             } else {
                 document.getElementById('claimSearchResults').innerHTML = `
-                    <div class="px-3 py-2 text-gray-500">No products found</div>
+                    <div class="px-3 py-2 text-gray-500">${searchResultsCache.length === 0 ? 'No products found' : 'No products match your search'}</div>
                 `;
                 document.getElementById('claimSearchResults').classList.remove('hidden');
             }
         } catch (error) {
             console.error('Search error:', error);
-            document.getElementById('claimSearchResults').classList.add('hidden');
+            document.getElementById('claimSearchResults').innerHTML = `
+                <div class="px-3 py-2 text-red-500">Error searching products. Please try again.</div>
+            `;
+            document.getElementById('claimSearchResults').classList.remove('hidden');
         }
     }
 
-    // ---------- Select product ----------
+    // ---------- Select product (FIXED - uses cache) ----------
     function selectProduct(productId) {
-        // Fetch product details
-        fetch(`/api/claims/search?q=${document.getElementById('claimProductSearch').value}`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    const product = data.products.find(p => p.id === productId);
-                    if (product) {
-                        selectedProduct = product;
-                        displaySelectedProduct(product);
-                        document.getElementById('claimSearchResults').classList.add('hidden');
-                        // Load batches for this product
-                        loadBatchesForProduct(productId);
-                    }
+        // Try to find product in cached search results
+        const product = searchResultsCache.find(p => p.id === productId);
+        
+        if (product) {
+            selectedProduct = product;
+            displaySelectedProduct(product);
+            document.getElementById('claimSearchResults').classList.add('hidden');
+            // Load batches for this product
+            loadBatchesForProduct(productId);
+            return;
+        }
+        
+        // Fallback: fetch product details
+        fetchProductById(productId);
+    }
+
+    // ---------- Fetch product by ID (fallback) ----------
+    async function fetchProductById(productId) {
+        try {
+            const res = await fetch(`/api/claims/search?q=${encodeURIComponent(productId)}`);
+            const data = await res.json();
+            if (data.success && data.products) {
+                const product = data.products.find(p => p.id === productId);
+                if (product) {
+                    selectedProduct = product;
+                    displaySelectedProduct(product);
+                    document.getElementById('claimSearchResults').classList.add('hidden');
+                    loadBatchesForProduct(productId);
+                    return;
                 }
-            })
-            .catch(error => console.error('Error selecting product:', error));
+            }
+            alert('Product not found. Please try searching again.');
+        } catch (error) {
+            console.error('Error fetching product:', error);
+            alert('Error loading product details. Please try again.');
+        }
     }
 
     // ---------- Load batches for product ----------
