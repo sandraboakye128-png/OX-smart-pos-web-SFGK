@@ -517,6 +517,7 @@
 
         console.log('🔍 Opening batch selector for screen:', product.name);
         console.log('📦 Product stock:', product.stock);
+        console.log('📦 Product has batches?', product.batches ? product.batches.length : 0);
 
         // Create a cache key based on product name and brand
         const cacheKey = `batches_${product.name}_${product.brand}`;
@@ -529,21 +530,39 @@
             // ✅ SECOND: Try fetching by name
             try {
                 const url = `/api/sales/batches/by_name?name=${encodeURIComponent(product.name)}&brand=${encodeURIComponent(product.brand)}`;
+                console.log('🔍 Fetching from:', url);
                 const res = await fetch(url);
                 if (res.ok) {
                     batches = await res.json();
+                    console.log('📦 Fetched batches:', batches.length);
                     if (batches.length > 0) {
                         cacheData(cacheKey, batches);
                     }
+                } else {
+                    console.warn('⚠️ API returned error:', res.status);
                 }
             } catch (err) {
                 console.warn('⚠️ Error fetching batches:', err);
             }
             
-            // ✅ THIRD: Try from local cache
+            // ✅ THIRD: Try by product ID (fallback)
+            if (batches.length === 0 && product.id) {
+                try {
+                    const res = await fetch(`/api/sales/batches/${product.id}`);
+                    if (res.ok) {
+                        batches = await res.json();
+                        console.log('📦 Fetched by product ID:', batches.length);
+                    }
+                } catch (err) {
+                    console.warn('⚠️ Error fetching by ID:', err);
+                }
+            }
+            
+            // ✅ FOURTH: Try from local cache
             if (batches.length === 0) {
                 const cached = getCachedData(cacheKey);
                 if (cached && cached.length > 0) {
+                    console.log('📦 Using cached batches:', cached.length);
                     batches = cached;
                 }
             }
@@ -551,8 +570,9 @@
 
         // Filter only batches with remaining stock
         let filteredBatches = batches.filter(b => b.remaining_quantity > 0);
+        console.log(`📊 ${filteredBatches.length} batches with stock available`);
 
-        // ✅ If no batches but product has stock, create a fallback batch
+        // ✅ FIFTH: If no batches but product has stock, create a fallback batch
         if (filteredBatches.length === 0 && product.stock > 0) {
             console.warn('⚠️ No batches found, creating fallback batch from product stock');
             filteredBatches = [{
@@ -664,6 +684,17 @@
             });
             
             qtyInput.addEventListener('input', updateBatchTotals);
+            qtyInput.addEventListener('blur', function() {
+                let val = parseInt(this.value) || 0;
+                const maxStock = parseInt(this.max) || 0;
+                if (val > maxStock) {
+                    this.value = maxStock;
+                    val = maxStock;
+                } else if (val < 0) {
+                    this.value = 0;
+                }
+                updateBatchTotals();
+            });
         }
         
         // Show total available stock info with warnings
@@ -917,6 +948,7 @@
 
     // ---------- Payment Modal Functions ----------
     function selectPayment(method, event) {
+        console.log("✅ Payment method selected:", method);
         selectedPaymentMethod = method;
         selectedChequeNumber = null;
         document.getElementById('chequeInputContainer').classList.add('hidden');
@@ -932,6 +964,7 @@
     window.selectPayment = selectPayment;
 
     function showChequeInput(event) {
+        console.log("✅ Cheque payment selected");
         selectedPaymentMethod = 'cheque';
         document.getElementById('chequeInputContainer').classList.remove('hidden');
         
@@ -953,25 +986,92 @@
         });
     }
 
+    // ✅ FIXED: Improved date/time parsing for all browsers including iPhone
     function getSaleDateTime() {
         const dateVal = document.getElementById('saleDate').value;
         const timeVal = document.getElementById('saleTime').value;
+        
         if (dateVal && timeVal) {
-            let time24 = timeVal;
             try {
-                if (timeVal.toLowerCase().includes('am') || timeVal.toLowerCase().includes('pm')) {
-                    const parsed = new Date(`2000-01-01 ${timeVal}`);
-                    if (!isNaN(parsed)) time24 = parsed.toLocaleTimeString('en-GB', { hour12: false });
-                } else time24 = timeVal;
-                return `${dateVal} ${time24}`;
-            } catch(e) { console.error(e); }
+                // Parse the time more robustly
+                let hours = 0, minutes = 0;
+                let timeStr = timeVal.trim();
+                
+                // Check for AM/PM
+                const isPM = timeStr.toLowerCase().includes('pm');
+                const isAM = timeStr.toLowerCase().includes('am');
+                
+                // Remove AM/PM and trim
+                let cleanTime = timeStr.replace(/[ap]m\s*/gi, '').trim();
+                
+                // Handle 12-hour format like "2:30" or "02:30"
+                let parts = cleanTime.split(':');
+                if (parts.length === 2) {
+                    hours = parseInt(parts[0]);
+                    minutes = parseInt(parts[1]);
+                    
+                    // Convert 12-hour to 24-hour
+                    if (isPM && hours < 12) hours += 12;
+                    if (isAM && hours === 12) hours = 0;
+                    
+                    // Validate
+                    if (isNaN(hours) || isNaN(minutes) || hours > 23 || minutes > 59) {
+                        throw new Error('Invalid time');
+                    }
+                } else {
+                    // Try 24-hour format "14:30"
+                    if (parts.length === 2) {
+                        hours = parseInt(parts[0]);
+                        minutes = parseInt(parts[1]);
+                        if (isNaN(hours) || isNaN(minutes) || hours > 23 || minutes > 59) {
+                            throw new Error('Invalid time');
+                        }
+                    } else {
+                        throw new Error('Invalid time format');
+                    }
+                }
+                
+                // Format with leading zeros
+                const time24 = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+                const result = `${dateVal} ${time24}`;
+                console.log(`📅 Formatted date/time: ${result}`);
+                return result;
+                
+            } catch(e) {
+                console.warn('⚠️ Date/time parsing failed:', e.message);
+                // Try to use the date with current time as fallback
+                try {
+                    const now = new Date();
+                    const hours = now.getHours().toString().padStart(2, '0');
+                    const minutes = now.getMinutes().toString().padStart(2, '0');
+                    const fallback = `${dateVal} ${hours}:${minutes}:00`;
+                    console.log(`🔄 Using fallback date/time: ${fallback}`);
+                    return fallback;
+                } catch {
+                    // Ultimate fallback
+                    const now = new Date();
+                    const date = now.toISOString().split('T')[0];
+                    const time = now.toTimeString().split(' ')[0];
+                    console.log(`🔄 Using current date/time as fallback: ${date} ${time}`);
+                    return `${date} ${time}`;
+                }
+            }
         }
-        return null;
+        
+        // If no date/time selected, use current
+        const now = new Date();
+        const date = now.toISOString().split('T')[0];
+        const time = now.toTimeString().split(' ')[0];
+        console.log(`📅 No date/time selected, using current: ${date} ${time}`);
+        return `${date} ${time}`;
     }
 
     // ---------- Execute Sale ----------
     async function executeSaleWithPayment(paymentMethod, chequeNum) {
         if (!pendingSaleCallback) return;
+        
+        console.log("🚀 Executing sale with payment method:", paymentMethod);
+        console.log("🚀 Cheque number:", chequeNum);
         
         const cartItems = pendingSaleCallback.cart.map(item => ({ 
             product: item.product, 
@@ -994,6 +1094,9 @@
             cheque_number: chequeNum
         };
         
+        console.log("📅 Sale datetime from form:", pendingSaleCallback.saleDatetime);
+        console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
+        
         try {
             const res = await fetch('/api/sales/complete', {
                 method: 'POST',
@@ -1007,6 +1110,7 @@
             }
             
             const data = await res.json();
+            console.log("📥 Response data:", data);
             
             if (data.success) {
                 lastSale = data;
@@ -1022,6 +1126,7 @@
         } catch (error) {
             console.warn('Network error, saving sale offline:', error);
             
+            // Only save offline if actually offline
             if (!navigator.onLine) {
                 if (typeof savePendingSale === 'function') {
                     savePendingSale(payload);
@@ -1048,6 +1153,7 @@
                 
                 alert('You are offline. Sale saved locally and will be synced later.');
             } else {
+                // Online but error occurred
                 alert('❌ Sale failed: ' + error.message);
             }
         }
@@ -1064,6 +1170,7 @@
             return;
         }
         
+        // Check if there are fallback or faulty batches in cart
         const hasFallback = cart.some(item => item.isFallback);
         const hasFaulty = cart.some(item => item.hasFaulty);
         
@@ -1096,6 +1203,8 @@
 
     // ---------- Confirm Payment Button ----------
     document.getElementById('confirmPaymentBtn').addEventListener('click', async () => {
+        console.log("🔘 Confirm button clicked. Current payment method:", selectedPaymentMethod);
+        
         if (!selectedPaymentMethod) {
             alert('Please select a payment method.');
             return;
@@ -1103,6 +1212,7 @@
         
         if (selectedPaymentMethod === 'cheque') {
             const chequeNumber = document.getElementById('chequeNumber').value.trim();
+            console.log("💰 Cheque number entered:", chequeNumber);
             if (!chequeNumber) {
                 alert('Please enter cheque number.');
                 return;
@@ -1113,6 +1223,8 @@
         const paymentMethodToUse = selectedPaymentMethod;
         const chequeNumberToUse = selectedChequeNumber;
         
+        console.log("✅ Final payment data - Method:", paymentMethodToUse, "Cheque:", chequeNumberToUse);
+        
         closePaymentModal();
         
         const licenseData = await loadLicenseStatus();
@@ -1121,7 +1233,7 @@
         if (licenseData.licensed) {
             canProceed = true;
         } else if (licenseData.trial_active && licenseData.remaining_seconds > 0) {
-            await showLicenseModal(true);
+            const userChoice = await showLicenseModal(true);
             canProceed = true;
         } else {
             const activated = await showLicenseModal(false);
@@ -1137,6 +1249,7 @@
     });
 
     document.getElementById('cancelPaymentBtn').addEventListener('click', () => {
+        console.log("❌ Payment cancelled");
         closePaymentModal();
         pendingSaleCallback = null;
     });
@@ -1173,8 +1286,10 @@
     window.addEventListener('online', function() {
         loadProducts();
         loadLicenseStatus();
+        // Check for pending sales
         const pendingSales = localStorage.getItem('pending_sales');
         if (pendingSales) {
+            console.log('📤 Found pending sales to sync');
             document.getElementById('receiptPreview').innerHTML = `
                 <div class="bg-blue-100 border border-blue-400 text-blue-700 p-3 rounded">
                     <strong>🔄 Syncing pending sales...</strong><br>
@@ -1191,6 +1306,7 @@
         if (typeof updatePendingBadge === 'function') updatePendingBadge();
         setDefaultDateTime();
         
+        // Check for pending sales on load
         const pendingSales = localStorage.getItem('pending_sales');
         if (pendingSales) {
             console.log('📤 Found pending sales on load');

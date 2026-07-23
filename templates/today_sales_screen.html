@@ -193,7 +193,7 @@
         }
 
         function getPaymentBadge(paymentMethod, chequeNumber) {
-            if (paymentMethod === 'cash') {
+            if (paymentMethod === 'cash' || paymentMethod === '') {
                 return '<span class="inline-flex items-center bg-green-100 text-green-800 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs font-medium">💵 Cash</span>';
             } else if (paymentMethod === 'momo') {
                 return '<span class="inline-flex items-center bg-blue-100 text-blue-800 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs font-medium">📱 MoMo</span>';
@@ -397,7 +397,7 @@
             }
         }
 
-        // ---------- Render sales cards ----------
+        // ---------- Render sales cards (FIXED - handles all sales properly) ----------
         function renderSales(sales) {
             const container = document.getElementById('salesList');
             if (!sales || sales.length === 0) {
@@ -406,25 +406,47 @@
                 return;
             }
 
+            // ✅ FIXED: Better grouping with validation
             const saleMap = new Map();
             for (const sale of sales) {
+                if (!sale.sale_id) {
+                    console.warn('Sale missing sale_id:', sale);
+                    continue;
+                }
+                
+                // Initialize sale group if not exists
                 if (!saleMap.has(sale.sale_id)) {
                     saleMap.set(sale.sale_id, {
+                        sale_id: sale.sale_id,
                         discount: sale.discount || 0,
                         total: sale.total || 0,
-                        date: sale.sale_date,
+                        date: sale.sale_date || sale.date,
                         netProfit: sale.net_profit || 0,
                         payment_method: sale.payment_method || 'unknown',
-                        cheque_number: sale.cheque_number,
+                        cheque_number: sale.cheque_number || null,
                         username: sale.username || 'Unknown',
                         items: []
                     });
                 }
+                
+                // Add item to the sale group
                 saleMap.get(sale.sale_id).items.push(sale);
             }
 
+            console.log('✅ Screen Sale Map size:', saleMap.size);
+            console.log('✅ Screen Sale IDs:', [...saleMap.keys()]);
+
             let html = '';
+            let saleCount = 0;
+            
             for (const [saleId, saleGroup] of saleMap) {
+                // Skip if no items
+                if (!saleGroup.items || saleGroup.items.length === 0) {
+                    console.warn('⚠️ Sale has no items:', saleId);
+                    continue;
+                }
+
+                saleCount++;
                 const paymentBadge = getPaymentBadge(saleGroup.payment_method, saleGroup.cheque_number);
 
                 const itemsHtml = saleGroup.items.map(item => {
@@ -462,9 +484,13 @@
                     </div>
                 `;
             }
+            
             container.innerHTML = html;
+            
+            // Update summary with all sales
             updateSummary(sales);
 
+            // Attach reverse event listeners
             document.querySelectorAll('.reverse-sale-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const saleId = parseInt(btn.getAttribute('data-sale-id'));
@@ -472,27 +498,35 @@
                     openReverseModal(saleId, saleItems);
                 });
             });
+            
+            console.log(`✅ Rendered ${saleCount} screen sales with ${sales.length} total items`);
         }
 
-        // ---------- Update summary – nicely formatted ----------
+        // ---------- Update summary (FIXED - handles all payment methods) ----------
         function updateSummary(sales) {
             const seenSales = new Set();
             let totalSales = 0, totalDiscount = 0, totalProfit = 0, totalItems = 0;
             let cashTotal = 0, momoTotal = 0, chequeTotal = 0;
 
             for (const sale of sales) {
+                // Use sale_id to track unique sales
                 if (!seenSales.has(sale.sale_id)) {
                     totalSales += sale.total || 0;
                     totalDiscount += sale.discount || 0;
                     totalProfit += sale.net_profit || 0;
                     seenSales.add(sale.sale_id);
 
-                    if (sale.payment_method === 'cash') {
+                    // Track payment methods (FIXED)
+                    const method = (sale.payment_method || 'cash').toLowerCase();
+                    if (method === 'cash' || method === '') {
                         cashTotal += sale.total || 0;
-                    } else if (sale.payment_method === 'momo') {
+                    } else if (method === 'momo') {
                         momoTotal += sale.total || 0;
-                    } else if (sale.payment_method === 'cheque') {
+                    } else if (method === 'cheque') {
                         chequeTotal += sale.total || 0;
+                    } else {
+                        // Default to cash if unknown
+                        cashTotal += sale.total || 0;
                     }
                 }
                 totalItems += sale.quantity || 0;
@@ -544,7 +578,7 @@
             `;
         }
 
-        // ---------- PDF export – exports ONLY filtered data ----------
+        // ---------- PDF export – exports ALL filtered data (FIXED) ----------
         async function exportPDF() {
             if (!navigator.onLine) {
                 alert('PDF export requires internet. Please connect and try again.');
@@ -553,7 +587,7 @@
             
             const dataToExport = currentFilteredData;
             
-            if (!dataToExport.length) {
+            if (!dataToExport || dataToExport.length === 0) {
                 alert('No data to export. Please adjust your filters.');
                 return;
             }
@@ -590,13 +624,15 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `Screen_Sales_${periodText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 19)}.pdf`;
+                    const fileName = `Screen_Sales_${periodText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 19)}.pdf`;
+                    a.download = fileName;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
                     window.URL.revokeObjectURL(url);
                 } else {
-                    alert('Failed to generate PDF');
+                    const errorData = await response.json();
+                    alert('Failed to generate PDF: ' + (errorData.error || 'Unknown error'));
                 }
             } catch (error) {
                 alert('PDF generation failed. Please check your internet connection.');

@@ -984,20 +984,84 @@
         });
     }
 
+    // ✅ FIXED: Improved date/time parsing for all browsers including iPhone
     function getSaleDateTime() {
         const dateVal = document.getElementById('saleDate').value;
         const timeVal = document.getElementById('saleTime').value;
+        
         if (dateVal && timeVal) {
-            let time24 = timeVal;
             try {
-                if (timeVal.toLowerCase().includes('am') || timeVal.toLowerCase().includes('pm')) {
-                    const parsed = new Date(`2000-01-01 ${timeVal}`);
-                    if (!isNaN(parsed)) time24 = parsed.toLocaleTimeString('en-GB', { hour12: false });
-                } else time24 = timeVal;
-                return `${dateVal} ${time24}`;
-            } catch(e) { console.error(e); }
+                // Parse the time more robustly
+                let hours = 0, minutes = 0;
+                let timeStr = timeVal.trim();
+                
+                // Check for AM/PM
+                const isPM = timeStr.toLowerCase().includes('pm');
+                const isAM = timeStr.toLowerCase().includes('am');
+                
+                // Remove AM/PM and trim
+                let cleanTime = timeStr.replace(/[ap]m\s*/gi, '').trim();
+                
+                // Handle 12-hour format like "2:30" or "02:30"
+                let parts = cleanTime.split(':');
+                if (parts.length === 2) {
+                    hours = parseInt(parts[0]);
+                    minutes = parseInt(parts[1]);
+                    
+                    // Convert 12-hour to 24-hour
+                    if (isPM && hours < 12) hours += 12;
+                    if (isAM && hours === 12) hours = 0;
+                    
+                    // Validate
+                    if (isNaN(hours) || isNaN(minutes) || hours > 23 || minutes > 59) {
+                        throw new Error('Invalid time');
+                    }
+                } else {
+                    // Try 24-hour format "14:30"
+                    if (parts.length === 2) {
+                        hours = parseInt(parts[0]);
+                        minutes = parseInt(parts[1]);
+                        if (isNaN(hours) || isNaN(minutes) || hours > 23 || minutes > 59) {
+                            throw new Error('Invalid time');
+                        }
+                    } else {
+                        throw new Error('Invalid time format');
+                    }
+                }
+                
+                // Format with leading zeros
+                const time24 = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+                const result = `${dateVal} ${time24}`;
+                console.log(`📅 Formatted date/time: ${result}`);
+                return result;
+                
+            } catch(e) {
+                console.warn('⚠️ Date/time parsing failed:', e.message);
+                // Try to use the date with current time as fallback
+                try {
+                    const now = new Date();
+                    const hours = now.getHours().toString().padStart(2, '0');
+                    const minutes = now.getMinutes().toString().padStart(2, '0');
+                    const fallback = `${dateVal} ${hours}:${minutes}:00`;
+                    console.log(`🔄 Using fallback date/time: ${fallback}`);
+                    return fallback;
+                } catch {
+                    // Ultimate fallback
+                    const now = new Date();
+                    const date = now.toISOString().split('T')[0];
+                    const time = now.toTimeString().split(' ')[0];
+                    console.log(`🔄 Using current date/time as fallback: ${date} ${time}`);
+                    return `${date} ${time}`;
+                }
+            }
         }
-        return null;
+        
+        // If no date/time selected, use current
+        const now = new Date();
+        const date = now.toISOString().split('T')[0];
+        const time = now.toTimeString().split(' ')[0];
+        console.log(`📅 No date/time selected, using current: ${date} ${time}`);
+        return `${date} ${time}`;
     }
 
     // ---------- Execute Sale ----------
@@ -1028,6 +1092,7 @@
             cheque_number: chequeNum
         };
         
+        console.log("📅 Sale datetime from form:", pendingSaleCallback.saleDatetime);
         console.log("📦 Sending payload:", JSON.stringify(payload, null, 2));
         
         try {

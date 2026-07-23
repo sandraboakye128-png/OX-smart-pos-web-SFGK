@@ -207,7 +207,7 @@ def bulk_update_product_stocks(cursor, product_ids):
         update_product_stock(cursor, product_id)
 
 # ---------------------------
-# MAIN SALE CREATION FUNCTION (WITH FAULTY BATCH HANDLING)
+# MAIN SALE CREATION FUNCTION (FIXED: DATE HANDLING)
 # ---------------------------
 @handle_timeout
 def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, payment_method='cash', cheque_number=None, user_id=None):
@@ -219,15 +219,74 @@ def create_multi_sale(cart_items, sale_datetime=None, selected_batches=None, pay
     cursor = conn.cursor()
     
     try:
-        # 1. Format sale date
+        # ✅ FIXED: Better date handling with multiple formats
+        sale_date_str = None
+        
         if sale_datetime:
-            try:
-                sale_date_obj = datetime.strptime(sale_datetime, "%Y-%m-%d %H:%M:%S")
-                sale_date_str = sale_date_obj.strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Try multiple date formats
+            date_formats = [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%dT%H:%M",
+                "%m/%d/%Y %H:%M:%S",
+                "%m/%d/%Y %H:%M",
+                "%d/%m/%Y %H:%M:%S",
+                "%d/%m/%Y %H:%M",
+            ]
+            
+            parsed = False
+            for fmt in date_formats:
+                try:
+                    sale_date_obj = datetime.strptime(sale_datetime, fmt)
+                    sale_date_str = sale_date_obj.strftime("%Y-%m-%d %H:%M:%S")
+                    parsed = True
+                    print(f"✅ Date parsed successfully: {sale_datetime} -> {sale_date_str}")
+                    break
+                except ValueError:
+                    continue
+            
+            if not parsed:
+                # If all parsing fails, try to extract date and time separately
+                try:
+                    # Try to parse as ISO format
+                    sale_date_obj = datetime.fromisoformat(sale_datetime.replace('Z', '+00:00'))
+                    sale_date_str = sale_date_obj.strftime("%Y-%m-%d %H:%M:%S")
+                    parsed = True
+                    print(f"✅ ISO date parsed: {sale_datetime} -> {sale_date_str}")
+                except:
+                    pass
+            
+            if not parsed:
+                # Last resort: use the string as-is if it looks like a date
+                if len(sale_datetime) >= 10:
+                    # Try to extract date part
+                    date_part = sale_datetime[:10]
+                    try:
+                        sale_date_obj = datetime.strptime(date_part, "%Y-%m-%d")
+                        # Use current time but with the selected date
+                        now = datetime.now()
+                        sale_date_str = sale_date_obj.replace(
+                            hour=now.hour,
+                            minute=now.minute,
+                            second=now.second
+                        ).strftime("%Y-%m-%d %H:%M:%S")
+                        print(f"✅ Extracted date: {date_part} -> {sale_date_str}")
+                    except:
+                        sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        print(f"❌ Using current date as fallback: {sale_date_str}")
+                else:
+                    sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    print(f"❌ Using current date as fallback: {sale_date_str}")
         else:
             sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"✅ No date provided, using current date: {sale_date_str}")
+        
+        # Ensure we have a valid date string
+        if not sale_date_str:
+            sale_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        print(f"📅 Final sale date: {sale_date_str}")
         
         # 2. Insert sale record with payment fields AND user_id
         cursor.execute("""
