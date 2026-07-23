@@ -150,21 +150,47 @@ def update_product(batch_id, name, brand, category, quantity, cost_price, discou
     finally:
         conn.close()
 
-# ---------------- GET ALL PRODUCTS (WITH BATCH AND CLAIM INFO) ----------------
+# ===================== OPTIMIZED GET ALL PRODUCTS =====================
 def get_all_products():
     """
     Get all products with their batches and claim information.
-    Includes is_faulty and claimed_quantity for each batch.
+    OPTIMIZED: Uses a single query with JOIN instead of per-product subqueries.
     """
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        # Single query to get all products, batches, and claims
         cursor.execute("""
-            SELECT DISTINCT p.id, p.name, p.brand, p.cost_price, p.selling_price, p.stock, p.category, p.discount
+            SELECT 
+                p.id as product_id,
+                p.name,
+                p.brand,
+                p.cost_price,
+                p.selling_price,
+                p.stock,
+                p.category,
+                p.discount,
+                pb.id as batch_id,
+                pb.quantity as batch_quantity,
+                pb.remaining_quantity,
+                pb.cost_price as batch_cost,
+                pb.selling_price as batch_selling,
+                pb.discount as batch_discount,
+                pb.date as batch_date,
+                COALESCE(pb.is_faulty, FALSE) as is_faulty,
+                COALESCE(pb.claimed_quantity, 0) as claimed_quantity,
+                COALESCE(c.claim_count, 0) as active_claims_qty
             FROM products p
+            LEFT JOIN purchase_batches pb ON pb.product_id = p.id AND pb.remaining_quantity > 0
+            LEFT JOIN (
+                SELECT batch_id, SUM(quantity) as claim_count
+                FROM claims 
+                WHERE status = 'active'
+                GROUP BY batch_id
+            ) c ON c.batch_id = pb.id
             WHERE EXISTS (
-                SELECT 1 FROM purchase_batches pb 
-                WHERE pb.product_id = p.id AND pb.remaining_quantity > 0
+                SELECT 1 FROM purchase_batches pb2 
+                WHERE pb2.product_id = p.id AND pb2.remaining_quantity > 0
             )
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 
@@ -172,73 +198,52 @@ def get_all_products():
                 AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
                 AND dp.source = 'product'
             )
-            ORDER BY p.id ASC
+            ORDER BY p.id ASC, pb.date ASC
         """)
+        
         rows = cursor.fetchall()
         
-        products = []
+        # Group results by product
+        products_dict = {}
         for r in rows:
             product_id = r[0]
+            if product_id not in products_dict:
+                products_dict[product_id] = {
+                    "product_id": product_id,
+                    "name": r[1] or "-",
+                    "brand": r[2] or "-",
+                    "cost_price": r[3] or 0.0,
+                    "selling_price": r[4] or 0.0,
+                    "stock": r[5] or 0,
+                    "category": r[6] or "-",
+                    "discount": r[7] or 0.0,
+                    "batches": [],
+                    "total_claimed": 0
+                }
             
-            # Get batches with claim info for this product
-            cursor.execute("""
-                SELECT 
-                    pb.id,
-                    pb.quantity,
-                    pb.remaining_quantity,
-                    pb.cost_price,
-                    pb.selling_price,
-                    pb.discount,
-                    pb.date,
-                    COALESCE(pb.is_faulty, FALSE) as is_faulty,
-                    COALESCE(pb.claimed_quantity, 0) as claimed_quantity,
-                    COALESCE((
-                        SELECT SUM(quantity) 
-                        FROM claims 
-                        WHERE batch_id = pb.id AND status = 'active'
-                    ), 0) as active_claims_qty
-                FROM purchase_batches pb
-                WHERE pb.product_id = %s AND pb.remaining_quantity > 0
-                ORDER BY pb.date ASC
-            """, (product_id,))
-            batch_rows = cursor.fetchall()
-            
-            batches = []
-            total_claimed = 0
-            for b in batch_rows:
-                claimed = b[9] if len(b) > 9 else 0  # active_claims_qty
-                is_faulty = b[7] if len(b) > 7 else False
-                claimed_qty = b[8] if len(b) > 8 else 0
-                total_claimed += claimed
-                
-                batches.append({
-                    "batch_id": b[0],
-                    "quantity": int(b[1] or 0),
-                    "remaining_quantity": int(b[2] or 0),
-                    "cost_price": float(b[3] or 0),
-                    "selling_price": float(b[4] or 0),
-                    "discount": float(b[5] or 0),
-                    "date": b[6],
-                    "is_faulty": is_faulty or False,
-                    "claimed_quantity": claimed,
-                    "active_claims": claimed
-                })
-            
-            products.append({
-                "product_id": r[0],
-                "name": r[1] or "-",
-                "brand": r[2] or "-",
-                "cost_price": r[3] or 0.0,
-                "selling_price": r[4] or 0.0,
-                "stock": r[5] or 0,
-                "category": r[6] or "-",
-                "discount": r[7] or 0.0,
-                "batches": batches,
-                "total_claimed": total_claimed
-            })
-        return products
+            # Add batch if it exists
+            if r[8] is not None:  # batch_id exists
+                active_claims = r[17] or 0
+                batch = {
+                    "batch_id": r[8],
+                    "quantity": int(r[9] or 0),
+                    "remaining_quantity": int(r[10] or 0),
+                    "cost_price": float(r[11] or 0),
+                    "selling_price": float(r[12] or 0),
+                    "discount": float(r[13] or 0),
+                    "date": r[14],
+                    "is_faulty": r[15] or False,
+                    "claimed_quantity": r[16] or 0,
+                    "active_claims": active_claims
+                }
+                products_dict[product_id]["batches"].append(batch)
+                products_dict[product_id]["total_claimed"] += active_claims
+        
+        return list(products_dict.values())
     except Exception as e:
         print(f"❌ Error in get_all_products: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
     finally:
         conn.close()

@@ -1095,52 +1095,124 @@ def api_suggest_source():
 @app.route('/api/products', methods=['GET'])
 @login_required
 def api_get_products():
+    """Get products with batches - OPTIMIZED with single query"""
     category = request.args.get('category')
     exclude_category = request.args.get('exclude_category')
-    purchases = get_all_purchases()
-    all_products = get_all_products_service()
-    id_map = {(prod['name'], prod['brand']): prod['product_id'] for prod in all_products}
-    products_dict = {}
-    total_batches = 0
-    for p in purchases:
-        total_batches += 1
-        key = (p['name'], p['brand'])
-        if key not in products_dict:
-            prod_category = p.get('category')
-            if category and prod_category != category:
-                continue
-            if exclude_category and prod_category == exclude_category:
-                continue
-            products_dict[key] = {
-                'name': p['name'],
-                'brand': p['brand'],
-                'category': prod_category,
-                'cost_price': p['cost_price'],
-                'selling_price': p['selling_price'],
-                'discount': p['discount'],
-                'stock': 0,
-                'batches': [],
-                'product_id': id_map.get(key)
-            }
-        if key in products_dict:
-            products_dict[key]['stock'] += p['remaining_quantity']
-            products_dict[key]['batches'].append({
-                'batch_id': p['batch_id'],
-                'quantity': p['quantity'],
-                'remaining_quantity': p['remaining_quantity'],
-                'cost_price': p['cost_price'],
-                'selling_price': p['selling_price'],
-                'discount': p['discount'],
-                'date': p['date'],
-                'is_faulty': p.get('is_faulty', False),
-                'claimed_quantity': p.get('claimed_quantity', 0)
-            })
-    result = list(products_dict.values())
-    return jsonify({
-        'products': result,
-        'total_products': len(result),
-        'total_batches': total_batches
-    })
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Build the WHERE clause
+        where_clauses = []
+        params = []
+        
+        if category:
+            where_clauses.append("p.category = %s")
+            params.append(category)
+        if exclude_category:
+            where_clauses.append("p.category != %s")
+            params.append(exclude_category)
+        
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+        
+        # ✅ SINGLE OPTIMIZED QUERY - joins products, batches, and claims
+        query = f"""
+            SELECT 
+                p.id as product_id,
+                p.name,
+                p.brand,
+                p.cost_price,
+                p.selling_price,
+                p.stock,
+                p.category,
+                p.discount,
+                pb.id as batch_id,
+                pb.quantity as batch_quantity,
+                pb.remaining_quantity,
+                pb.cost_price as batch_cost,
+                pb.selling_price as batch_selling,
+                pb.discount as batch_discount,
+                pb.date as batch_date,
+                COALESCE(pb.is_faulty, FALSE) as is_faulty,
+                COALESCE(pb.claimed_quantity, 0) as claimed_quantity,
+                COALESCE(c.claim_count, 0) as active_claims_qty
+            FROM products p
+            LEFT JOIN purchase_batches pb ON pb.product_id = p.id AND pb.remaining_quantity > 0
+            LEFT JOIN (
+                SELECT batch_id, SUM(quantity) as claim_count
+                FROM claims 
+                WHERE status = 'active'
+                GROUP BY batch_id
+            ) c ON c.batch_id = pb.id
+            WHERE EXISTS (
+                SELECT 1 FROM purchase_batches pb2 
+                WHERE pb2.product_id = p.id AND pb2.remaining_quantity > 0
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                AND dp.source = 'product'
+            )
+            {where_sql}
+            ORDER BY p.name ASC, pb.date ASC
+        """
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        # Group results by product
+        products_dict = {}
+        total_batches = 0
+        
+        for r in rows:
+            product_id = r[0]
+            if product_id not in products_dict:
+                products_dict[product_id] = {
+                    'product_id': product_id,
+                    'name': r[1] or "-",
+                    'brand': r[2] or "-",
+                    'cost_price': r[3] or 0.0,
+                    'selling_price': r[4] or 0.0,
+                    'stock': r[5] or 0,
+                    'category': r[6] or "-",
+                    'discount': r[7] or 0.0,
+                    'batches': []
+                }
+            
+            # Add batch if it exists
+            if r[8] is not None:  # batch_id exists
+                total_batches += 1
+                batch = {
+                    'batch_id': r[8],
+                    'quantity': int(r[9] or 0),
+                    'remaining_quantity': int(r[10] or 0),
+                    'cost_price': float(r[11] or 0),
+                    'selling_price': float(r[12] or 0),
+                    'discount': float(r[13] or 0),
+                    'date': r[14],
+                    'is_faulty': r[15] or False,
+                    'claimed_quantity': r[16] or 0
+                }
+                products_dict[product_id]['batches'].append(batch)
+        
+        result = list(products_dict.values())
+        
+        return jsonify({
+            'products': result,
+            'total_products': len(result),
+            'total_batches': total_batches
+        })
+        
+    except Exception as e:
+        print(f"❌ Error in api_get_products: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
 
 @app.route('/api/products', methods=['POST'])
 @login_required
@@ -2016,6 +2088,7 @@ def api_analytics_top_products():
 
 # ===================== ARCHIVE API =====================
 # ===================== ARCHIVE API (WITH CLAIMS) =====================
+# ===================== ARCHIVE API (WITH CLAIMS - FIXED) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
@@ -2052,36 +2125,39 @@ def api_archive():
         for r in active_rows:
             product_id = r[0]
             
-            # ✅ Get claims for this product
-            cursor.execute("""
-                SELECT 
-                    c.id,
-                    c.batch_id,
-                    c.issue_type,
-                    c.description,
-                    c.quantity,
-                    c.status,
-                    c.created_at,
-                    pb.batch_id as batch_identifier
-                FROM claims c
-                LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
-                WHERE c.product_id = %s AND c.status = 'active'
-                ORDER BY c.created_at DESC
-            """, (product_id,))
-            claims = cursor.fetchall()
-            
+            # ✅ Get claims for this product (with error handling)
             claims_data = []
-            for claim in claims:
-                claims_data.append({
-                    "claim_id": claim[0],
-                    "batch_id": claim[1],
-                    "issue_type": claim[2],
-                    "description": claim[3],
-                    "quantity": claim[4],
-                    "status": claim[5],
-                    "created_at": claim[6],
-                    "batch_identifier": claim[7]
-                })
+            try:
+                cursor.execute("""
+                    SELECT 
+                        c.id,
+                        c.batch_id,
+                        c.issue_type,
+                        c.description,
+                        c.quantity,
+                        c.status,
+                        c.created_at,
+                        pb.batch_id as batch_identifier
+                    FROM claims c
+                    LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
+                    WHERE c.product_id = %s AND c.status = 'active'
+                    ORDER BY c.created_at DESC
+                """, (product_id,))
+                claims = cursor.fetchall()
+                for claim in claims:
+                    claims_data.append({
+                        "claim_id": claim[0],
+                        "batch_id": claim[1],
+                        "issue_type": claim[2],
+                        "description": claim[3],
+                        "quantity": claim[4],
+                        "status": claim[5],
+                        "created_at": claim[6],
+                        "batch_identifier": claim[7]
+                    })
+            except Exception as claim_err:
+                print(f"⚠️ Could not fetch claims for product {product_id}: {str(claim_err)}")
+                # Continue without claims
             
             active_items.append({
                 'id': None,
@@ -2126,30 +2202,33 @@ def api_archive():
             claims_data = []
             product_id = r[13] if len(r) > 13 else None
             if product_id:
-                cursor.execute("""
-                    SELECT 
-                        c.id,
-                        c.batch_id,
-                        c.issue_type,
-                        c.description,
-                        c.quantity,
-                        c.status,
-                        c.created_at
-                    FROM claims c
-                    WHERE c.product_id = %s
-                    ORDER BY c.created_at DESC
-                """, (product_id,))
-                claims = cursor.fetchall()
-                for claim in claims:
-                    claims_data.append({
-                        "claim_id": claim[0],
-                        "batch_id": claim[1],
-                        "issue_type": claim[2],
-                        "description": claim[3],
-                        "quantity": claim[4],
-                        "status": claim[5],
-                        "created_at": claim[6]
-                    })
+                try:
+                    cursor.execute("""
+                        SELECT 
+                            c.id,
+                            c.batch_id,
+                            c.issue_type,
+                            c.description,
+                            c.quantity,
+                            c.status,
+                            c.created_at
+                        FROM claims c
+                        WHERE c.product_id = %s
+                        ORDER BY c.created_at DESC
+                    """, (product_id,))
+                    claims = cursor.fetchall()
+                    for claim in claims:
+                        claims_data.append({
+                            "claim_id": claim[0],
+                            "batch_id": claim[1],
+                            "issue_type": claim[2],
+                            "description": claim[3],
+                            "quantity": claim[4],
+                            "status": claim[5],
+                            "created_at": claim[6]
+                        })
+                except Exception as claim_err:
+                    print(f"⚠️ Could not fetch claims for deleted product {product_id}: {str(claim_err)}")
             
             deleted_items.append({
                 'id': r[0],

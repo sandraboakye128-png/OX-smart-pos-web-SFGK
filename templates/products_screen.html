@@ -31,7 +31,7 @@
 
 <!-- Modal: View Batches -->
 <div id="batchModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
-    <div class="bg-white rounded-xl shadow-xl w-11/12 max-w-3xl max-h-[90vh] overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-xl w-11/12 max-w-4xl max-h-[90vh] overflow-y-auto">
         <div class="sticky top-0 bg-white p-4 border-b flex justify-between items-center">
             <h3 class="text-xl font-bold" id="modalTitle">Batches</h3>
             <button onclick="closeBatchModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
@@ -129,41 +129,154 @@
 
     // Helper: Navigate to purchase page with batch ID
     function navigateToPurchase(batchId) {
-        // Open the purchase page in a new tab with the batch ID as a parameter
         const url = `/purchases/screens?edit_batch=${batchId}`;
         window.open(url, '_blank');
     }
 
-    // Helper: View claims for a batch
-    async function viewBatchClaims(batchId, productName) {
+    // Helper: View claims for a batch with professional display
+    async function viewBatchClaims(batchId, productName, batchData) {
         try {
             const res = await fetch('/api/claims');
             const data = await res.json();
             if (data.success) {
-                const claims = data.claims.filter(c => c.batch_id === batchId && c.status === 'active');
+                const claims = data.claims.filter(c => c.batch_id === batchId);
                 const container = document.getElementById('claimList');
                 const modal = document.getElementById('claimModal');
                 
-                if (claims.length === 0) {
-                    container.innerHTML = '<div class="text-gray-400 text-center py-4">No active claims for this batch.</div>';
-                } else {
-                    container.innerHTML = claims.map(claim => `
-                        <div class="border rounded-lg p-3 bg-red-50">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <span class="text-xs font-semibold text-red-600">⚠️ ${escapeHtml(claim.issue_type)}</span>
-                                    <p class="text-sm font-bold">${escapeHtml(claim.product_name)}</p>
-                                    <p class="text-sm text-gray-600">Quantity: ${claim.quantity} | Remaining Good: ${claim.remaining_good}</p>
-                                    ${claim.description ? `<p class="text-xs text-gray-500 mt-1">${escapeHtml(claim.description)}</p>` : ''}
-                                    <p class="text-xs text-gray-400">Created: ${new Date(claim.created_at).toLocaleString()}</p>
-                                </div>
-                                <span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">${claim.status}</span>
+                // Calculate totals
+                const totalClaimed = claims.reduce((sum, c) => sum + c.quantity, 0);
+                const activeClaims = claims.filter(c => c.status === 'active');
+                const resolvedClaims = claims.filter(c => c.status === 'resolved');
+                const totalActive = activeClaims.reduce((sum, c) => sum + c.quantity, 0);
+                const totalResolved = resolvedClaims.reduce((sum, c) => sum + c.quantity, 0);
+                
+                // Get batch stock info
+                const batchRemaining = batchData ? batchData.remaining_quantity : 0;
+                const batchOriginal = batchData ? batchData.quantity : 0;
+                const availableGood = batchRemaining - totalActive;
+                
+                let html = `
+                    <div class="bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="text-center">
+                                <p class="text-xs text-gray-500">Total Claimed</p>
+                                <p class="text-xl font-bold text-red-600">${totalClaimed}</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-xs text-gray-500">Active Claims</p>
+                                <p class="text-xl font-bold text-orange-500">${totalActive}</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-xs text-gray-500">Resolved</p>
+                                <p class="text-xl font-bold text-green-600">${totalResolved}</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-xs text-gray-500">Good Stock Remaining</p>
+                                <p class="text-xl font-bold text-blue-600">${Math.max(availableGood, 0)}</p>
                             </div>
                         </div>
-                    `).join('');
+                    </div>
+                `;
+                
+                if (claims.length === 0) {
+                    html += `
+                        <div class="text-center text-gray-400 py-8">
+                            <i class="fas fa-check-circle text-green-500 text-4xl mb-2"></i>
+                            <p>No claims have been filed for this batch.</p>
+                            <p class="text-xs text-gray-400 mt-1">All ${batchRemaining} units are available as good stock.</p>
+                        </div>
+                    `;
+                } else {
+                    // Sort claims: active first, then resolved
+                    const sortedClaims = [...claims].sort((a, b) => {
+                        if (a.status === 'active' && b.status !== 'active') return -1;
+                        if (a.status !== 'active' && b.status === 'active') return 1;
+                        return new Date(b.created_at) - new Date(a.created_at);
+                    });
+                    
+                    html += `<div class="space-y-3">`;
+                    
+                    // Active Claims Section
+                    const activeList = sortedClaims.filter(c => c.status === 'active');
+                    if (activeList.length > 0) {
+                        html += `
+                            <div class="border-l-4 border-red-500 pl-3">
+                                <p class="text-sm font-semibold text-red-600 mb-2">⚠️ Active Claims (${activeList.length})</p>
+                        `;
+                        activeList.forEach(claim => {
+                            html += `
+                                <div class="bg-red-50 rounded-lg p-3 mb-2 border border-red-200">
+                                    <div class="flex justify-between items-start">
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded">#${claim.id}</span>
+                                                <span class="text-xs font-semibold bg-red-100 text-red-800 px-2 py-0.5 rounded">${escapeHtml(claim.issue_type)}</span>
+                                                <span class="text-xs text-red-500 font-bold">${claim.quantity} units</span>
+                                            </div>
+                                            ${claim.description ? `<p class="text-sm text-gray-600 mt-1">📝 ${escapeHtml(claim.description)}</p>` : ''}
+                                            <div class="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                                                <span>📅 ${new Date(claim.created_at).toLocaleString()}</span>
+                                                <span>📦 Remaining Good: ${claim.remaining_good}</span>
+                                            </div>
+                                        </div>
+                                        <span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded font-medium">Active</span>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        html += `</div>`;
+                    }
+                    
+                    // Resolved Claims Section
+                    const resolvedList = sortedClaims.filter(c => c.status === 'resolved');
+                    if (resolvedList.length > 0) {
+                        html += `
+                            <div class="border-l-4 border-green-500 pl-3 mt-4">
+                                <p class="text-sm font-semibold text-green-600 mb-2">✅ Resolved Claims (${resolvedList.length})</p>
+                        `;
+                        resolvedList.forEach(claim => {
+                            html += `
+                                <div class="bg-green-50 rounded-lg p-3 mb-2 border border-green-200">
+                                    <div class="flex justify-between items-start">
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded">#${claim.id}</span>
+                                                <span class="text-xs font-semibold bg-green-100 text-green-800 px-2 py-0.5 rounded">${escapeHtml(claim.issue_type)}</span>
+                                                <span class="text-xs text-green-500 font-bold">${claim.quantity} units</span>
+                                            </div>
+                                            ${claim.description ? `<p class="text-sm text-gray-600 mt-1">📝 ${escapeHtml(claim.description)}</p>` : ''}
+                                            <div class="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                                                <span>📅 ${new Date(claim.created_at).toLocaleString()}</span>
+                                                <span>✅ Resolved</span>
+                                            </div>
+                                        </div>
+                                        <span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded font-medium">Resolved</span>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        html += `</div>`;
+                    }
+                    
+                    // Summary footer
+                    html += `
+                        <div class="bg-gray-50 rounded-lg p-3 mt-3 border border-gray-200">
+                            <div class="flex justify-between items-center text-sm">
+                                <span class="text-gray-600">📊 Batch Summary:</span>
+                                <span class="font-medium">
+                                    ${batchOriginal} total | 
+                                    <span class="text-red-500">${totalActive} claimed</span> | 
+                                    <span class="text-green-600">${totalResolved} resolved</span> | 
+                                    <span class="text-blue-600">${Math.max(availableGood, 0)} good</span>
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                    html += `</div>`;
                 }
                 
-                document.getElementById('claimModalTitle').textContent = `Claims for ${productName} - Batch #${batchId}`;
+                container.innerHTML = html;
+                document.getElementById('claimModalTitle').textContent = `📋 Claims for ${productName} - Batch #${batchId}`;
                 modal.classList.remove('hidden');
             }
         } catch (error) {
@@ -198,13 +311,11 @@
         let fromCache = false;
 
         try {
-            // Fetch only screen products
             const res = await fetch('/api/products?category=Screen');
             if (!res.ok) throw new Error('Network error');
             const data = await res.json();
             productsData = data.products;
             summaryData = { total_products: data.total_products, total_batches: data.total_batches };
-            // Cache the data
             try {
                 localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ products: productsData, summary: summaryData, timestamp: Date.now() }));
             } catch (e) {}
@@ -226,7 +337,6 @@
         document.getElementById('summary').innerHTML = `Total Screen Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}${fromCache ? ' (cached)' : ''}`;
         applySearch();
         
-        // Auto-open batches if coming from dashboard
         autoOpenBatches();
     }
 
@@ -235,7 +345,6 @@
         if (sessionStorage.getItem('autoOpenBatches') === 'true') {
             const productName = sessionStorage.getItem('autoOpenProduct');
             if (productName) {
-                // Wait for products to render
                 setTimeout(function() {
                     const products = document.querySelectorAll('#productsList .bg-white');
                     for (const product of products) {
@@ -248,7 +357,6 @@
                             }
                         }
                     }
-                    // Clear the session storage
                     sessionStorage.removeItem('autoOpenBatches');
                     sessionStorage.removeItem('autoOpenProduct');
                 }, 800);
@@ -270,7 +378,7 @@
         renderProducts(filtered);
     }
 
-    // Render product cards
+    // Render product cards with claim info
     function renderProducts(products) {
         const container = document.getElementById('productsList');
         if (!products.length) {
@@ -284,18 +392,26 @@
             // Check if product has any faulty batches
             let hasFaulty = false;
             let faultyCount = 0;
+            let totalProductClaims = 0;
+            let batchesWithClaims = 0;
+            
             if (p.batches && p.batches.length > 0) {
                 p.batches.forEach(batch => {
-                    // If batch has claims, it's faulty
-                    if (batch.claimed_quantity && batch.claimed_quantity > 0) {
+                    const claimed = batch.claimed_quantity || 0;
+                    if (claimed > 0) {
                         hasFaulty = true;
-                        faultyCount += batch.claimed_quantity || 0;
+                        faultyCount += claimed;
+                        totalProductClaims += claimed;
+                        batchesWithClaims += 1;
                     }
                 });
             }
             
             const faultyBadge = hasFaulty ? 
                 `<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-2">⚠️ ${faultyCount} Claimed</span>` : '';
+            
+            const claimsInfo = totalProductClaims > 0 ? 
+                `<p class="text-xs text-red-500 mt-1">⚠️ ${totalProductClaims} units claimed across ${batchesWithClaims} batch${batchesWithClaims > 1 ? 'es' : ''}</p>` : '';
 
             return `
                 <div class="bg-white rounded-xl shadow-md p-4 border">
@@ -305,6 +421,7 @@
                             <p class="text-gray-600 text-sm">Category: ${escapeHtml(p.category)} | Stock: ${p.stock}</p>
                             <p class="text-sm">Cost: ₵${p.cost_price.toFixed(2)} | Selling: ₵${p.selling_price.toFixed(2)} | Discount: ₵${p.discount.toFixed(2)}</p>
                             ${faultyBadge}
+                            ${claimsInfo}
                         </div>
                         <div class="text-right">
                             <span class="font-semibold ${statusColor}">● ${status}</span>
@@ -328,11 +445,9 @@
         const totalBatches = batches.length;
         document.getElementById('modalTitle').innerHTML = `Batches for ${productName}`;
         
-        // Reset search
         document.getElementById('batchSearchInput').value = '';
         document.getElementById('clearBatchSearchBtn').classList.add('hidden');
         
-        // Render all batches
         renderBatchList(batches);
         updateBatchCount(batches.length, totalBatches);
         
@@ -353,7 +468,6 @@
             const div = document.createElement('div');
             div.className = 'border rounded-lg p-3 hover:bg-gray-50';
             
-            // Create a flex container for checkbox and content
             const flexDiv = document.createElement('div');
             flexDiv.className = 'flex items-start space-x-3';
             
@@ -374,7 +488,6 @@
             const statusText = batch.remaining_quantity > 0 ? '● In Stock' : '● Depleted';
             const statusColor = batch.remaining_quantity > 0 ? 'text-green-600' : 'text-red-600';
             
-            // Build batch info with Update button
             info.innerHTML = `
                 <div class="flex justify-between items-start">
                     <div>
@@ -384,13 +497,13 @@
                     </div>
                     <div class="flex items-center space-x-2">
                         <span class="text-xs font-semibold ${statusColor}">${statusText}</span>
-                        ${hasClaims ? `<button onclick="event.stopPropagation(); viewBatchClaims(${batch.batch_id}, '${escapeHtml(currentBatchModalProductName)}')" 
-                                class="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1 rounded transition-colors" 
+                        ${hasClaims ? `<button onclick="event.stopPropagation(); viewBatchClaims(${batch.batch_id}, '${escapeHtml(currentBatchModalProductName)}', ${JSON.stringify(batch).replace(/"/g, '&quot;')})" 
+                                class="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1 rounded transition-colors flex items-center gap-1" 
                                 title="View claims for this batch">
                             📋 Claims
                         </button>` : ''}
                         <button onclick="event.stopPropagation(); navigateToPurchase(${batch.batch_id})" 
-                                class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs px-2 py-1 rounded transition-colors" 
+                                class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs px-2 py-1 rounded transition-colors flex items-center gap-1" 
                                 title="Update this batch">
                             ✏️ Update
                         </button>
@@ -430,7 +543,6 @@
         
         if (keyword) {
             clearBtn.classList.remove('hidden');
-            // Filter batches by batch_id
             const filtered = currentBatches.filter(batch => 
                 batch.batch_id.toString().includes(keyword)
             );
@@ -452,7 +564,6 @@
 
     function closeBatchModal() {
         document.getElementById('batchModal').classList.add('hidden');
-        // Reset search
         document.getElementById('batchSearchInput').value = '';
         document.getElementById('clearBatchSearchBtn').classList.add('hidden');
     }
