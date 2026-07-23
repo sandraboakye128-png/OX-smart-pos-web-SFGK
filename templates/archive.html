@@ -24,10 +24,15 @@
             <option value="BATCH DELETED">BATCH DELETED</option>
             <option value="PERMANENTLY DELETED">PERMANENTLY DELETED</option>
         </select>
-        <button onclick="loadArchive()" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-2 rounded-lg text-sm flex items-center gap-1">
+        <button onclick="resetAndLoad()" class="bg-teal-500 hover:bg-teal-600 text-white px-3 py-2 rounded-lg text-sm flex items-center gap-1">
             <i class="fas fa-sync-alt"></i> Refresh
         </button>
     </div>
+</div>
+
+<!-- Stats -->
+<div id="statsBar" class="mb-4 text-sm text-gray-600 hidden">
+    Showing <span id="shownCount">0</span> of <span id="totalCount">0</span> items
 </div>
 
 <!-- Archive List -->
@@ -36,6 +41,13 @@
         <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
         <p>Loading archive data...</p>
     </div>
+</div>
+
+<!-- Load More Button -->
+<div id="loadMoreContainer" class="text-center mt-6 hidden">
+    <button id="loadMoreBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg transition-colors flex items-center gap-2 mx-auto">
+        <i class="fas fa-chevron-down"></i> Load More
+    </button>
 </div>
 
 <!-- Modal: View Batches -->
@@ -97,10 +109,13 @@
     }
 
     // ---------- Main ----------
-    let currentArchiveData = [];
-    let currentStatus = 'ALL';
-    let searchTerm = '';
+    let allItems = [];
+    let currentPage = 1;
+    let totalItems = 0;
+    let totalPages = 1;
     let isLoading = false;
+    let hasMore = true;
+    const PER_PAGE = 50;
 
     // Helper: format currency
     function formatMoney(amount) {
@@ -152,105 +167,132 @@
         return colors[status] || '#6B7280';
     }
 
-    // Load archive data from API or cache
-    async function loadArchive() {
+    // Reset and load from beginning
+    function resetAndLoad() {
+        currentPage = 1;
+        allItems = [];
+        document.getElementById('loadMoreContainer').classList.add('hidden');
+        loadArchive(true);
+    }
+
+    // Load archive data from API
+    async function loadArchive(reset = true) {
         if (isLoading) return;
         isLoading = true;
         
         updateOfflineBanner();
         const status = document.getElementById('statusFilter').value;
-        currentStatus = status;
-        const container = document.getElementById('archiveList');
+        const searchTerm = document.getElementById('searchInput').value.trim();
         
-        // Show loading state
-        container.innerHTML = `
-            <div class="text-center text-gray-400 py-8">
-                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
-                <p>Loading archive data...</p>
-            </div>
-        `;
-        
-        let data = [];
-        let fromCache = false;
-        let error = null;
-        const cacheKey = `archive_${status}`;
-
-        try {
-            const res = await fetch(`/api/archive?status=${status}`);
-            if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(`HTTP error! status: ${res.status} - ${errorText}`);
-            }
-            data = await res.json();
-            
-            // Only cache if we have valid data (array)
-            if (data && Array.isArray(data)) {
-                cacheData(cacheKey, data);
-                console.log(`✅ Loaded ${data.length} items from API`);
-            } else {
-                console.warn('⚠️ API returned invalid data format');
-                data = [];
-            }
-        } catch (error) {
-            console.warn('⚠️ Error fetching archive data:', error.message);
-            fromCache = true;
-            const cached = getCachedData(cacheKey);
-            if (cached && Array.isArray(cached) && cached.length > 0) {
-                data = cached;
-                console.log(`📦 Using cached archive data: ${data.length} items`);
-            } else {
-                // Try cache without status filter
-                const fallbackCache = getCachedData('archive_ALL');
-                if (fallbackCache && Array.isArray(fallbackCache) && fallbackCache.length > 0) {
-                    data = fallbackCache;
-                    console.log(`📦 Using fallback cache (ALL): ${data.length} items`);
-                } else {
-                    data = [];
-                    console.warn('⚠️ No cached data available');
-                }
-            }
-        }
-
-        currentArchiveData = data;
-        isLoading = false;
-        
-        if (data.length === 0 && !fromCache) {
+        // If reset, clear the list and show loading
+        if (reset) {
+            currentPage = 1;
+            allItems = [];
+            document.getElementById('loadMoreContainer').classList.add('hidden');
+            const container = document.getElementById('archiveList');
             container.innerHTML = `
                 <div class="text-center text-gray-400 py-8">
-                    <i class="fas fa-database text-2xl mb-2"></i>
-                    <p>No archive data available.</p>
-                    <p class="text-xs text-gray-400 mt-1">Try refreshing or check your connection.</p>
+                    <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                    <p>Loading archive data...</p>
                 </div>
             `;
-            return;
+            document.getElementById('statsBar').classList.add('hidden');
         }
-        
-        applySearchAndRender();
-        
-        if (fromCache && data.length > 0) {
-            const note = document.createElement('div');
-            note.className = 'text-xs text-gray-400 text-center mt-2';
-            note.innerText = '⚠️ Data may be outdated (offline)';
-            container.appendChild(note);
+
+        try {
+            const url = `/api/archive?status=${status}&page=${currentPage}&per_page=${PER_PAGE}&search=${encodeURIComponent(searchTerm)}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            const data = await res.json();
+            
+            // Cache the data (only if it's page 1)
+            if (currentPage === 1) {
+                cacheData(`archive_${status}_${searchTerm}`, data);
+            }
+            
+            // Update pagination info
+            totalItems = data.total || 0;
+            totalPages = data.total_pages || 1;
+            hasMore = data.has_more || false;
+            
+            // Append items
+            if (reset) {
+                allItems = data.items || [];
+            } else {
+                allItems = [...allItems, ...(data.items || [])];
+            }
+            
+            // Render
+            renderArchive(allItems);
+            
+            // Update stats
+            document.getElementById('shownCount').textContent = allItems.length;
+            document.getElementById('totalCount').textContent = totalItems;
+            document.getElementById('statsBar').classList.remove('hidden');
+            
+            // Show/hide load more button
+            if (hasMore && allItems.length < totalItems) {
+                document.getElementById('loadMoreContainer').classList.remove('hidden');
+                document.getElementById('loadMoreBtn').textContent = `📥 Load More (${allItems.length}/${totalItems})`;
+            } else {
+                document.getElementById('loadMoreContainer').classList.add('hidden');
+                // Show "all loaded" message
+                if (allItems.length > 0 && allItems.length === totalItems) {
+                    const container = document.getElementById('archiveList');
+                    const note = document.createElement('div');
+                    note.className = 'text-xs text-gray-400 text-center mt-2';
+                    note.innerText = `✅ All ${totalItems} items loaded`;
+                    container.appendChild(note);
+                }
+            }
+            
+        } catch (error) {
+            console.warn('Error fetching archive data:', error);
+            // Try cache as fallback
+            const status = document.getElementById('statusFilter').value;
+            const searchTerm = document.getElementById('searchInput').value.trim();
+            const cacheKey = `archive_${status}_${searchTerm}`;
+            const cached = getCachedData(cacheKey);
+            if (cached && cached.items && cached.items.length > 0) {
+                allItems = cached.items;
+                totalItems = cached.total || cached.items.length;
+                hasMore = false;
+                renderArchive(allItems);
+                document.getElementById('statsBar').classList.remove('hidden');
+                document.getElementById('shownCount').textContent = allItems.length;
+                document.getElementById('totalCount').textContent = totalItems;
+                const note = document.createElement('div');
+                note.className = 'text-xs text-gray-400 text-center mt-2';
+                note.innerText = '⚠️ Data may be outdated (offline)';
+                document.getElementById('archiveList').appendChild(note);
+            } else {
+                const container = document.getElementById('archiveList');
+                container.innerHTML = `
+                    <div class="text-center text-gray-400 py-8">
+                        <i class="fas fa-exclamation-triangle text-2xl mb-2 text-yellow-500"></i>
+                        <p>Failed to load archive data.</p>
+                        <p class="text-xs text-gray-400 mt-1">Please try refreshing or check your connection.</p>
+                    </div>
+                `;
+            }
+        } finally {
+            isLoading = false;
         }
     }
 
-    // Search + render
-    function applySearchAndRender() {
-        searchTerm = document.getElementById('searchInput').value.toLowerCase();
-        let filtered = currentArchiveData;
-        if (searchTerm) {
-            filtered = currentArchiveData.filter(item => 
-                (item.name && item.name.toLowerCase().includes(searchTerm)) ||
-                (item.brand && item.brand.toLowerCase().includes(searchTerm))
-            );
-        }
-        renderArchive(filtered);
+    // Load more items
+    function loadMore() {
+        if (!hasMore || isLoading) return;
+        currentPage++;
+        loadArchive(false);
     }
 
     // Render cards
     function renderArchive(items) {
         const container = document.getElementById('archiveList');
+        // Keep the "Load More" container separate, we'll re-append it later
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        
         if (!items || !items.length) {
             container.innerHTML = `
                 <div class="text-center text-gray-400 py-8">
@@ -262,8 +304,19 @@
             return;
         }
 
-        container.innerHTML = '';
-        for (const item of items) {
+        // If we're on page 1, clear and rebuild
+        if (currentPage === 1) {
+            container.innerHTML = '';
+        } else {
+            // Remove any "all loaded" message if present
+            const notes = container.querySelectorAll('.text-xs.text-gray-400.text-center.mt-2');
+            notes.forEach(n => n.remove());
+        }
+
+        // Use document fragment for better performance
+        const fragment = document.createDocumentFragment();
+        
+        items.forEach(item => {
             const card = document.createElement('div');
             card.className = 'bg-white rounded-xl shadow-md border p-4';
 
@@ -361,7 +414,17 @@
             }
             
             card.appendChild(btnDiv);
-            container.appendChild(card);
+            fragment.appendChild(card);
+        });
+
+        container.appendChild(fragment);
+        
+        // Show "all loaded" message if we're done
+        if (!hasMore && allItems.length > 0 && allItems.length === totalItems) {
+            const note = document.createElement('div');
+            note.className = 'text-xs text-gray-400 text-center mt-2';
+            note.innerText = `✅ All ${totalItems} items loaded`;
+            container.appendChild(note);
         }
     }
 
@@ -475,7 +538,7 @@
             const data = await res.json();
             if (data.success) {
                 alert('✅ Item restored successfully!\n\nIt has been added back to your inventory.');
-                loadArchive(); // refresh list
+                resetAndLoad();
             } else {
                 alert('❌ Restore failed: ' + data.error);
             }
@@ -485,17 +548,22 @@
     }
 
     // ---------- Event listeners ----------
-    document.getElementById('statusFilter').addEventListener('change', () => loadArchive());
-    document.getElementById('searchInput').addEventListener('input', applySearchAndRender);
+    document.getElementById('statusFilter').addEventListener('change', resetAndLoad);
+    document.getElementById('searchInput').addEventListener('input', function() {
+        clearTimeout(this._searchTimeout);
+        this._searchTimeout = setTimeout(resetAndLoad, 500);
+    });
+    document.getElementById('loadMoreBtn').addEventListener('click', loadMore);
 
     // Auto-refresh on reconnect
     window.addEventListener('online', function() {
-        loadArchive();
+        resetAndLoad();
     });
 
     // Initial load
     document.addEventListener('DOMContentLoaded', function() {
-        loadArchive();
+        resetAndLoad();
     });
+
 </script>
 {% endblock %}

@@ -2087,12 +2087,16 @@ def api_analytics_top_products():
     return jsonify(result)
 
 # ===================== ARCHIVE API =====================
-# ===================== ARCHIVE API (WITH CLAIMS - FULLY FIXED) =====================
+# ===================== ARCHIVE API (WITH PAGINATION - FAST) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
     status_filter = request.args.get('status', 'ALL')
-    print(f"📁 Archive API called with status filter: {status_filter}")
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    search = request.args.get('search', '').strip()
+    
+    print(f"📁 Archive API called with status: {status_filter}, page: {page}, per_page: {per_page}")
     
     conn = get_connection()
     cursor = conn.cursor()
@@ -2159,9 +2163,7 @@ def api_archive():
                     })
             except Exception as claim_err:
                 print(f"⚠️ Could not fetch claims for product {product_id}: {str(claim_err)}")
-                # Rollback the failed claim query
                 conn.rollback()
-                # Continue without claims
             
             active_items.append({
                 'id': None,
@@ -2202,7 +2204,6 @@ def api_archive():
             action = str(r[8]).upper() if len(r) > 8 and r[8] else 'UNKNOWN'
             is_permanent = action == 'PERMANENTLY DELETED'
             
-            # ✅ Get claims for deleted product if product_id exists
             claims_data = []
             product_id = r[13] if len(r) > 13 else None
             if product_id:
@@ -2233,7 +2234,6 @@ def api_archive():
                         })
                 except Exception as claim_err:
                     print(f"⚠️ Could not fetch claims for deleted product {product_id}: {str(claim_err)}")
-                    # Rollback the failed claim query
                     conn.rollback()
             
             deleted_items.append({
@@ -2260,10 +2260,20 @@ def api_archive():
         
         combined = active_items + deleted_items
         
+        # Apply status filter
         if status_filter != 'ALL':
             combined = [item for item in combined if item['action'] == status_filter]
             print(f"📊 Filtered to {len(combined)} items with status '{status_filter}'")
         
+        # Apply search filter
+        if search:
+            search_lower = search.lower()
+            combined = [item for item in combined if 
+                search_lower in item['name'].lower() or 
+                search_lower in item['brand'].lower()]
+            print(f"🔍 Filtered to {len(combined)} items with search '{search}'")
+        
+        # Sort
         def sort_key(item):
             if item['action'] == 'ACTIVE':
                 return (datetime.max.replace(tzinfo=timezone.utc), item['name'])
@@ -2278,14 +2288,28 @@ def api_archive():
         
         combined.sort(key=sort_key, reverse=True)
         
-        print(f"📦 Returning {len(combined)} items")
-        return jsonify(combined)
+        # Pagination
+        total = len(combined)
+        start = (page - 1) * per_page
+        end = min(start + per_page, total)
+        paginated = combined[start:end] if start < total else []
+        
+        print(f"📦 Returning {len(paginated)} items of {total} total (page {page}/{((total + per_page - 1) // per_page)})")
+        
+        return jsonify({
+            'items': paginated,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page if total > 0 else 1,
+            'has_more': end < total
+        })
         
     except Exception as e:
         print(f"❌ Error in archive API: {str(e)}")
         import traceback
         traceback.print_exc()
-        conn.rollback()  # ✅ Rollback on error
+        conn.rollback()
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
