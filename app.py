@@ -2087,8 +2087,7 @@ def api_analytics_top_products():
     return jsonify(result)
 
 # ===================== ARCHIVE API =====================
-# ===================== ARCHIVE API (WITH CLAIMS) =====================
-# ===================== ARCHIVE API (WITH CLAIMS - FIXED) =====================
+# ===================== ARCHIVE API (WITH CLAIMS - FULLY FIXED) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
@@ -2099,6 +2098,9 @@ def api_archive():
     cursor = conn.cursor()
     
     try:
+        # ✅ CRITICAL: Rollback any aborted transaction
+        conn.rollback()
+        
         # Get active products
         cursor.execute("""
             SELECT 
@@ -2157,6 +2159,8 @@ def api_archive():
                     })
             except Exception as claim_err:
                 print(f"⚠️ Could not fetch claims for product {product_id}: {str(claim_err)}")
+                # Rollback the failed claim query
+                conn.rollback()
                 # Continue without claims
             
             active_items.append({
@@ -2229,6 +2233,8 @@ def api_archive():
                         })
                 except Exception as claim_err:
                     print(f"⚠️ Could not fetch claims for deleted product {product_id}: {str(claim_err)}")
+                    # Rollback the failed claim query
+                    conn.rollback()
             
             deleted_items.append({
                 'id': r[0],
@@ -2279,6 +2285,7 @@ def api_archive():
         print(f"❌ Error in archive API: {str(e)}")
         import traceback
         traceback.print_exc()
+        conn.rollback()  # ✅ Rollback on error
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
