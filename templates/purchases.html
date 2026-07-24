@@ -12,6 +12,23 @@
     <button onclick="refreshData()" class="underline font-bold">Click here to refresh</button>
 </div>
 
+<!-- Force Refresh / Clear Cache Banner -->
+<div class="bg-white rounded-xl shadow-md p-4 mb-4">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+        <div>
+            <span class="text-sm text-gray-500">💡 Having issues loading data?</span>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+            <button onclick="forceRefresh()" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                🔄 Force Refresh
+            </button>
+            <button onclick="clearAllLocalData()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                🗑️ Clear All Data
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- ADD / EDIT FORM -->
 <div class="bg-white rounded-xl shadow-md p-6 mb-6">
     <div class="flex items-center gap-2 mb-4">
@@ -129,12 +146,101 @@
     window.addEventListener('online', updateOfflineBanner);
     window.addEventListener('offline', updateOfflineBanner);
 
+    // ---------- FORCE REFRESH & CLEAR CACHE ----------
+    function forceRefresh() {
+        if (!confirm('⚠️ This will clear your local cache and reload all data from the server.\n\nContinue?')) {
+            return;
+        }
+        
+        try {
+            // Clear the specific purchase cache
+            localStorage.removeItem(CACHE_KEY);
+            localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+            
+            // Also clear any batch caches
+            const allKeys = Object.keys(localStorage);
+            allKeys.forEach(key => {
+                if (key.startsWith('batches_')) {
+                    localStorage.removeItem(key);
+                    console.log('🗑️ Cleared batch cache:', key);
+                }
+            });
+            
+            console.log('✅ Cache cleared successfully');
+            
+            // Reload purchases from server
+            loadPurchases(true);
+            
+            alert('✅ Cache cleared. Data reloaded from server.');
+        } catch (e) {
+            console.error('Error clearing cache:', e);
+            alert('❌ Failed to clear cache. Please try refreshing the page.');
+        }
+    }
+
+    function clearAllLocalData() {
+        if (!confirm('⚠️⚠️⚠️ WARNING: This will delete ALL locally stored data including:\n\n' +
+                     '- Cached products\n' +
+                     '- Cached purchases\n' +
+                     '- Pending sales\n' +
+                     '- Pending purchases\n' +
+                     '- Pending deletions\n\n' +
+                     'Are you sure you want to continue?')) {
+            return;
+        }
+        
+        try {
+            // Clear all app-related localStorage items
+            const keysToClear = [
+                'cached_products_accessories',
+                'cached_products_screen',
+                'cached_purchases_accessories',
+                'cached_purchases_screen',
+                'pending_sales',
+                'pendingPurchases',
+                'pendingBatchDeletions',
+                'pendingProductDeletions',
+                'sales_products_cache_accessories',
+                'sales_products_cache_screens',
+                'sales_license_cache',
+                'offline_sales'
+            ];
+            
+            keysToClear.forEach(key => {
+                try {
+                    localStorage.removeItem(key);
+                    console.log('🗑️ Cleared:', key);
+                } catch(e) {}
+            });
+            
+            // Clear any batch caches
+            const allKeys = Object.keys(localStorage);
+            allKeys.forEach(key => {
+                if (key.startsWith('batches_')) {
+                    localStorage.removeItem(key);
+                    console.log('🗑️ Cleared batch cache:', key);
+                }
+            });
+            
+            alert('✅ All local data cleared. Refreshing page...');
+            location.reload();
+        } catch (e) {
+            console.error('Error clearing all data:', e);
+            alert('❌ Failed to clear data. Please try refreshing the page.');
+        }
+    }
+
+    // Make functions globally available
+    window.forceRefresh = forceRefresh;
+    window.clearAllLocalData = clearAllLocalData;
+
     // ---------- Main variables ----------
     let currentPurchases = [];
-    let currentFilteredData = [];  // ✅ NEW: Track filtered data for PDF
+    let currentFilteredData = [];
     let editMode = false;
     let editBatchId = null;
     let isDataFresh = false;
+    let isLoading = false;
     const CACHE_KEY = 'cached_purchases_accessories';
     const CACHE_TIMESTAMP_KEY = 'cached_purchases_accessories_timestamp';
 
@@ -447,10 +553,17 @@
 
     // ---------- Load purchases (EXCLUDE screens) ----------
     async function loadPurchases(forceRefresh = false) {
+        if (isLoading) return;
+        isLoading = true;
+        
         updateOfflineBanner();
         
         if (forceRefresh) {
             isDataFresh = false;
+            try {
+                localStorage.removeItem(CACHE_KEY);
+                localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+            } catch(e) {}
         }
         
         let purchases = [];
@@ -461,15 +574,19 @@
                 const res = await fetch('/api/purchases?exclude_category=Screen');
                 if (res.ok) {
                     purchases = await res.json();
-                    cachePurchases(purchases);
-                    isDataFresh = true;
-                    currentFilteredData = purchases;  // ✅ Store loaded data
-                    console.log('✅ Data loaded from API (fresh)');
-                    
-                    const pending = getPendingPurchases();
-                    if (pending.length > 0) {
-                        console.log(`📦 ${pending.length} pending purchases found - syncing automatically...`);
-                        await syncAllPendingSilently();
+                    if (Array.isArray(purchases)) {
+                        cachePurchases(purchases);
+                        isDataFresh = true;
+                        currentFilteredData = purchases;
+                        console.log('✅ Data loaded from API (fresh)');
+                        
+                        const pending = getPendingPurchases();
+                        if (pending.length > 0) {
+                            console.log(`📦 ${pending.length} pending purchases found - syncing automatically...`);
+                            await syncAllPendingSilently();
+                        }
+                    } else {
+                        throw new Error('Invalid data format');
                     }
                 } else {
                     throw new Error('API returned error');
@@ -478,9 +595,9 @@
                 console.warn('⚠️ API failed, using cached data:', err.message);
                 fromCache = true;
                 const cached = loadCachedPurchases();
-                if (cached) {
+                if (cached && Array.isArray(cached)) {
                     purchases = cached;
-                    currentFilteredData = cached;  // ✅ Store cached data
+                    currentFilteredData = cached;
                     isDataFresh = false;
                 } else {
                     purchases = [];
@@ -491,9 +608,9 @@
         } else {
             fromCache = true;
             const cached = loadCachedPurchases();
-            if (cached) {
+            if (cached && Array.isArray(cached)) {
                 purchases = cached;
-                currentFilteredData = cached;  // ✅ Store cached data
+                currentFilteredData = cached;
                 isDataFresh = false;
             } else {
                 purchases = [];
@@ -508,6 +625,7 @@
         updatePendingBadge();
         
         checkForBatchEdit();
+        isLoading = false;
     }
 
     async function syncAllPendingSilently() {
@@ -560,7 +678,7 @@
     // ---------- Render list ----------
     function renderList(purchases, fromCache = false) {
         const container = document.getElementById('purchasesList');
-        if (!purchases.length) {
+        if (!purchases || purchases.length === 0) {
             container.innerHTML = '<div class="text-center text-gray-400 py-8">No accessory purchase records found.</div>';
             updateSummary([]);
             return;
@@ -572,8 +690,8 @@
                     <div class="flex-1">
                         <h3 class="font-bold text-lg">${escapeHtml(p.name)} (${escapeHtml(p.brand)})</h3>
                         <p class="text-sm text-gray-600">Batch #${p.batch_id} | Qty: ${p.quantity} | Stock: ${p.remaining_quantity}</p>
-                        <p class="text-sm">Cost: ₵${p.cost_price.toFixed(2)} | Discount: ₵${p.discount.toFixed(2)} | Selling: ₵${p.selling_price.toFixed(2)}</p>
-                        <p class="text-sm">Total: ₵${p.total_cost.toFixed(2)} | Date: ${formatDate(p.date)}</p>
+                        <p class="text-sm">Cost: ₵${(p.cost_price || 0).toFixed(2)} | Discount: ₵${(p.discount || 0).toFixed(2)} | Selling: ₵${(p.selling_price || 0).toFixed(2)}</p>
+                        <p class="text-sm">Total: ₵${(p.total_cost || 0).toFixed(2)} | Date: ${formatDate(p.date)}</p>
                         <p class="text-sm text-gray-500 mt-1"><span class="font-medium">Source:</span> ${escapeHtml(p.source || 'Unknown')}</p>
                     </div>
                     <button onclick="editPurchase(${p.batch_id})" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1 rounded ml-2">✏️ Update</button>
@@ -591,23 +709,25 @@
         let totalSelling = 0;
         let totalProfit = 0;
         let totalCapital = 0;
-        const totalBatches = purchases.length;
+        const totalBatches = purchases ? purchases.length : 0;
         
-        purchases.forEach(p => {
-            const itemQty = p.quantity || 0;
-            const itemCost = p.cost_price || 0;
-            const itemSelling = p.selling_price || 0;
-            const itemDiscount = p.discount || 0;
-            
-            totalQty += itemQty;
-            totalCost += p.total_cost || (itemCost * itemQty);
-            totalDiscount += itemDiscount;
-            totalSelling += itemSelling * itemQty;
-            
-            const itemProfit = (itemSelling - itemCost) * itemQty - itemDiscount;
-            totalProfit += itemProfit;
-            totalCapital += (itemCost * itemQty) - itemDiscount;
-        });
+        if (purchases && purchases.length > 0) {
+            purchases.forEach(p => {
+                const itemQty = p.quantity || 0;
+                const itemCost = p.cost_price || 0;
+                const itemSelling = p.selling_price || 0;
+                const itemDiscount = p.discount || 0;
+                
+                totalQty += itemQty;
+                totalCost += p.total_cost || (itemCost * itemQty);
+                totalDiscount += itemDiscount;
+                totalSelling += itemSelling * itemQty;
+                
+                const itemProfit = (itemSelling - itemCost) * itemQty - itemDiscount;
+                totalProfit += itemProfit;
+                totalCapital += (itemCost * itemQty) - itemDiscount;
+            });
+        }
         
         const isOffline = !navigator.onLine;
         const isCached = !isDataFresh && !isOffline;
@@ -685,7 +805,7 @@
         let actionType = 'add';
         let batchId = null;
         
-        if (editMode) {
+        if (editMode && editBatchId) {
             url = `/api/purchases/${editBatchId}`;
             method = 'PUT';
             actionType = 'update';
@@ -718,6 +838,10 @@
                     window.history.pushState({}, '', newUrl);
                 }
                 
+                // ✅ Reset edit mode before reloading
+                editMode = false;
+                editBatchId = null;
+                
                 loadPurchases(true);
             } else {
                 alert('Error: ' + data.error);
@@ -743,13 +867,13 @@
         
         console.log('📦 Purchase data:', purchase);
         
-        document.getElementById('name').value = purchase.name;
-        document.getElementById('brand').value = purchase.brand;
+        document.getElementById('name').value = purchase.name || '';
+        document.getElementById('brand').value = purchase.brand || '';
         document.getElementById('category').value = purchase.category || 'Accessory';
-        document.getElementById('quantity').value = purchase.quantity;
-        document.getElementById('cost_price').value = purchase.cost_price;
-        document.getElementById('discount').value = purchase.discount;
-        document.getElementById('selling_price').value = purchase.selling_price;
+        document.getElementById('quantity').value = purchase.quantity || '';
+        document.getElementById('cost_price').value = purchase.cost_price || '';
+        document.getElementById('discount').value = purchase.discount || 0;
+        document.getElementById('selling_price').value = purchase.selling_price || '';
         document.getElementById('source').value = purchase.source || 'Unknown';
         
         editMode = true;
@@ -807,40 +931,45 @@
             try {
                 const res = await fetch(`/api/purchases/filter?start_date=${fromDate}&end_date=${toDate}&exclude_category=Screen`);
                 if (!res.ok) throw new Error();
-                currentPurchases = await res.json();
-                currentFilteredData = currentPurchases;  // ✅ Store filtered data
-                cachePurchases(currentPurchases);
-                isDataFresh = true;
-                updateCacheBanner();
+                const data = await res.json();
+                if (Array.isArray(data)) {
+                    currentPurchases = data;
+                    currentFilteredData = data;
+                    cachePurchases(currentPurchases);
+                    isDataFresh = true;
+                    updateCacheBanner();
+                } else {
+                    throw new Error('Invalid data format');
+                }
             } catch (err) {
                 alert('Filter is unavailable offline. Showing cached data.');
                 const cached = loadCachedPurchases();
-                if (cached) {
+                if (cached && Array.isArray(cached)) {
                     currentPurchases = cached;
-                    currentFilteredData = cached;  // ✅ Store cached data
+                    currentFilteredData = cached;
                 }
                 isDataFresh = false;
                 updateCacheBanner();
             }
         } else {
             await loadPurchases();
-            currentFilteredData = currentPurchases;  // ✅ Store all data
+            currentFilteredData = currentPurchases;
         }
-        applySearch();  // This will filter further if search term exists
+        applySearch();
     }
 
     function clearFilters() {
         document.getElementById('fromDate').value = '';
         document.getElementById('toDate').value = '';
         document.getElementById('searchInput').value = '';
-        currentFilteredData = currentPurchases;  // ✅ Reset filtered data
+        currentFilteredData = currentPurchases;
         loadPurchases(true);
     }
 
     function applySearch() {
         const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
         if (!keyword) {
-            currentFilteredData = currentPurchases;  // ✅ Store all data
+            currentFilteredData = currentPurchases;
             renderList(currentPurchases, !isDataFresh);
             return;
         }
@@ -850,7 +979,7 @@
             (p.category && p.category.toLowerCase().includes(keyword)) ||
             (p.source && p.source.toLowerCase().includes(keyword))
         );
-        currentFilteredData = filtered;  // ✅ Store filtered data
+        currentFilteredData = filtered;
         renderList(filtered, !isDataFresh);
     }
 
@@ -863,7 +992,6 @@
         const fromDate = document.getElementById('fromDate').value;
         const toDate = document.getElementById('toDate').value;
         
-        // ✅ Get current displayed data (after search/filter)
         const purchasesToExport = currentFilteredData;
         
         if (!purchasesToExport || purchasesToExport.length === 0) {
@@ -871,7 +999,6 @@
             return;
         }
 
-        // Calculate totals for the report
         let totalQty = 0;
         let totalCost = 0;
         let totalDiscount = 0;
@@ -900,7 +1027,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    purchases: purchasesToExport,  // ✅ Send filtered data
+                    purchases: purchasesToExport,
                     from_date: fromDate,
                     to_date: toDate,
                     totals: {
@@ -944,7 +1071,7 @@
             if (!res.ok) throw new Error();
             const suggestions = await res.json();
             const box = document.getElementById('nameSuggestions');
-            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            if (!suggestions || suggestions.length === 0) { box.classList.add('hidden'); return; }
             box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectNameSuggestion('${escapeHtml(s.name)}', '${escapeHtml(s.brand)}', '${escapeHtml(s.category)}')">${escapeHtml(s.name)} (${escapeHtml(s.brand)})</div>`).join('');
             box.classList.remove('hidden');
             const rect = document.getElementById('name').getBoundingClientRect();
@@ -968,7 +1095,7 @@
             if (!res.ok) throw new Error();
             const suggestions = await res.json();
             const box = document.getElementById('categorySuggestions');
-            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            if (!suggestions || suggestions.length === 0) { box.classList.add('hidden'); return; }
             box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectCategorySuggestion('${escapeHtml(s.category)}')">${escapeHtml(s.category)}</div>`).join('');
             box.classList.remove('hidden');
             const rect = document.getElementById('category').getBoundingClientRect();
@@ -992,7 +1119,7 @@
             if (!res.ok) throw new Error();
             const suggestions = await res.json();
             const box = document.getElementById('sourceSuggestions');
-            if (!suggestions.length) { box.classList.add('hidden'); return; }
+            if (!suggestions || suggestions.length === 0) { box.classList.add('hidden'); return; }
             box.innerHTML = suggestions.map(s => `<div class="px-3 py-1 hover:bg-gray-100 cursor-pointer" onclick="selectSourceSuggestion('${escapeHtml(s.source)}')">${escapeHtml(s.source)}</div>`).join('');
             box.classList.remove('hidden');
             const rect = document.getElementById('source').getBoundingClientRect();

@@ -1117,7 +1117,7 @@ def api_get_products():
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
         
-        # ✅ SINGLE OPTIMIZED QUERY - joins products, batches, and claims
+        # ✅ FIXED: Removed "AND pb2.remaining_quantity > 0" to show ALL products
         query = f"""
             SELECT 
                 p.id as product_id,
@@ -1139,7 +1139,7 @@ def api_get_products():
                 COALESCE(pb.claimed_quantity, 0) as claimed_quantity,
                 COALESCE(c.claim_count, 0) as active_claims_qty
             FROM products p
-            LEFT JOIN purchase_batches pb ON pb.product_id = p.id AND pb.remaining_quantity > 0
+            LEFT JOIN purchase_batches pb ON pb.product_id = p.id
             LEFT JOIN (
                 SELECT batch_id, SUM(quantity) as claim_count
                 FROM claims 
@@ -1148,7 +1148,7 @@ def api_get_products():
             ) c ON c.batch_id = pb.id
             WHERE EXISTS (
                 SELECT 1 FROM purchase_batches pb2 
-                WHERE pb2.product_id = p.id AND pb2.remaining_quantity > 0
+                WHERE pb2.product_id = p.id
             )
             AND NOT EXISTS (
                 SELECT 1 FROM deleted_products dp 

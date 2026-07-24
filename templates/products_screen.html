@@ -6,6 +6,23 @@
     ⚠️ You are offline – showing cached screen products. Deletions will be saved and applied when you reconnect.
 </div>
 
+<!-- Force Refresh / Clear Cache Banner -->
+<div class="bg-white rounded-xl shadow-md p-4 mb-4">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+        <div>
+            <span class="text-sm text-gray-500">💡 Having issues loading data?</span>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+            <button onclick="forceRefresh()" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                🔄 Force Refresh
+            </button>
+            <button onclick="clearAllLocalData()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                🗑️ Clear All Data
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Header with screen indicator -->
 <div class="bg-white rounded-xl shadow-md p-6 mb-6">
     <div class="flex items-center gap-2">
@@ -109,12 +126,104 @@
         };
     }
 
+    // -------------------- FORCE REFRESH & CLEAR CACHE --------------------
+    function forceRefresh() {
+        if (!confirm('⚠️ This will clear your local cache and reload all data from the server.\n\nContinue?')) {
+            return;
+        }
+        
+        try {
+            // Clear the specific product cache
+            localStorage.removeItem(PRODUCTS_CACHE_KEY);
+            
+            // Also clear any batch caches
+            const allKeys = Object.keys(localStorage);
+            allKeys.forEach(key => {
+                if (key.startsWith('batches_')) {
+                    localStorage.removeItem(key);
+                    console.log('🗑️ Cleared batch cache:', key);
+                }
+            });
+            
+            console.log('✅ Cache cleared successfully');
+            
+            // Reload products from server
+            loadProducts(true);
+            
+            alert('✅ Cache cleared. Data reloaded from server.');
+        } catch (e) {
+            console.error('Error clearing cache:', e);
+            alert('❌ Failed to clear cache. Please try refreshing the page.');
+        }
+    }
+
+    function clearAllLocalData() {
+        if (!confirm('⚠️⚠️⚠️ WARNING: This will delete ALL locally stored data including:\n\n' +
+                     '- Cached products\n' +
+                     '- Cached purchases\n' +
+                     '- Pending sales\n' +
+                     '- Pending purchases\n' +
+                     '- Pending deletions\n\n' +
+                     'Are you sure you want to continue?')) {
+            return;
+        }
+        
+        try {
+            // Clear all app-related localStorage items
+            const keysToClear = [
+                'cached_products_accessories',
+                'cached_products_screen',
+                'cached_purchases_accessories',
+                'cached_purchases_screen',
+                'pending_sales',
+                'pendingPurchases',
+                'pendingBatchDeletions',
+                'pendingProductDeletions',
+                'sales_products_cache_accessories',
+                'sales_products_cache_screens',
+                'sales_license_cache',
+                'offline_sales'
+            ];
+            
+            keysToClear.forEach(key => {
+                try {
+                    localStorage.removeItem(key);
+                    console.log('🗑️ Cleared:', key);
+                } catch(e) {}
+            });
+            
+            // Clear any batch caches
+            const allKeys = Object.keys(localStorage);
+            allKeys.forEach(key => {
+                if (key.startsWith('batches_')) {
+                    localStorage.removeItem(key);
+                    console.log('🗑️ Cleared batch cache:', key);
+                }
+            });
+            
+            // Clear session storage
+            sessionStorage.removeItem('autoOpenBatches');
+            sessionStorage.removeItem('autoOpenProduct');
+            
+            alert('✅ All local data cleared. Refreshing page...');
+            location.reload();
+        } catch (e) {
+            console.error('Error clearing all data:', e);
+            alert('❌ Failed to clear data. Please try refreshing the page.');
+        }
+    }
+
+    // Make functions globally available
+    window.forceRefresh = forceRefresh;
+    window.clearAllLocalData = clearAllLocalData;
+
     // -------------------- MAIN LOGIC --------------------
     let currentProducts = [];
     let currentProductIdForDelete = null;
     let currentBatchSelections = [];
     let currentBatchModalProductName = "";
     let currentBatches = []; // Store all batches for filtering
+    let isLoading = false;
 
     // Helper: escape HTML
     function escapeHtml(str) {
@@ -304,40 +413,73 @@
     const PRODUCTS_CACHE_KEY = 'cached_products_screen';
 
     // Load products from API or cache (filtered to Screen category)
-    async function loadProducts() {
+    async function loadProducts(forceRefresh = false) {
+        if (isLoading) return;
+        isLoading = true;
+        
         updateOfflineBanner();
         let productsData = null;
         let summaryData = null;
         let fromCache = false;
 
         try {
+            // If force refresh, clear cache first
+            if (forceRefresh) {
+                try {
+                    localStorage.removeItem(PRODUCTS_CACHE_KEY);
+                } catch(e) {}
+            }
+            
             const res = await fetch('/api/products?category=Screen');
             if (!res.ok) throw new Error('Network error');
             const data = await res.json();
-            productsData = data.products;
-            summaryData = { total_products: data.total_products, total_batches: data.total_batches };
-            try {
-                localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ products: productsData, summary: summaryData, timestamp: Date.now() }));
-            } catch (e) {}
-        } catch (err) {
-            console.warn('Offline – using cached screen products');
-            fromCache = true;
-            const cached = localStorage.getItem(PRODUCTS_CACHE_KEY);
-            if (cached) {
-                const parsed = JSON.parse(cached);
-                productsData = parsed.products || [];
-                summaryData = parsed.summary || { total_products: 0, total_batches: 0 };
+            
+            // Validate data
+            if (data && data.products && Array.isArray(data.products)) {
+                productsData = data.products;
+                summaryData = { total_products: data.total_products || data.products.length, total_batches: data.total_batches || 0 };
+                try {
+                    localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ 
+                        products: productsData, 
+                        summary: summaryData, 
+                        timestamp: Date.now() 
+                    }));
+                } catch (e) {}
             } else {
+                throw new Error('Invalid data format');
+            }
+        } catch (err) {
+            console.warn('⚠️ API failed, using cached data:', err.message);
+            fromCache = true;
+            try {
+                const cached = localStorage.getItem(PRODUCTS_CACHE_KEY);
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (parsed.products && Array.isArray(parsed.products)) {
+                        productsData = parsed.products;
+                        summaryData = parsed.summary || { total_products: parsed.products.length, total_batches: 0 };
+                    } else {
+                        productsData = [];
+                        summaryData = { total_products: 0, total_batches: 0 };
+                    }
+                } else {
+                    productsData = [];
+                    summaryData = { total_products: 0, total_batches: 0 };
+                }
+            } catch (e) {
+                console.error('Error reading cache:', e);
                 productsData = [];
                 summaryData = { total_products: 0, total_batches: 0 };
             }
         }
 
         currentProducts = productsData || [];
-        document.getElementById('summary').innerHTML = `Total Screen Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}${fromCache ? ' (cached)' : ''}`;
+        const summaryText = `Total Screen Products: ${summaryData.total_products} | Total Batches: ${summaryData.total_batches}`;
+        document.getElementById('summary').innerHTML = summaryText + (fromCache ? ' (cached)' : '');
         applySearch();
-        
         autoOpenBatches();
+        
+        isLoading = false;
     }
 
     // Auto-open batches when coming from dashboard
@@ -366,7 +508,7 @@
 
     // Filter products based on search input
     function applySearch() {
-        const keyword = document.getElementById('searchInput').value.toLowerCase();
+        const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
         let filtered = currentProducts;
         if (keyword) {
             filtered = currentProducts.filter(p => 
@@ -381,7 +523,7 @@
     // Render product cards with claim info
     function renderProducts(products) {
         const container = document.getElementById('productsList');
-        if (!products.length) {
+        if (!products || products.length === 0) {
             container.innerHTML = '<div class="text-center text-gray-400 py-8">No screen products found.</div>';
             return;
         }
@@ -419,7 +561,7 @@
                         <div>
                             <h3 class="text-xl font-bold text-indigo-700">${escapeHtml(p.name)} (${escapeHtml(p.brand)})</h3>
                             <p class="text-gray-600 text-sm">Category: ${escapeHtml(p.category)} | Stock: ${p.stock}</p>
-                            <p class="text-sm">Cost: ₵${p.cost_price.toFixed(2)} | Selling: ₵${p.selling_price.toFixed(2)} | Discount: ₵${p.discount.toFixed(2)}</p>
+                            <p class="text-sm">Cost: ₵${(p.cost_price || 0).toFixed(2)} | Selling: ₵${(p.selling_price || 0).toFixed(2)} | Discount: ₵${(p.discount || 0).toFixed(2)}</p>
                             ${faultyBadge}
                             ${claimsInfo}
                         </div>
@@ -428,7 +570,7 @@
                         </div>
                     </div>
                     <div class="mt-3 flex justify-end space-x-2">
-                        <button onclick="viewBatches(${p.product_id}, '${escapeHtml(p.name)}', ${JSON.stringify(p.batches).replace(/"/g, '&quot;')})" 
+                        <button onclick="viewBatches(${p.product_id}, '${escapeHtml(p.name)}', ${JSON.stringify(p.batches || []).replace(/"/g, '&quot;')})" 
                                 class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded">View Batches</button>
                         <button onclick="confirmDeleteProduct(${p.product_id}, '${escapeHtml(p.name)}')" 
                                 class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded">Delete Product</button>
@@ -440,16 +582,16 @@
 
     // ----- Batch Management with Search and Update Button -----
     function viewBatches(productId, productName, batches) {
-        currentBatches = batches;
+        currentBatches = batches || [];
         currentBatchModalProductName = productName;
-        const totalBatches = batches.length;
-        document.getElementById('modalTitle').innerHTML = `Batches for ${productName}`;
+        const totalBatches = batches ? batches.length : 0;
+        document.getElementById('modalTitle').innerHTML = `Batches for ${productName} (${totalBatches})`;
         
         document.getElementById('batchSearchInput').value = '';
         document.getElementById('clearBatchSearchBtn').classList.add('hidden');
         
-        renderBatchList(batches);
-        updateBatchCount(batches.length, totalBatches);
+        renderBatchList(batches || []);
+        updateBatchCount(batches ? batches.length : 0, totalBatches);
         
         document.getElementById('batchModal').classList.remove('hidden');
     }
@@ -460,7 +602,7 @@
         currentBatchSelections = [];
         
         if (!batches || batches.length === 0) {
-            container.innerHTML = '<div class="text-center text-gray-400 py-8">No batches match your search.</div>';
+            container.innerHTML = '<div class="text-center text-gray-400 py-8">No batches available for this product.</div>';
             return;
         }
         
@@ -493,7 +635,7 @@
                     <div>
                         <strong class="text-indigo-600">Batch #${batch.batch_id}</strong>
                         ${claimBadge}
-                        <span class="text-xs text-gray-400 ml-2">${new Date(batch.date).toLocaleString()}</span>
+                        <span class="text-xs text-gray-400 ml-2">${batch.date ? new Date(batch.date).toLocaleString() : 'No date'}</span>
                     </div>
                     <div class="flex items-center space-x-2">
                         <span class="text-xs font-semibold ${statusColor}">${statusText}</span>
@@ -512,8 +654,8 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-1 text-xs">
                     <span>Qty: <strong>${batch.quantity}</strong></span>
                     <span>Remaining: <strong>${batch.remaining_quantity}</strong></span>
-                    <span>Cost: ₵${batch.cost_price.toFixed(2)}</span>
-                    <span>Selling: ₵${batch.selling_price.toFixed(2)}</span>
+                    <span>Cost: ₵${(batch.cost_price || 0).toFixed(2)}</span>
+                    <span>Selling: ₵${(batch.selling_price || 0).toFixed(2)}</span>
                 </div>
                 ${hasClaims ? `<div class="text-xs text-red-500 mt-1">⚠️ ${batch.claimed_quantity} units claimed as faulty</div>` : ''}
                 ${batch.discount > 0 ? `<div class="text-xs text-gray-500 mt-1">Discount: ₵${batch.discount.toFixed(2)}</div>` : ''}
@@ -544,7 +686,7 @@
         if (keyword) {
             clearBtn.classList.remove('hidden');
             const filtered = currentBatches.filter(batch => 
-                batch.batch_id.toString().includes(keyword)
+                batch.batch_id && batch.batch_id.toString().includes(keyword)
             );
             renderBatchList(filtered);
             updateBatchCount(filtered.length, currentBatches.length);
@@ -608,10 +750,10 @@
             alert(`⚠️ ${pending.length} batch deletion(s) saved offline. They will be applied when you reconnect.`);
         }
         closeBatchModal();
-        loadProducts();
+        loadProducts(true);
     }
 
-    // ----- Product Deletion (unchanged) -----
+    // ----- Product Deletion -----
     function confirmDeleteProduct(productId, productName) {
         currentProductIdForDelete = productId;
         document.getElementById('deleteProductName').innerHTML = `Screen Product: ${productName}`;
@@ -631,7 +773,7 @@
             if (data.success) {
                 alert(`Screen product ${deleteType === 'clean' ? 'permanently deleted' : 'deleted (history kept)'}.`);
                 closeDeleteProductModal();
-                loadProducts();
+                loadProducts(true);
             } else {
                 alert('Error: ' + data.error);
             }
@@ -656,7 +798,7 @@
     });
 
     window.addEventListener('online', function() {
-        loadProducts();
+        loadProducts(true);
     });
 
 </script>
