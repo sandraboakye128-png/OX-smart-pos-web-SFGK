@@ -1102,8 +1102,19 @@ def api_get_products():
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Build the WHERE clause
-        where_clauses = []
+        # ✅ FIXED: Build WHERE clauses properly
+        where_clauses = [
+            """EXISTS (
+                SELECT 1 FROM purchase_batches pb2 
+                WHERE pb2.product_id = p.id
+            )""",
+            """NOT EXISTS (
+                SELECT 1 FROM deleted_products dp 
+                WHERE dp.product_id = p.id 
+                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
+                AND dp.source = 'product'
+            )"""
+        ]
         params = []
         
         if category:
@@ -1113,11 +1124,9 @@ def api_get_products():
             where_clauses.append("p.category != %s")
             params.append(exclude_category)
         
-        where_sql = ""
-        if where_clauses:
-            where_sql = "WHERE " + " AND ".join(where_clauses)
+        where_sql = "WHERE " + " AND ".join(where_clauses)
         
-        # ✅ FIXED: Removed "AND pb2.remaining_quantity > 0" to show ALL products
+        # ✅ FIXED: Single query with proper WHERE clause
         query = f"""
             SELECT 
                 p.id as product_id,
@@ -1146,16 +1155,6 @@ def api_get_products():
                 WHERE status = 'active'
                 GROUP BY batch_id
             ) c ON c.batch_id = pb.id
-            WHERE EXISTS (
-                SELECT 1 FROM purchase_batches pb2 
-                WHERE pb2.product_id = p.id
-            )
-            AND NOT EXISTS (
-                SELECT 1 FROM deleted_products dp 
-                WHERE dp.product_id = p.id 
-                AND dp.action IN ('PERMANENTLY DELETED', 'PRODUCT DELETED')
-                AND dp.source = 'product'
-            )
             {where_sql}
             ORDER BY p.name ASC, pb.date ASC
         """
@@ -2087,7 +2086,6 @@ def api_analytics_top_products():
     return jsonify(result)
 
 # ===================== ARCHIVE API =====================
-# ===================== ARCHIVE API (WITH PAGINATION - FAST) =====================
 @app.route('/api/archive', methods=['GET'])
 @login_required
 def api_archive():
@@ -2131,7 +2129,7 @@ def api_archive():
         for r in active_rows:
             product_id = r[0]
             
-            # ✅ Get claims for this product (with error handling)
+            # ✅ FIXED: Get claims for this product - removed pb.batch_id reference
             claims_data = []
             try:
                 cursor.execute("""
@@ -2142,10 +2140,8 @@ def api_archive():
                         c.description,
                         c.quantity,
                         c.status,
-                        c.created_at,
-                        pb.batch_id as batch_identifier
+                        c.created_at
                     FROM claims c
-                    LEFT JOIN purchase_batches pb ON c.batch_id = pb.id
                     WHERE c.product_id = %s AND c.status = 'active'
                     ORDER BY c.created_at DESC
                 """, (product_id,))
@@ -2158,8 +2154,7 @@ def api_archive():
                         "description": claim[3],
                         "quantity": claim[4],
                         "status": claim[5],
-                        "created_at": claim[6],
-                        "batch_identifier": claim[7]
+                        "created_at": claim[6]
                     })
             except Exception as claim_err:
                 print(f"⚠️ Could not fetch claims for product {product_id}: {str(claim_err)}")
